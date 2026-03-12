@@ -1,3 +1,9 @@
+---
+description: Unified Modbus development rules for TCP (Tc2_ModbusSrv) and RTU (Tc3_ModbusRtuEB). Shared state machine architecture, step-pair pattern, error handling, timing.
+globs: "**/*.TcPOU,**/*.TcDUT"
+alwaysApply: false
+---
+
 # Unified Modbus Development Rules (TCP + RTU)
 
 ## 1. Shared Modbus Architecture

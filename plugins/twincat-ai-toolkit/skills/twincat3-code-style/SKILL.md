@@ -1,3 +1,8 @@
+---
+name: twincat3-code-style
+description: TwinCAT3 ST code formatting and style rules. Indentation, alignment, blank lines, THEN/DO placement, comments, headers, section separators. Use when writing or reviewing TwinCAT3 Structured Text formatting.
+---
+
 # Skill: twincat3-code-style
 
 ## Trigger

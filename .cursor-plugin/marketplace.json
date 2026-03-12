@@ -10,8 +10,8 @@
   },
   "plugins": [
     {
-      "name": "twincat3-ai-toolkit",
-      "source": "./plugins/twincat3-ai-toolkit",
+      "name": "twincat-ai-toolkit",
+      "source": "twincat-ai-toolkit",
       "description": "TwinCAT 3 development toolkit for Cursor"
     }
   ]
