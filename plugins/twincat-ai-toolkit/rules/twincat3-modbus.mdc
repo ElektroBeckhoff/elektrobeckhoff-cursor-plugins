@@ -1,0 +1,533 @@
+# Unified Modbus Development Rules (TCP + RTU)
+
+## 1. Shared Modbus Architecture
+
+Every Modbus device FB — regardless of TCP or RTU transport — follows this architecture:
+
+```
+FB_[Device]
+├── VAR_INPUT:  Transport config, bReadEnable, bWriteEnable, tReadInterval, stControl
+├── VAR_OUTPUT: stData, bError, bBusy, Read diagnostics, Write diagnostics
+├── VAR:        Transport FB instances, _nReadStep, _nWriteStep, data buffer, _nReadNextStep
+├── VAR CONSTANT: REG_*, READ_DELAY, WRITE_DELAY
+├── Interval Timer (self-resetting TON)
+├── Read State Machine  (CASE _nReadStep OF ... END_CASE)
+├── Write State Machine (CASE _nWriteStep OF ... END_CASE)
+└── FB Calls (outside CASE, once per cycle, at the bottom)
+```
+
+The only differences between TCP and RTU are:
+- Transport-specific VAR_INPUT parameters
+- Communication FB types and their call signatures
+- Raw data buffer type (WORD vs BYTE) and type conversion functions
+
+All higher-level logic (state machine structure, step convention, error handling, timing, diagnostics) is identical.
+
+## 2. Shared Engineering Rules
+
+### 2.1 Step-Pair Pattern
+
+**Rule:** Every register read uses a step pair — odd step triggers, even step waits and parses.
+
+**Rationale:** Separating trigger and result into distinct cycles guarantees the FB has at least one cycle to process the request. Reading results in the same step that set `bExecute` causes undefined behavior.
+
+```iecst
+N:   // Odd: configure + trigger
+     IF NOT bReadBusy THEN
+         _bReadExecute  := TRUE;
+         _nReadMBAddr   := REG_BLOCK_A;
+         _nReadQuantity := 6;
+         _pReadDestAddr := ADR(_arrReadBuffer);
+         _cbReadLength  := SIZEOF(_arrReadBuffer);
+         _nReadStep     := _nReadStep + 1;
+     END_IF
+
+N+1: // Even: wait + parse + route
+     IF NOT bReadBusy THEN
+         _nReadNextStep := _nReadStep + 1;
+
+         IF NOT _bReadError THEN
+             // parse buffer into stData fields
+             _nReadStep := 90;
+         ELSE
+             _nReadStep := 100;
+         END_IF
+     END_IF
+```
+
+### 2.2 Busy Guard in Trigger Steps
+
+**Rule:** Always wrap odd (trigger) steps in `IF NOT bReadBusy THEN`.
+
+**Rationale:** Prevents enqueueing a new request while a previous one is still in flight. Essential for RTU FIFO; defensive best practice for TCP.
+
+### 2.3 Reserved Step Number Convention
+
+**Rule:** Use fixed step numbers for control flow, sequential numbers for data steps.
+
+| Range | Purpose |
+|-------|---------|
+| 0 | Idle — wait for interval timer |
+| 1–29 | Global read steps (device-wide data) |
+| 30 | Loop entry: calculate base address for current sub-device |
+| 9–26 | Per-device read steps (inside loop) |
+| 50 | Loop control: advance to next sub-device or complete |
+| 90 | Success handler |
+| 100 | Error handler |
+| 200 | Shared delay step |
+
+Write state machine: same convention with `_nWriteStep`. Write data steps typically start at 10.
+
+### 2.4 Interval Timer (Self-Resetting)
+
+**Rule:** Use a self-resetting TON with minimum interval enforcement.
+
+**Rationale:** Prevents retriggering while a read cycle is running. Minimum interval protects bus from overload.
+
+```iecst
+_fbTonRead(
+    IN := bReadEnable AND NOT _fbTonRead.Q AND (_nReadStep = 0) AND (tReadInterval >= T#100MS),
+    PT := tReadInterval);
+
+IF _fbTonRead.Q THEN
+    _nReadStep := 1;
+END_IF
+```
+
+### 2.5 Execute Flag Pattern
+
+**Rule:** Set `_bReadExecute` inside the CASE step. Call the communication FB once after all CASE blocks. Clear the flag unconditionally after the call.
+
+**Rationale:** Guarantees exactly one rising edge per request. The FB is called every cycle regardless of state.
+
+```iecst
+// Inside CASE step:
+    _bReadExecute := TRUE;
+
+// After CASE — call FB once:
+_fbRead(bExecute := _bReadExecute, ...);
+
+// Clear every cycle:
+_bReadExecute := FALSE;
+```
+
+### 2.6 Centralized Delay Step (200)
+
+**Rule:** Both success (90) and error (100) route through step 200. The variable `_nReadNextStep` determines the continuation target.
+
+**Rationale:** Eliminates duplicated timer code. The delay is set in the even (wait) step before jumping to 90/100.
+
+```iecst
+200: // Shared delay
+    _fbTonReadDelay(IN := TRUE, PT := READ_DELAY);
+
+    IF _fbTonReadDelay.Q THEN
+        _fbTonReadDelay(IN := FALSE);
+        _nReadStep := _nReadNextStep;
+    END_IF
+```
+
+### 2.7 Error Counter Pattern (Standardized)
+
+**Rule:** Use two counters: consecutive (resets on success) and total (never resets). Capture error address and error ID on failure.
+
+**Rationale:** Consecutive counter enables threshold-based alerting. Total counter provides lifetime statistics. Both are needed for diagnostics.
+
+```iecst
+VAR_OUTPUT
+    bReadError             : BOOL;
+    nReadErrId             : UDINT;          // TCP: UDINT, RTU: MODBUS_ERRORS — transport-specific type
+    nReadErrorCounter      : UDINT;          // Consecutive errors (resets on success)
+    nReadTotalErrorCounter : UDINT;          // Total errors (never resets)
+    nReadErrorMBAddr       : WORD;           // Register address where last error occurred
+    nReadAllCounter        : UDINT;          // Total successful read cycles
+END_VAR
+```
+
+Step 90 — Success:
+```iecst
+90:
+    nReadAllCounter   := nReadAllCounter + 1;
+    bReadError        := FALSE;
+    nReadErrorCounter := 0;
+    _nReadStep        := 200;
+```
+
+**Important:** `_nReadNextStep` is NOT set in step 90. It is set in the even (wait) step before jumping to 90. For the last read step in a cycle, set `_nReadNextStep := 0` (back to idle).
+
+Step 100 — Error:
+```iecst
+100:
+    nReadTotalErrorCounter := nReadTotalErrorCounter + 1;
+    nReadErrorCounter      := nReadErrorCounter + 1;
+    bReadError             := TRUE;
+    nReadErrorMBAddr       := _fbRead.nMBAddr;   // transport-specific accessor
+    nReadErrId             := _fbRead.nErrId;     // transport-specific accessor
+    _nReadStep             := 200;
+```
+
+### 2.8 Standard Output Pattern
+
+**Rule:** Every communicating FB exposes separate read and write diagnostics plus combined flags.
+
+```iecst
+VAR_OUTPUT
+    stData : ST_[Device]_Data;                  // Parsed process data
+    bError : BOOL;                              // Combined: bReadError OR bWriteError
+    bBusy  : BOOL;                              // Combined: bReadBusy OR bWriteBusy
+    // Read diagnostics
+    bReadBusy              : BOOL;
+    bReadError             : BOOL;
+    nReadErrId             : UDINT;
+    nReadErrorCounter      : UDINT;
+    nReadTotalErrorCounter : UDINT;
+    nReadAllCounter        : UDINT;
+    nReadErrorMBAddr       : WORD;
+    // Write diagnostics (mirror of read)
+    bWriteBusy              : BOOL;
+    bWriteError             : BOOL;
+    nWriteErrId             : UDINT;
+    nWriteErrorCounter      : UDINT;
+    nWriteTotalErrorCounter : UDINT;
+    nWriteAllCounter        : UDINT;
+    nWriteErrorMBAddr       : WORD;
+END_VAR
+```
+
+Combined flags at the bottom of the FB body:
+```iecst
+bError := bReadError OR bWriteError;
+bBusy  := bReadBusy OR bWriteBusy;
+```
+
+### 2.9 Register Constants Inside FB
+
+**Rule:** Device-specific register addresses, timing, and limits are `VAR CONSTANT` inside the FB. Never in a GVL.
+
+**Rationale:** Keeps device knowledge self-contained. GVLs are for project-wide shared state only.
+
+```iecst
+VAR CONSTANT
+    REG_VOLTAGE_L1   : WORD := 1000;
+    REG_ACTIVE_POWER : WORD := 1010;
+    READ_DELAY       : TIME := T#200MS;
+    WRITE_DELAY      : TIME := T#500MS;
+END_VAR
+```
+
+### 2.10 VAR_INPUT Defaults
+
+**Rule:** Communication parameters go in VAR_INPUT with sensible defaults. The caller overrides only what differs.
+
+**Rationale:** Reduces boilerplate at instantiation. Common parameters (port, timeout, interval) rarely change.
+
+### 2.11 Register Gap Handling
+
+**Rule:** Never read across reserved/non-existent register addresses. Split into separate step pairs.
+
+**Rationale:** Devices may return errors or undefined data for reserved addresses.
+
+### 2.12 32-Bit Word Order (Big-Endian)
+
+**Rule:** First register (lower address) = HIGH word. Always verify against device web interface or datasheet examples.
+
+**Rationale:** Swapping HIGH/LOW produces values off by factor 65536. This is the most common Modbus integration bug.
+
+### 2.13 Sentinel Values
+
+**Rule:** Helper functions check for "not-implemented" sentinels (0xFFFF, 0x8000, 0xFFFFFFFF, 0x80000000) and substitute 0 with `bValid := FALSE`.
+
+**Rationale:** Many devices use sentinels for undefined registers. Returning 0 prevents garbage data in the application. Whether `bValid` is evaluated is the caller's choice.
+
+### 2.14 Dual State Machine (Read + Write)
+
+**Rule:** Read and write run as two independent CASE state machines in the same FB cycle. Each has its own step variable, delay timer, next-step variable, and error handling.
+
+**Rationale:** Write operations must not block reads and vice versa.
+
+### 2.15 Write Change Detection
+
+**Rule:** Store last-written values in a memory struct. Only trigger a write when the input value has changed or an explicit `_Write` trigger is set.
+
+**Rationale:** Avoids unnecessary bus traffic. Modbus writes are expensive (especially RTU with FIFO contention).
+
+### 2.16 Data Struct Design
+
+**Rule:** Use a single `ST_[Device]_Data` struct for all parsed process data. Document each field with unit `[V]`, gain, and register offset in a comment.
+
+**Rationale:** Keeps the output interface simple. One struct per device. Use nested structs only for distinct sub-devices (e.g. inverters in an array).
+
+### 2.17 IEEE 754 FLOAT32 Conversion
+
+**Rule:** Use `POINTER TO REAL` for bit-reinterpretation. Never use `DWORD_TO_REAL`.
+
+**Rationale:** `DWORD_TO_REAL` performs a value conversion (integer → float), not a bit reinterpretation. The result is always wrong for IEEE 754 data.
+
+### 2.18 Signed Write Values
+
+**Rule:** For S16 register writes, convert via `REAL_TO_INT` then `INT_TO_WORD` (bit-pattern cast). Never use `REAL_TO_WORD`.
+
+**Rationale:** `REAL_TO_WORD` clips negative values to 0, losing the sign.
+
+## 3. Shared Implementation Patterns
+
+### 3.1 Device FB Template
+
+```iecst
+FUNCTION_BLOCK FB_[Device]
+VAR_INPUT
+    bReadEnable   : BOOL := TRUE;
+    bWriteEnable  : BOOL := FALSE;
+    // ... transport-specific connection parameters ...
+    tReadInterval : TIME := T#5S;
+    stControl     : ST_[Device]_Control;
+END_VAR
+VAR_OUTPUT
+    stData : ST_[Device]_Data;
+    // ... standard diagnostic outputs (see 2.8) ...
+END_VAR
+VAR
+    // Read state machine
+    _fbTonRead      : TON;
+    _fbTonReadDelay : TON;
+    _nReadStep      : INT;
+    _nReadNextStep  : INT;
+    _bReadExecute   : BOOL;
+    _nReadQuantity  : WORD;
+    _nReadMBAddr    : WORD;
+    _cbReadLength   : UDINT;
+    _pReadDestAddr  : POINTER TO BYTE;
+    // ... transport-specific read FB + data buffer ...
+
+    // Write state machine
+    _fbTonWriteDelay : TON;
+    _nWriteStep      : INT;
+    _nWriteNextStep  : INT;
+    _bWriteExecute   : BOOL;
+    _nWriteMBAddr    : WORD;
+    _nWriteValueU16  : WORD;
+    _stControlMem    : ST_[Device]_Control;
+    // ... transport-specific write FB ...
+END_VAR
+VAR CONSTANT
+    // Register addresses
+    REG_BLOCK_A : WORD := 1000;
+    // Timing
+    READ_DELAY  : TIME := T#200MS;
+    WRITE_DELAY : TIME := T#500MS;
+END_VAR
+```
+
+### 3.2 Multi-Device / Gateway Pattern
+
+For gateways that multiplex sub-devices (e.g. Solplanet Ai-Logger with 90 inverters):
+
+1. Global data steps (1–8): read device-wide registers
+2. Step 30: calculate register base for `_nCurrentIdx`
+3. Steps 9–26: read per-device data into `_arrDevices[_nCurrentIdx]`
+4. Step 50: advance index; when complete, build compact online-only output array
+
+```iecst
+50: // Next device or cycle complete
+    _nCurrentIdx := _nCurrentIdx + 1;
+
+    IF _nCurrentIdx >= MAX_DEVICES THEN
+        _nCurrentIdx := 0;
+        nOnlineCount := 0;
+
+        FOR _idx := 0 TO MAX_DEVICES - 1 DO
+            IF _arrDevices[_idx].bOnline THEN
+                arrDevices[nOnlineCount] := _arrDevices[_idx];
+                nOnlineCount             := nOnlineCount + 1;
+            END_IF
+        END_FOR
+
+        _nReadStep := 0;
+    ELSE
+        _nReadStep := 30;
+    END_IF
+```
+
+### 3.3 Helper Function Naming
+
+| Function | Purpose | TCP Variant | RTU Variant |
+|---|---|---|---|
+| `F_[Device]_Uint16` | U16 with sentinel check | `(in : WORD)` | `(b1, b2 : BYTE)` |
+| `F_[Device]_int16` | S16 with sentinel check | `(in : WORD)` | `(b1, b2 : BYTE)` |
+| `F_[Device]_Uint32` | U32 big-endian | `(in1, in2 : WORD)` | `(b1, b2, b3, b4 : BYTE)` |
+| `F_[Device]_int32` | S32 big-endian | `(in1, in2 : WORD)` | `(b1, b2, b3, b4 : BYTE)` |
+| `F_[Device]_Real` | IEEE 754 FLOAT32 | `(in1, in2 : WORD)` | `(b1, b2, b3, b4 : BYTE)` |
+
+Input signature differs by buffer type. Internal logic (shift, sentinel check, POINTER TO REAL) is identical.
+
+### 3.4 Error Counter Patterns (Advanced)
+
+**Simple (default):** Consecutive + total counters (see 2.7).
+
+**Threshold + Auto-Reset (optional, for noisy environments):**
+```iecst
+bReadError := (_nReadErrorCounter > 5);
+
+_fbTonResetReadError(IN := (_nReadErrorCounter > 0) AND NOT _fbTonResetReadError.Q, PT := T#15S);
+IF _fbTonResetReadError.Q THEN
+    _nReadErrorCounter := 0;
+END_IF
+```
+
+## 4. Transport Layer Differences
+
+### 4.1 Modbus TCP
+
+**Library:** `Tc2_ModbusSrv`
+
+**Transport-specific VAR_INPUT:**
+```iecst
+VAR_INPUT
+    sIPAddr  : STRING;          // Device IP address (no default)
+    nUnitID  : BYTE := 1;       // Modbus TCP Unit ID
+    nTCPPort : UINT := 502;     // TCP port
+    tTimeout : TIME := T#5S;    // Communication timeout
+END_VAR
+```
+
+**Communication FBs:**
+
+| FB | FC | Purpose |
+|----|-----|---------|
+| `FB_MBReadInputRegs` | FC04 | Read input registers (read-only) |
+| `FB_MBReadRegs` | FC03 | Read holding registers |
+| `FB_MBWriteSingleReg` | FC06 | Write single register |
+| `FB_MBWriteRegs` | FC16 | Write multiple registers |
+
+**Data Buffer:** `ARRAY[0..N] OF WORD` (0-based). Size is variabel — muss mindestens so groß sein wie die größte Einzelabfrage (nQuantity). Beispiel: `ARRAY[0..31] OF WORD` für max 32 Register.
+
+**FB Call (after CASE):**
+```iecst
+_fbMBReadInputRegs(
+    sIPAddr   := sIPAddr,
+    nTCPPort  := nTCPPort,
+    nUnitID   := nUnitID,
+    nQuantity := _nReadQuantity,
+    nMBAddr   := _nReadMBAddr,
+    cbLength  := _cbReadLength,
+    pDestAddr := _pReadDestAddr,
+    bExecute  := _bReadExecute,
+    tTimeout  := tTimeout,
+    bBusy     => bReadBusy);
+
+_bReadExecute := FALSE;
+```
+
+**Busy/Error Access:**
+```iecst
+// In even steps:
+IF NOT _fbMBReadInputRegs.bBusy THEN
+    IF NOT _fbMBReadInputRegs.bError THEN ...
+
+// In step 100:
+nReadErrorMBAddr := _fbMBReadInputRegs.nMBAddr;
+nReadErrId       := _fbMBReadInputRegs.nErrId;
+```
+
+**Max registers per read:** 125 (Modbus protocol limit). Split larger blocks into chunks with pointer offsets.
+
+**MAIN wiring:** Direct FB instantiation, no shared buffer.
+
+### 4.2 Modbus RTU
+
+**Library:** `Tc3_ModbusRtuEB` (+ `Tc2_ModbusRTU`, `Tc2_Standard`, `Tc2_System`)
+
+**Transport-specific VAR_INPUT / VAR_IN_OUT:**
+```iecst
+VAR_INPUT
+    nUnitID   : BYTE;           // Modbus slave address (no default)
+    tReadDelay : TIME := T#250MS; // Delay between consecutive reads
+END_VAR
+VAR_IN_OUT
+    stModbusComBuffer : ST_ModbusComBuffer;  // Shared FIFO buffer
+END_VAR
+```
+
+**Communication FB:** `FB_ModbusRtu` (single FB with `E_ModbusFunction` parameter)
+
+| E_ModbusFunction | FC | Purpose |
+|------------------|----|---------|
+| `ReadInputRegs` | 4 | Read input registers |
+| `ReadRegs` | 3 | Read holding registers |
+| `WriteSingleRegister` | 6 | Write single register |
+| `WriteRegs` | 16 | Write multiple registers |
+
+**Data Buffer:** `ARRAY[1..N] OF BYTE` (1-based). Size ist variabel — muss mindestens `nQuantity * 2` Bytes groß sein (2 Bytes pro Register). Beispiel: `ARRAY[1..40] OF BYTE` für max 20 Register.
+
+**FB Call (after CASE):**
+```iecst
+_fbModbusRead(
+    stModbusComBuffer := stModbusComBuffer,
+    eModbusFunction   := _eReadModbusFunction,
+    nUnitID           := _nReadUnitID,
+    nQuantity         := _nReadQuantity,
+    nMBAddr           := _nReadMBAddr,
+    pMemoryAddr       := _pReadMemoryAddr,
+    cbLength          := _cbLength,
+    bExecute          := _bReadExecute,
+    bBusy             => bReadBusy);
+
+_bReadExecute := FALSE;
+bReadBusy     := _fbModbusRead.bBusy;
+_bReadError   := _fbModbusRead.bError;
+```
+
+**Busy/Error Access:**
+```iecst
+// In even steps — use local shadow variable:
+IF NOT bReadBusy THEN
+    IF NOT _bReadError THEN ...
+
+// In step 100:
+nReadErrorMBAddr := _fbModbusRead.nMBAddr;
+nReadErrId       := _fbModbusRead.eErrorId;
+```
+
+**Max registers per read:** ~20 (40-byte buffer limit). Split larger blocks into multiple step pairs.
+
+**FIFO Architecture:**
+```
+Device FBs (FB_ModbusRtu)  →  ST_ModbusComBuffer (FIFO)  →  FB_ModbusRtuCom_*  →  Serial HW
+                           ←  Answer via nMessageID       ←                     ←
+```
+
+**MAIN wiring:** All device FBs share one `ST_ModbusComBuffer` per serial bus. Communication FB must be called FIRST every cycle.
+
+```iecst
+// 1. Communication FB (called first)
+fbModbusRtuCom(stModbusComBuffer := stModbusComBuffer);
+
+// 2. Device FBs (share buffer)
+fbDevice[1](stModbusComBuffer := stModbusComBuffer, nUnitID := 1);
+fbDevice[2](stModbusComBuffer := stModbusComBuffer, nUnitID := 2);
+```
+
+**Hardware variants:**
+
+| Hardware | Com FB | Master FB |
+|----------|--------|-----------|
+| KL6x22B terminal | `FB_ModbusRtuCom_KL6x22B` | `ModbusRtuMasterV2_KL6x22B` |
+| PC COM port | `FB_ModbusRtuCom_PcCOM` | `ModbusRtuMasterV2_PcCOM` |
+
+## 5. Minimalistic Coding Principles
+
+1. **One FB per device type.** All device knowledge (registers, parsing, timing) is encapsulated inside the FB. No external GVLs for device constants.
+
+2. **Identical state machine skeleton.** Copy the template, fill in register addresses and parsing logic. The control flow (0 → steps → 90/100 → 200 → next) never changes.
+
+3. **No blocking constructs.** Never use `WHILE`, `REPEAT`, or spin-loops. All waiting is done via state machine steps that yield control to the PLC cycle.
+
+4. **One FB call per cycle.** Communication FBs are called exactly once, after all CASE blocks, with parameters set inside CASE steps. Execute flags are cleared unconditionally.
+
+5. **Minimal variable scope.** Buffer arrays, step variables, and delay timers are private (`_` prefix). Only `stData`, diagnostics, and enable flags are exposed.
+
+6. **Consistent naming.** Follow `twincat3-naming` conventions. FB instances: `_fbMBRead*` (TCP), `_fbModbusRead` (RTU). Steps: `_nReadStep`, `_nWriteStep`. Delays: `_fbTonReadDelay`, `_fbTonWriteDelay`.
+
+7. **No premature optimization.** Read all needed registers every cycle. Use inter-operation delays to protect the bus. Only add complexity (threshold counters, auto-reset) when operationally required.
+
+8. **Transport layer is the only variable.** When porting a device from TCP to RTU (or vice versa), only the following change: VAR_INPUT parameters, communication FB type, data buffer type, type conversion function signatures, and FB call signature. The state machine structure, step numbers, error handling, and timing logic remain unchanged.

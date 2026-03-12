@@ -1,0 +1,76 @@
+---
+description: TwinCAT3 .TcDUT file format rules. XML structure for STRUCTs, ENUMs, and UNIONs.
+globs: "**/*.TcDUT"
+alwaysApply: false
+---
+
+# TcDUT File Format
+
+## STRUCT
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="ST_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+TYPE ST_Example :
+STRUCT
+    nValue   : INT;
+    fPower   : LREAL;
+    sName    : STRING(80);
+    bEnabled : BOOL := TRUE;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+## ENUM
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="E_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_Example :
+(
+    IDLE    := 0,
+    RUNNING := 1,
+    ERROR   := 99
+) := IDLE;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+Always use `{attribute 'qualified_only'}` and `{attribute 'strict'}` on enums.
+
+## UNION
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="U_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+TYPE U_Example :
+UNION
+    nValue   : DINT;
+    arrBytes : ARRAY[0..3] OF BYTE;
+END_UNION
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+## Rules
+
+- DUTs have **only** `<Declaration>`, no `<Implementation>` section
+- Each DUT file needs ONE unique GUID
+- `Name` attribute must match the TYPE name
+- `STRUCT` keyword goes on its own line (after `TYPE ST_Name :`)
+- Prefix: `ST_` for structs, `E_` for enums, `U_` for unions

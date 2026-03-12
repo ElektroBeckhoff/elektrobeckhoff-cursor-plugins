@@ -1,0 +1,18 @@
+{
+  "name": "elektrobeckhoff-cursor-plugins",
+  "owner": {
+    "name": "ElektroBeckhoff"
+  },
+  "metadata": {
+    "description": "Cursor plugins for TwinCAT development",
+    "version": "0.1.0",
+    "pluginRoot": "plugins"
+  },
+  "plugins": [
+    {
+      "name": "twincat3-ai-toolkit",
+      "source": "./plugins/twincat3-ai-toolkit",
+      "description": "TwinCAT 3 development toolkit for Cursor"
+    }
+  ]
+}

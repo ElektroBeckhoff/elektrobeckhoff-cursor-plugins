@@ -1,0 +1,81 @@
+---
+description: TwinCAT3 version management. ST_LibVersion GVL, .plcproj version, changelog structure, Versions folder convention.
+alwaysApply: false
+---
+
+# Version Management
+
+## Version Format
+
+`MAJOR.MINOR.BUILD.REVISION` — e.g. `0.0.0.1`, `1.0.0.0`, `1.2.3.45`
+
+| Part | When to increment |
+|------|------------------|
+| MAJOR | Breaking change / incompatible API |
+| MINOR | New feature, backwards-compatible |
+| BUILD | Bug fix |
+| REVISION | Internal/patch |
+
+## plcproj Version
+
+Set in `.plcproj` `<PropertyGroup>`:
+
+```xml
+<ProjectVersion>0.0.0.1</ProjectVersion>
+```
+
+## Global_Version GVL
+
+Create `GVLs/Global_Version.TcGVL` with `ST_LibVersion` from `Tc2_System`:
+
+```iecst
+{attribute 'TcGenerated'}
+VAR_GLOBAL CONSTANT
+    stLibVersion : ST_LibVersion := (
+        iMajor    := 0,
+        iMinor    := 0,
+        iBuild    := 0,
+        iRevision := 1,
+        sVersion  := '0.0.0.1'
+    );
+END_VAR
+```
+
+`ST_LibVersion` is defined in `Tc2_System`. Reference it for runtime version queries.
+
+## Project Folder Convention
+
+```
+Versions/
+  0.0.0.1/
+    changelog-0.0.0.1.md
+  1.0.0.0/
+    changelog-1.0.0.0.md
+```
+
+## Changelog Format
+
+Keep changelogs short and in English. One file per release version.
+
+```markdown
+# Changelog vX.Y.Z.R
+
+## New Features
+- FB_Example: brief description of what it does
+
+## Data Structures (DUTs)
+- ST_Example_Data: fields and purpose
+- E_Example_State: enum states
+
+## Bug Fixes
+- Fixed: description of fix
+
+## Breaking Changes
+- Renamed: OldName → NewName
+```
+
+Rules:
+- English only
+- List every new FB, DUT, GVL, and Helper Function
+- Note breaking changes explicitly
+- No implementation details — purpose only

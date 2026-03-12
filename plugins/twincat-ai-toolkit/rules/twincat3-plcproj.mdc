@@ -1,0 +1,53 @@
+---
+description: TwinCAT3 .plcproj file editing rules. How to register new files, folders, and library references.
+globs: "**/*.plcproj"
+alwaysApply: false
+---
+
+# plcproj File Rules
+
+The `.plcproj` is an MSBuild XML file that registers all PLC source files.
+
+## Register a New File
+
+Add inside an `<ItemGroup>` block:
+
+```xml
+<Compile Include="POUs\FB_NewDevice.TcPOU">
+  <SubType>Code</SubType>
+</Compile>
+
+<Compile Include="DUTs\ST_NewDevice_Data.TcDUT">
+  <SubType>Code</SubType>
+</Compile>
+
+<Compile Include="GVLs\GVL_NewDomain.TcGVL">
+  <SubType>Code</SubType>
+</Compile>
+```
+
+## Register a New Folder
+
+Add inside the `<ItemGroup>` that contains `<Folder>` elements:
+
+```xml
+<Folder Include="POUs\NewSubfolder" />
+```
+
+## Library References
+
+Placeholder (version-independent):
+```xml
+<PlaceholderReference Include="Tc3_JsonXml">
+  <DefaultResolution>Tc3_JsonXml, * (Beckhoff Automation GmbH)</DefaultResolution>
+  <Namespace>Tc3_JsonXml</Namespace>
+</PlaceholderReference>
+```
+
+## Critical Rules
+
+- **Path separators**: Use backslashes `\` in `Include` attributes (Windows convention)
+- **Always add `<SubType>Code</SubType>`** for Compile items
+- **Methods are NOT registered separately** - only the parent .TcPOU file
+- **Match the actual file path** on disk exactly (case-sensitive in some builds)
+- **Do not duplicate** entries - check if file is already registered before adding

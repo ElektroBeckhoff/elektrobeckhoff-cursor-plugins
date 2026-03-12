@@ -1,0 +1,8 @@
+{
+  "name": "twincat-ai-toolkit",
+  "description": "AI toolkit for Beckhoff TwinCAT 3 development with Structured Text. Includes coding rules, architecture patterns, and reusable skills for PLC communication, state machines, and IoT integration.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Elektro Beckhoff"
+  }
+}

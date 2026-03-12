@@ -1,0 +1,46 @@
+---
+description: TwinCAT3 .TcGVL file format rules. XML structure for Global Variable Lists.
+globs: "**/*.TcGVL"
+alwaysApply: false
+---
+
+# TcGVL File Format
+
+## Standard GVL
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <GVL Name="GVL_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+VAR_GLOBAL
+    gbSystemReady : BOOL;
+    gfActualSpeed : REAL;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>
+```
+
+## Constant GVL (Parameters)
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <GVL Name="Param_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+VAR_GLOBAL CONSTANT
+    cMaxRetries : UINT := 3;
+    cTimeout    : TIME := T#5S;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>
+```
+
+## Rules
+
+- GVLs have **only** `<Declaration>`, no `<Implementation>` section
+- Each GVL needs ONE unique GUID
+- Naming: `GVL_[Domain]` for runtime globals, `Param_[Library]` for constants
+- `Global_Version` GVL for library version info (uses `ST_LibVersion` from `Tc2_System`)

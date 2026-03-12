@@ -1,0 +1,213 @@
+---
+description: TwinCAT3 HTTP(S) REST communication rules using FB_IotHttpClient/FB_IotHttpRequest from Tc3_IotBase. Mandatory FB structure, Execute method, Send state machine, 3-level error evaluation, authentication, JSON body workflow.
+globs: "**/*.TcPOU"
+alwaysApply: false
+---
+
+# HTTP(S) REST Communication Rules (Tc3_IotBase)
+
+## 1. Required Libraries
+
+```xml
+<PlaceholderReference Include="Tc3_IotBase">
+  <DefaultResolution>Tc3_IotBase, * (Beckhoff Automation GmbH)</DefaultResolution>
+  <Namespace>Tc3_IotBase</Namespace>
+</PlaceholderReference>
+<PlaceholderReference Include="Tc3_JsonXml">
+  <DefaultResolution>Tc3_JsonXml, * (Beckhoff Automation GmbH)</DefaultResolution>
+  <Namespace>Tc3_JsonXml</Namespace>
+</PlaceholderReference>
+```
+
+## 2. Core FBs
+
+| FB | Purpose |
+|----|---------|
+| `FB_IotHttpClient` | HTTP connection (host, port, TLS) |
+| `FB_IotHttpRequest` | Build and send request, read response |
+| `FB_IotHttpHeaderFieldMap` | Custom headers (auth, content-type) |
+
+## 3. Mandatory FB Structure
+
+**Rule:** Every HTTP client FB MUST have these internal state variables:
+
+```iecst
+VAR
+    _bBusy      : BOOL;         // TRUE while any request is in flight
+    _bConnected : BOOL;         // TRUE after successful response, FALSE after client error
+    _bError     : BOOL;         // TRUE after any error (client, request, or status code)
+    _sError     : T_MaxString;  // Human-readable error text
+
+    _fbClient  : FB_IotHttpClient;
+    _fbRequest : FB_IotHttpRequest;
+    _fbHeader  : FB_IotHttpHeaderFieldMap;
+
+    _fbTonTimeout : TON;        // Timeout recovery
+
+    {attribute 'instance-path'}
+    {attribute 'noinit'}
+    _sPath : T_MaxString;
+END_VAR
+```
+
+**Rationale:** Consistent interface across all HTTP FBs. `_bConnected` separates "server reachable" from "request succeeded". `_sError` provides human-readable diagnostics without reading ADS logs.
+
+## 4. Execute Method
+
+**Rule:** `_fbClient.Execute()` MUST be called every PLC cycle (after init). Use a single TON on `_bBusy` for timeout recovery.
+
+```iecst
+METHOD Execute : BOOL
+
+IF _bInitClient THEN
+    // Configure _fbClient (host, port, TLS, headers) — once
+    _bInitClient := FALSE;
+    _fbClient.Disconnect();
+    RETURN;
+ELSE
+    _fbClient.Execute();
+END_IF
+
+_fbTonTimeout(IN := _bBusy, PT := _stParam.tConnectionTimeout * 2);
+
+IF _fbTonTimeout.Q THEN
+    MEMSET(destAddr := ADR(_bBusy), fillByte := 0, n := SIZEOF(_bBusy));
+    MEMSET(destAddr := ADR(_fbRequest.bBusy), fillByte := 0, n := SIZEOF(_fbRequest.bBusy));
+    _bError := TRUE;
+    _sError := 'Timeout: request stuck';
+END_IF
+```
+
+**Rationale:** The timeout recovery via MEMSET is a workaround for cases where `FB_IotHttpRequest` gets stuck in busy state. Without it the FB blocks indefinitely.
+
+## 5. Send Method: 2-State CASE Machine
+
+**Rule:** Every Send method uses a 2-state CASE: State 0 = Build & Send, State 1 = Evaluate response with flat ELSIF chain. Use `VAR_INST` for `_nState` so each method has independent state.
+
+**Rule:** Return `TRUE` only in State 1 when fully processed (not when "success" — when "done").
+
+### Key constraints:
+- `_bBusy`/`_nState` reset happens ONCE at the end of State 1
+- **ALWAYS** validate `_jsonDoc <> 0` after `GetJsonDomContent`
+- `__DELETE(_pJsonPayload)` in State 0 after `SendRequest` (not in State 1)
+
+## 6. 3-Level Error Evaluation
+
+**Rule:** Every response MUST be evaluated at three levels in a flat ELSIF chain:
+
+| Level | Condition | Meaning | `_bConnected` | `_bError` |
+|-------|-----------|---------|---------------|-----------|
+| 1 | `_fbClient.bError` | No connection (DNS, network, TLS handshake) | `FALSE` | `TRUE` |
+| 2 | `_fbRequest.bError` | Request failed (timeout, parse error, etc.) | `FALSE` | `TRUE` |
+| 3 | `nStatusCode < 200 OR > 207` | Server rejected (4xx, 5xx) | `TRUE` | `TRUE` |
+| OK | `nStatusCode >= 200 AND <= 207` | Success | `TRUE` | `FALSE` |
+
+**Rationale:** Deep nesting makes the error path hard to trace. A flat ELSIF ensures each level is mutually exclusive and easy to debug.
+
+### Error text sources per level:
+
+```iecst
+// Level 1: hex HRESULT
+_sError := DWORD_TO_HEXSTR(DINT_TO_DWORD(_fbClient.hrErrorCode), 8, 0);
+
+// Level 2: human-readable via ETcIotHttpRequestError mapping
+_sError := F_[Lib]_HttpRequestErrorToString(_fbRequest.eErrorId);
+
+// Level 3: response body
+_fbRequest.GetContent(ADR(_sContent), SIZEOF(_sContent), TRUE);
+_sError := CONCAT('HTTP ', TO_STRING(_fbRequest.nStatusCode));
+```
+
+## 7. Error Mapping Function
+
+**Rule:** Every library that uses HTTP MUST include `F_[Lib]_HttpRequestErrorToString` mapping `ETcIotHttpRequestError` to human-readable strings.
+
+**Rationale:** Raw enum values in logs are unreadable. A consistent mapping function enables diagnostics without looking up error codes.
+
+## 8. Authentication Patterns
+
+### API Key Header
+
+```iecst
+_fbHeader.AddField('X-Api-Key', _stParam.sApiToken, FALSE);
+_fbHeader.AddField('Accept', 'application/json', FALSE);
+```
+
+### Bearer Token
+
+```iecst
+_fbHeader.AddField('Authorization', CONCAT('Token ', _stParam.sToken), FALSE);
+_fbHeader.AddField('Content-Type', 'text/plain; charset=utf-8', FALSE);
+```
+
+**Rule:** Set `bAppendValue := FALSE` for auth headers. `TRUE` would append to existing value instead of replacing.
+
+## 9. JSON Body Build/Send/Free
+
+**Rule:** Build JSON in State 0, allocate with `__NEW`, send, then `__DELETE` in the same state (not in State 1).
+
+```iecst
+_fbWrite.ResetDocument();
+_fbWrite.StartObject();
+_fbWrite.AddKeyString('key', sValue);
+_fbWrite.EndObject();
+_nJsonPayloadSize := _fbWrite.GetDocumentLength();
+
+IF _nJsonPayloadSize > 0 THEN
+    _pJsonPayload := __NEW(BYTE, _nJsonPayloadSize);
+
+    IF _pJsonPayload <> 0 THEN
+        _fbWrite.CopyDocument(_pJsonPayload^, _nJsonPayloadSize);
+
+        IF _fbRequest.SendRequest(
+                sUri         := _sUri,
+                fbClient     := _fbClient,
+                eRequestType := ETcIotHttpRequestType.HTTP_POST,
+                pContent     := _pJsonPayload,
+                nContentSize := _nJsonPayloadSize - 1,
+                fbHeader     := _refHeader) THEN
+            _nState := 1;
+        END_IF
+    END_IF
+
+    __DELETE(_pJsonPayload);
+END_IF
+```
+
+**Important:** `nContentSize := _nJsonPayloadSize - 1` excludes the null terminator.
+
+## 10. JSON Response Parsing
+
+**Rule:** ALWAYS validate `_jsonDoc <> 0` after `GetJsonDomContent`.
+
+```iecst
+_jsonDoc := _fbRequest.GetJsonDomContent(_fbJson);
+
+IF _jsonDoc <> 0 THEN
+    IF (_jsonVal := _fbJson.FindMember(_jsonDoc, 'key')) <> 0 THEN
+        _fValue := _fbJson.GetDouble(_jsonVal);
+    END_IF
+END_IF
+```
+
+**Rationale:** `GetJsonDomContent` returns 0 when the response body is not valid JSON. Accessing members on a null document crashes the PLC.
+
+## 11. HTTP Methods Reference
+
+| Method | Enum | Typical Use |
+|--------|------|-------------|
+| GET | `ETcIotHttpRequestType.HTTP_GET` | Read data, status queries |
+| POST | `ETcIotHttpRequestType.HTTP_POST` | Send data, create resources |
+| PUT | `ETcIotHttpRequestType.HTTP_PUT` | Update resources |
+| DELETE | `ETcIotHttpRequestType.HTTP_DELETE` | Remove resources |
+
+## 12. Checklist for New HTTP Library
+
+- [ ] `FB_[Lib]_Client` with `_bBusy`, `_bConnected`, `_bError`, `_sError`
+- [ ] `Execute` method: init, `_fbClient.Execute()`, timeout recovery, output update
+- [ ] `F_[Lib]_HttpRequestErrorToString` function
+- [ ] `ST_[Lib]_HttpParam` struct with host, port, token, TLS, timeout
+- [ ] Each Send method: 2-state CASE, flat ELSIF in State 1, 3-level error eval
+- [ ] `_jsonDoc <> 0` check after every `GetJsonDomContent`
+- [ ] `__DELETE(_pJsonPayload)` in State 0 after SendRequest
+- [ ] Properties: `IsConnected`, `IsBusy`, `IsError`, `ErrorText`

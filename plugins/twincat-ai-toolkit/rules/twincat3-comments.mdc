@@ -1,0 +1,128 @@
+---
+description: TwinCAT3 commenting standards. Mandatory I/O comments, block section separators, FB headers. Enforces consistent documentation style.
+globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL"
+alwaysApply: false
+---
+
+# Comment Standards
+
+## FB / FUNCTION Header
+
+One-line `//` purpose comment before `FUNCTION_BLOCK` / `FUNCTION`. Multi-line for complex FBs (max 3 lines).
+
+```iecst
+// On/off hysteresis timer.
+// Signal must stay TRUE for tActivate before Q goes TRUE.
+// Signal must stay FALSE for tDeactivate before Q goes FALSE.
+FUNCTION_BLOCK FB_EMS_HysteresisTimer
+```
+
+## VAR_INPUT / VAR_OUTPUT — Always Commented
+
+Every input and output **must** have an inline `//` comment. Format: `// [unit] Purpose`
+
+```iecst
+VAR_INPUT
+    bEnable       : BOOL; // Enable the controller
+    rW            : REAL; // Setpoint value
+    rX            : REAL; // Actual value (process variable)
+    rDeadRange    : REAL; // [%] Dead band relative to output range
+    rKp           : REAL; // Proportional gain
+    tTi           : TIME; // Integration time
+    rYMin         : REAL; // [A] Minimum output value
+    rYMax         : REAL; // [A] Maximum output value
+END_VAR
+VAR_OUTPUT
+    rY        : REAL; // Controller output
+    bMaxLimit : BOOL; // TRUE when output hit upper limit
+    bMinLimit : BOOL; // TRUE when output hit lower limit
+    bError    : BOOL; // Error flag
+END_VAR
+```
+
+Rules:
+- Physical units in brackets at the start: `// [A]`, `// [W]`, `// [kWh]`, `// [%]`, `// [ms]`
+- BOOL: describe TRUE condition: `// TRUE when charging is active`
+- Keep it short — one line, no period at end
+- English comments
+
+## VAR Section Headers
+
+Group private variables with `(* section name *)` headers:
+
+```iecst
+VAR
+    (* edge triggers *)
+    _posEdgePlugged : R_TRIG;
+    _negEdgeDone    : F_TRIG;
+
+    (* timers *)
+    _fbTonTest      : TON;
+    _fbTonFailsafe  : TON;
+
+    (* state *)
+    _nStep   : INT;
+    _bActive : BOOL;
+END_VAR
+```
+
+One blank line between sections. No `(* *)` header needed for small VAR blocks (< 5 vars).
+
+## Code Block Separators
+
+Use `(* --- Purpose --- *)` to separate logical sections in implementation code:
+
+```iecst
+(* --- Rising edge of enable signal --- *)
+_posEdgeEnable(CLK := bEnable);
+
+(* --- Parameter validation --- *)
+IF rKp <= 0 THEN
+    bError := TRUE;
+    RETURN;
+END_IF
+
+(* --- Calculate output --- *)
+fY_P := fKp * fE;
+```
+
+Rules:
+- At least 3 dashes on each side: `(* --- text --- *)`
+- Lowercase text, short (3-6 words)
+- One blank line before the separator, none after
+- Use for logical groupings of 3+ related lines
+- Do NOT use for single statements
+
+## Action / Method Headers (optional, for large FBs only)
+
+For complex actions/methods in large FBs, use a 3-line block header:
+
+```iecst
+(* ------------------------------------------- *)
+(*               Initial Sync                  *)
+(* ------------------------------------------- *)
+```
+
+Only use this for FBs with 5+ actions/methods. Small FBs don't need it.
+
+## What NOT to Comment
+
+- Do not narrate obvious code: `// Set bDone to TRUE` on `bDone := TRUE;`
+- Do not comment END_IF / END_CASE / END_FOR
+- Do not duplicate the variable name: `bEnable : BOOL; // Enable flag for bEnable`
+- Do not write TODO/FIXME without a name and date
+- Internal VAR members: comments optional (only if purpose is non-obvious)
+
+## STRUCT Members
+
+Same rules as VAR_INPUT — each member gets an inline comment:
+
+```iecst
+TYPE ST_EMS_ECabinet_Param :
+    STRUCT
+        fMaxCurrent         : REAL := 120;  // [A] Max current per phase
+        fMaxFailsafeCurrent : REAL := 72;   // [A] Failsafe current limit
+        bCalculateCircuits  : BOOL := TRUE; // TRUE: dynamic distribution
+    END_STRUCT
+END_TYPE
+```

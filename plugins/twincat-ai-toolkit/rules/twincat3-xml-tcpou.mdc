@@ -1,0 +1,106 @@
+---
+description: TwinCAT3 .TcPOU file format rules. XML structure, CDATA sections, GUID requirements for POUs, Methods, and Properties.
+globs: "**/*.TcPOU"
+alwaysApply: false
+---
+
+# TcPOU File Format
+
+## XML Structure
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <POU Name="FB_Example" Id="{GUID}" SpecialFunc="None">
+    <Declaration><![CDATA[
+FUNCTION_BLOCK FB_Example
+VAR_INPUT
+    bEnable : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+// Implementation code here
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
+```
+
+## Critical Rules
+
+1. **Edit ONLY inside `<![CDATA[...]]>` sections** - never touch XML tags
+2. **Every POU needs a unique GUID** in `Id="{...}"` - generate via PowerShell: `[guid]::NewGuid()`
+3. **Name attribute MUST match** the FUNCTION_BLOCK/FUNCTION/PROGRAM name inside CDATA
+4. **SpecialFunc** is usually `"None"`. Only `"FB_init"`, `"FB_reinit"`, `"FB_exit"` for special cases.
+5. **Preserve existing GUIDs** when editing - never change them
+
+## Methods (inside POU, after `</Implementation>`)
+
+```xml
+    <Method Name="MethodName" Id="{DIFFERENT-GUID}">
+      <Declaration><![CDATA[
+METHOD MethodName : BOOL
+VAR_INPUT
+    nParam : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[
+MethodName := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+```
+
+Each method needs its **OWN unique GUID**, different from the POU's GUID.
+
+## Properties (inside POU)
+
+```xml
+    <Property Name="PropName" Id="{UNIQUE-GUID}">
+      <Declaration><![CDATA[
+PROPERTY PropName : INT
+]]></Declaration>
+      <Get Name="Get" Id="{UNIQUE-GUID}">
+        <Declaration><![CDATA[VAR END_VAR]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PropName := _nValue;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{UNIQUE-GUID}">
+        <Declaration><![CDATA[VAR END_VAR]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_nValue := PropName;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+```
+
+Property + Get + Set = 3 separate GUIDs needed.
+
+## Actions (inside POU, after `</Implementation>`)
+
+```xml
+    <Action Name="A_HandleError" Id="{UNIQUE-GUID}">
+      <Implementation>
+        <ST><![CDATA[
+nErrorCounter := nErrorCounter + 1;
+bError        := TRUE;
+]]></ST>
+      </Implementation>
+    </Action>
+```
+
+Rules:
+- Each action needs its **OWN unique GUID**
+- Actions have **no** `<Declaration>` section (unlike methods)
+- Actions are **not registered separately** in .plcproj
+- Call via `A_HandleError();` inside the FB's cyclic code
+- Naming: `A_[Verb][Object]` — e.g. `A_CalculatePower`, `A_HandleFailsafe`
+
+## POU Types
+
+- `FUNCTION_BLOCK FB_Name` - stateful, instantiated
+- `FUNCTION F_Name : ReturnType` - stateless, direct call
+- `PROGRAM MAIN` - entry point, called by task

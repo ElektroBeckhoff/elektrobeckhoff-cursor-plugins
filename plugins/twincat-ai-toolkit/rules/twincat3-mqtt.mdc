@@ -1,0 +1,167 @@
+---
+description: TwinCAT3 MQTT communication rules using FB_IotMqttClient from Tc3_IotBase. Connection setup, subscribe-on-connect, publish, receive with dynamic allocation, reconnection handling, QoS, TLS, Last Will.
+globs: "**/*.TcPOU"
+alwaysApply: false
+---
+
+# MQTT Communication Rules (Tc3_IotBase)
+
+## 1. Required Library
+
+```xml
+<PlaceholderReference Include="Tc3_IotBase">
+  <DefaultResolution>Tc3_IotBase, * (Beckhoff Automation GmbH)</DefaultResolution>
+  <Namespace>Tc3_IotBase</Namespace>
+</PlaceholderReference>
+```
+
+## 2. Core FBs
+
+| FB | Purpose |
+|----|---------|
+| `FB_IotMqttClient` | MQTT client (connect, publish, subscribe) |
+| `FB_IotMqttMessageQueue` | Receive queue for incoming messages |
+| `FB_IotMqttMessage` | Single received message (topic + payload) |
+
+## 3. Mandatory Rules
+
+### 3.1 Execute Every Cycle
+
+**Rule:** `_fbMqttClient.Execute(bConnect := TRUE)` MUST be called every PLC cycle.
+
+**Rationale:** The MQTT client is state-driven. Skipping cycles causes connection loss and missed messages.
+
+### 3.2 Subscribe-on-Connect Pattern
+
+**Rule:** Subscribe ONLY when `eConnectionState = ETcIotMqttClientState.Connected AND NOT _bSubscribed`. Set `_bSubscribed := TRUE` after subscribe.
+
+**Rationale:** Subscribing while not connected is silently ignored. The flag prevents duplicate subscriptions every cycle.
+
+```iecst
+IF _fbMqttClient.eConnectionState = ETcIotMqttClientState.Connected
+   AND NOT _bSubscribed
+THEN
+    _fbMqttClient.Subscribe(
+        sTopic := 'device/+/status',
+        eQoS   := TcIotMqttQos.AtLeastOnceDelivery);
+    _bSubscribed := TRUE;
+END_IF
+```
+
+### 3.3 Reconnection Handling
+
+**Rule:** Reset `_bSubscribed := FALSE` when connection state is NOT `Connected`.
+
+**Rationale:** After reconnect the broker has no subscription memory. Without reset, the FB never re-subscribes.
+
+```iecst
+IF _fbMqttClient.eConnectionState <> ETcIotMqttClientState.Connected THEN
+    _bSubscribed := FALSE;
+END_IF
+```
+
+### 3.4 Payload Allocation with `__NEW` / `__DELETE`
+
+**Rule:** Always allocate payload dynamically via `__NEW(BYTE, nPayloadSize + 1)`. Always validate `_pPayload <> 0` before use. Always `__DELETE(_pPayload)` after processing.
+
+**Rationale:** MQTT payloads have variable length. Static buffers truncate large payloads. The `+1` ensures null termination for string operations.
+
+```iecst
+IF _fbMsgQueue.nQueuedMessages > 0 THEN
+    IF _fbMsgQueue.Dequeue(fbMessage := _fbMessage) THEN
+        _fbMessage.GetTopic(pTopic := ADR(_sTopic), nTopicSize := SIZEOF(_sTopic));
+
+        _nPayloadSize := _fbMessage.nPayloadSize + 1;
+        _pPayload     := __NEW(BYTE, _nPayloadSize);
+
+        IF _pPayload <> 0 THEN
+            _fbMessage.GetPayload(
+                pPayload            := _pPayload,
+                nPayloadSize        := _nPayloadSize,
+                bSetNullTermination := TRUE);
+
+            // Parse JSON, route by topic, etc.
+
+            __DELETE(_pPayload);
+        END_IF
+    END_IF
+END_IF
+```
+
+### 3.5 Publish Pattern
+
+**Rule:** Use `ADR(sPayload)` + `LEN2(ADR(sPayload))` for string payloads. Use pointer + size for dynamic payloads.
+
+**Rationale:** `LEN2` returns the actual string length (not buffer size). `LEN` would include the null terminator, sending garbage bytes.
+
+```iecst
+_fbMqttClient.Publish(
+    sTopic       := 'device/cx01/command',
+    pPayload     := ADR(sPayload),
+    nPayloadSize := LEN2(ADR(sPayload)),
+    eQoS         := TcIotMqttQos.AtLeastOnceDelivery,
+    bRetain      := FALSE);
+```
+
+### 3.6 Topic Routing
+
+**Rule:** Route incoming messages by topic suffix using `FIND()`. Do NOT use string equality — topics may contain dynamic device IDs.
+
+```iecst
+IF FIND(_sTopic, '/status') > 0 THEN
+    ProcessStatus();
+ELSIF FIND(_sTopic, '/result') > 0 THEN
+    ProcessResult();
+END_IF
+```
+
+## 4. QoS Selection
+
+| QoS | Enum | Use case |
+|-----|------|----------|
+| 0 | `TcIotMqttQos.AtMostOnceDelivery` | Telemetry, status (loss acceptable) |
+| 1 | `TcIotMqttQos.AtLeastOnceDelivery` | Commands, control (default choice) |
+| 2 | `TcIotMqttQos.ExactlyOnceDelivery` | Financial / safety-critical (slowest) |
+
+**Rule:** Use QoS 1 as default. Only use QoS 0 for high-frequency telemetry. Avoid QoS 2 unless strictly required.
+
+## 5. TLS Configuration
+
+```iecst
+_fbMqttClient.stTLS.sCA                := 'c:\TwinCAT\3.1\Target\certs\ca.pem';
+_fbMqttClient.stTLS.sCert              := 'c:\TwinCAT\3.1\Target\certs\client.pem';
+_fbMqttClient.stTLS.sKeyFile           := 'c:\TwinCAT\3.1\Target\certs\client.key';
+_fbMqttClient.stTLS.bNoServerCertCheck := FALSE;
+```
+
+**Rule:** Set `bNoServerCertCheck := TRUE` only for local development. Production MUST validate certificates.
+
+## 6. Last Will and Testament
+
+```iecst
+_fbMqttClient.sTopicWill   := CONCAT(sTopicPrefix, '/status');
+_fbMqttClient.sPayloadWill := '{"online": false}';
+_fbMqttClient.eQosWill     := TcIotMqttQos.AtLeastOnceDelivery;
+_fbMqttClient.bRetainWill  := TRUE;
+```
+
+**Rule:** Set Last Will BEFORE the first `Execute` call. The broker publishes this message when the client disconnects unexpectedly.
+
+## 7. Connection State Reference
+
+| State | Meaning |
+|-------|---------|
+| `Idle` | Not connected, not trying |
+| `Connecting` | Connection in progress |
+| `Connected` | Connected and ready |
+| `Disconnecting` | Disconnect in progress |
+| `Error` | Error occurred (check `hrErrorCode`) |
+
+## 8. Wildcard Subscriptions
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| `+` | Single-level wildcard | `devices/+/status` matches `devices/shelly-001/status` |
+| `#` | Multi-level wildcard | `devices/#` matches all sub-topics under `devices/` |
+
+**Rule:** Prefer `+` over `#` to limit message volume. Use `#` only when all sub-topics are relevant.

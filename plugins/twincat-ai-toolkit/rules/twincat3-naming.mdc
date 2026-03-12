@@ -1,0 +1,75 @@
+---
+description: TwinCAT3 naming conventions for variables, types, FBs, actions, methods, and files.
+alwaysApply: true
+---
+
+# Naming Conventions
+
+## Variable Prefixes
+
+| Prefix | Type | Example |
+|--------|------|---------|
+| `b` | BOOL | `bEnable`, `bError`, `bDone` |
+| `n` | INT, DINT, UINT, UDINT, ... | `nCount`, `nState`, `nIndex` |
+| `f` | REAL, LREAL | `fPower`, `fCurrent_A`, `fTemperature` |
+| `s` | STRING | `sName`, `sTopic`, `sPayload` |
+| `t` | TIME | `tTimeout`, `tDelay`, `tCycleTime` |
+| `e` | ENUM | `eState`, `eMode`, `eError` |
+| `st` | STRUCT instance | `stParam`, `stConfig`, `stMeasurement` |
+| `fb` | FB instance | `fbTimer`, `fbPidControl`, `fbJson` |
+| `arr` | ARRAY | `arrValues`, `arrCurrent` |
+| `hr` | HRESULT | `hrErrorCode` |
+| `p` | POINTER | `pPayload`, `pBuffer` |
+| `i` | INTERFACE | `iWidget`, `iBase` |
+| `c` | Constant (VAR CONSTANT) | `cMaxRetries`, `cTimeout` |
+| `cf` | Constant REAL (inline) | `cfNoDataValue`, `cfMinPower` |
+
+## Scope Prefixes
+
+| Prefix | Scope | Example |
+|--------|-------|---------|
+| `_` | Private/internal VAR (combined with type) | `_nStep`, `_bInitialized`, `_fbTonTest` |
+| *(none)* | VAR_INPUT / VAR_OUTPUT | `bEnable`, `fPower`, `stParam` |
+
+## FB Instances — Specific Patterns
+
+| Pattern | Naming | Example |
+|---------|--------|---------|
+| R_TRIG | `_posEdge{Purpose}` | `_posEdgePlugged`, `_posEdgeReset` |
+| F_TRIG | `_negEdge{Purpose}` | `_negEdgePlugged`, `_negEdgeDone` |
+| TON | `_fbTon{Purpose}` | `_fbTonTest`, `_fbTonFailsafe` |
+| TOF | `_fbTof{Purpose}` | `_fbTofDelay` |
+
+## Type Names
+
+| Kind | Pattern | Example |
+|------|---------|---------|
+| Function Block | `FB_[Lib]_[Purpose]` | `FB_EMS_ECabinet`, `FB_EMS_PID` |
+| Internal FB | `FB_[Lib]_[Purpose]` (in `[internal]` folder) | `FB_EMS_FloatingAvg_1m` |
+| Function | `F_[Lib]_[Purpose]` | `F_EMS_ReduceInstancePath` |
+| Struct | `ST_[Lib]_[Purpose]` | `ST_EMS_ECabinet_Param` |
+| Enum | `E_[Lib]_[Purpose]` | `E_EMS_ReleaseMode` |
+| String alias | `T_[Purpose]` | `T_MaxString` |
+| GVL Params | `Param_[Lib]` | `Param_EMS` |
+| GVL Globals | `GVL_[Domain]` | `GVL_EMS` |
+| GVL Version | `Global_Version` | — |
+
+## Actions & Methods
+
+| Kind | Pattern | Example |
+|------|---------|---------|
+| Action | `A_[Verb][Object]` | `A_CalculateGridCurrent`, `A_HandleFailsafe` |
+| Method | `M_[Verb][Object]` or `[Verb][Object]` | `M_Init`, `SetParam` |
+| Property | `[Noun]` (PascalCase) | `IsValid`, `MaxCurrent` |
+
+## Files
+
+- FBs/Functions: `[TypeName].TcPOU` — `FB_EMS_ECabinet.TcPOU`
+- DUTs: `[TypeName].TcDUT` — `ST_EMS_ECabinet_Param.TcDUT`, `E_EMS_Mode.TcDUT`
+- GVLs: `[GVLName].TcGVL` — `Param_EMS.TcGVL`
+- XML `Name` attribute **must** match the type name in the CDATA declaration
+
+## Units in Names
+
+Append unit suffix to physical values: `fCurrent_A`, `fPower_W`, `fEnergy_kWh`, `tDelay_ms`.
+In structs, group by purpose, not by type.

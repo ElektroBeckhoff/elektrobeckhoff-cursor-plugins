@@ -1,0 +1,161 @@
+---
+description: TwinCAT3 OOP patterns. Inheritance with EXTENDS, interfaces, abstract FBs, SUPER^(), properties, FB_init dependency injection.
+alwaysApply: false
+---
+
+# Object-Oriented Patterns in TwinCAT3
+
+## Inheritance — EXTENDS
+
+```iecst
+// Base FB
+FUNCTION_BLOCK FB_Base
+VAR
+    _bInitialized : BOOL;
+END_VAR
+
+METHOD Initialize : BOOL
+    _bInitialized := TRUE;
+    Initialize    := TRUE;
+END_METHOD
+```
+
+```iecst
+// Derived FB
+FUNCTION_BLOCK FB_Derived EXTENDS FB_Base
+VAR
+    _fSpeed : REAL;
+END_VAR
+
+METHOD Initialize : BOOL
+    SUPER^.Initialize(); // Call base method first
+    _fSpeed := 0.0;
+    Initialize := TRUE;
+END_METHOD
+```
+
+Rules:
+- `SUPER^.Method()` calls the parent implementation
+- Derived FB has access to all public/protected members of base
+- Can override any method — `SUPER^` is optional
+
+## Interfaces
+
+```iecst
+// Interface definition (.TcPOU, SpecialFunc="None")
+INTERFACE I_Controller
+METHOD Start  : BOOL
+METHOD Stop   : BOOL
+METHOD IsRunning : BOOL
+END_INTERFACE
+```
+
+```iecst
+// FB implementing interface
+FUNCTION_BLOCK FB_MotorController IMPLEMENTS I_Controller
+METHOD Start : BOOL
+    _bRunning := TRUE;
+    Start     := TRUE;
+END_METHOD
+
+METHOD Stop : BOOL
+    _bRunning := FALSE;
+    Stop      := TRUE;
+END_METHOD
+
+METHOD IsRunning : BOOL
+    IsRunning := _bRunning;
+END_METHOD
+```
+
+```iecst
+// Usage via interface reference
+VAR
+    iCtrl : I_Controller; // interface variable
+END_VAR
+
+// Assign concrete instance
+iCtrl := fbMotorController;
+
+// Call via interface
+IF iCtrl.Start() THEN ...
+```
+
+## Abstract FBs
+
+Cannot be instantiated directly. Use `ABSTRACT` keyword:
+
+```iecst
+{attribute 'hide'}
+FUNCTION_BLOCK ABSTRACT FB_AbstractBase
+VAR
+    _bEnabled : BOOL;
+END_VAR
+
+METHOD ABSTRACT Process : BOOL  // must be implemented by derived FB
+```
+
+## Properties
+
+Properties provide getter/setter access to private state. In .TcPOU XML, each property needs 3 GUIDs (Property + Get + Set).
+
+```iecst
+// Getter
+PROPERTY IsEnabled : BOOL
+// Get implementation:
+IsEnabled := _bEnabled;
+
+// Setter
+// Set implementation:
+_bEnabled := IsEnabled;
+```
+
+Call with dot notation:
+```iecst
+fbMotor.IsEnabled := TRUE;   // calls Set
+bState := fbMotor.IsEnabled; // calls Get
+```
+
+Property names: PascalCase (no prefix). Mark read-only properties by omitting the `Set` accessor.
+
+## FB_init — Dependency Injection
+
+Use `FB_init` to inject references at instantiation time. Only called once when FB is created.
+
+```iecst
+{attribute 'hide'}
+METHOD FB_init : BOOL
+VAR_INPUT
+    bInitRetains   : BOOL;
+    bInCopyCode    : BOOL;
+    fbComClient    : REFERENCE TO FB_SomeClient; // injected dependency
+END_VAR
+IF bInCopyCode THEN RETURN; END_IF
+
+_fbComClient REF= fbComClient; // store reference
+```
+
+Rules:
+- Always guard with `IF bInCopyCode THEN RETURN; END_IF`
+- Use `REFERENCE TO` for non-nullable references; validate with `__ISVALIDREF(ref)` before use
+- `FB_reinit` is called on warm reset; `FB_exit` before deletion
+
+## Interface Variables
+
+Store interface references in FB for polymorphism:
+
+```iecst
+VAR
+    _ipBase : I_Controller; // interface pointer/reference
+END_VAR
+
+// Assign in FB_init:
+_ipBase := THIS^; // self-assignment for delegation
+
+// Call:
+IF _ipBase <> 0 THEN
+    _ipBase.Start();
+END_IF
+```
+
+Use `<> 0` to check interface pointer validity (not `__ISVALIDREF`).

@@ -1,0 +1,54 @@
+---
+description: Core TwinCAT3 IEC 61131-3 Structured Text rules. Prevents C-style syntax errors and enforces PLC programming fundamentals.
+alwaysApply: true
+---
+
+# TwinCAT3 IEC 61131-3 Core Rules
+
+## This is NOT C/C++/Python
+
+| Concept | Correct (ST) | Wrong (C-style) |
+|---------|-------------|-----------------|
+| Assignment | `x := 5;` | `x = 5;` |
+| Comparison | `IF x = 5 THEN` | `if (x == 5) {` |
+| Not equal | `x <> 5` | `x != 5` |
+| Boolean AND | `AND` | `&&` |
+| Boolean OR | `OR` | `\|\|` |
+| Boolean NOT | `NOT` | `!` |
+| End block | `END_IF`, `END_CASE`, `END_FOR` | `}` |
+| String concat | `CONCAT(s1, s2)` | `s1 + s2` |
+| Comments | `// text` or `(* text *)` | `/* text */` |
+
+## Cyclic Execution
+
+- PLC code runs in cycles (e.g. every 10ms). There is no `main()` with `while(true)`.
+- Function Blocks are **stateful** - they keep their internal variables between cycles.
+- FB instances must be **declared** before use and **called every cycle**.
+- Use **state machines** (`CASE _nStep OF`) for multi-step processes - never blocking loops.
+
+## Type Safety
+
+- Strong typing enforced. Use explicit conversions: `TO_INT()`, `TO_REAL()`, `TO_STRING()`, `UINT_TO_BOOL()`, `INT_TO_UINT()`, etc.
+- No implicit type coercion between numeric types.
+
+## Memory Model
+
+- No dynamic memory by default. All variables allocated at compile time.
+- Arrays have fixed size. No resizable containers.
+- Exception: `__NEW(BYTE, nSize)` / `__DELETE(ptr)` for JSON payloads only.
+- `POINTER TO` and `REFERENCE TO` for indirection. Always validate: `IF _pPtr <> 0 THEN` / `IF __ISVALIDREF(ref) THEN`.
+
+## Error Handling Pattern
+
+Every FB that can fail exposes:
+```iecst
+VAR_OUTPUT
+    bError      : BOOL;       // Error flag
+    hrErrorCode : HRESULT;    // Detailed error code
+    eError      : E_*_Error;  // Domain-specific enum (optional)
+END_VAR
+```
+
+## Attributes
+
+See skill `twincat3-attributes` for the complete reference with all pragmas, syntax, and effects.

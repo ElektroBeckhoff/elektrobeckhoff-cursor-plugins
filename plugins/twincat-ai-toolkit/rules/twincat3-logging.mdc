@@ -1,0 +1,32 @@
+---
+description: Logging conventions using F_IoT_Utilities_MessageLog from Tc3_IoT_Utilities. Edge-detected state logging, log level filtering, instance-path setup.
+globs: "**/*.TcPOU,**/*.TcGVL"
+alwaysApply: false
+---
+
+# Logging with Tc3_IoT_Utilities
+
+> Patterns, examples, and level guide → skill `twincat3-logging`
+
+## Mandatory Rules
+
+1. **Never log every cycle** — always edge-detect state changes with `_bXxxMem`
+2. **Always use `Param_[Lib].cnMessageLog`** as `eMode` — never hardcode a level
+3. **Always pass `_sPath`** — never empty string or hardcoded path
+4. **Both `sArg1` and `sArg2` required** — use `''` when unused
+5. **Explicit type conversions only** — `UINT_TO_STRING()`, `TO_STRING()`, `DWORD_TO_HEXSTR()`
+6. **Use `CONCAT()`** when >2 format args needed, or `F_IoT_Utilities_FormatString_N` (N=2..8)
+
+## Required Variables Per FB
+
+```iecst
+{attribute 'instance-path'}
+{attribute 'noinit'}
+_sPath : T_MaxString;
+```
+
+## Required Per Library (Param GVL)
+
+```iecst
+ceMessageLog : E_IoT_Utilities_MessageLog := E_IoT_Utilities_MessageLog.Debug;
+```
