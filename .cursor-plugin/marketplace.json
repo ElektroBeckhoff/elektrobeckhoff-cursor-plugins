@@ -1,7 +1,8 @@
 {
   "name": "elektrobeckhoff-cursor-plugins",
   "owner": {
-    "name": "ElektroBeckhoff"
+    "name": "ElektroBeckhoff",
+    "email": "info@elektrobeckhoff.de"
   },
   "metadata": {
     "description": "Cursor plugins for TwinCAT development",
@@ -11,8 +12,8 @@
   "plugins": [
     {
       "name": "twincat-ai-toolkit",
-      "source": "./plugins/twincat-ai-toolkit",
-      "description": "TwinCAT 3 development toolkit for Cursor"
+      "source": "twincat-ai-toolkit",
+      "description": "AI toolkit for Beckhoff TwinCAT 3 development with Structured Text"
     }
   ]
 }
