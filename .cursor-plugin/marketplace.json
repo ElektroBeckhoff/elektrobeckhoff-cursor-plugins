@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "twincat-ai-toolkit",
-      "source": "twincat-ai-toolkit",
+      "source": "./plugins/twincat-ai-toolkit",
       "description": "TwinCAT 3 development toolkit for Cursor"
     }
   ]
