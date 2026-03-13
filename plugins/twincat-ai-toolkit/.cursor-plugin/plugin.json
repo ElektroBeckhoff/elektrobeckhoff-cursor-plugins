@@ -9,5 +9,51 @@
   },
   "license": "MIT",
   "keywords": ["cursor", "plugin", "twincat", "beckhoff", "plc", "structured-text", "iec-61131"],
-  "logo": "assets/logo.svg"
+  "logo": "assets/logo.svg",
+  "rules": [
+    "rules/twincat3-core.mdc",
+    "rules/twincat3-naming.mdc",
+    "rules/twincat3-oop.mdc",
+    "rules/twincat3-formatting.mdc",
+    "rules/twincat3-comments.mdc",
+    "rules/twincat3-versioning.mdc",
+    "rules/twincat3-modbus.mdc",
+    "rules/twincat3-mqtt.mdc",
+    "rules/twincat3-http.mdc",
+    "rules/twincat3-iot-patterns.mdc",
+    "rules/twincat3-logging.mdc",
+    "rules/twincat3-plcproj.mdc",
+    "rules/twincat3-xml-tcpou.mdc",
+    "rules/twincat3-xml-tcdut.mdc",
+    "rules/twincat3-xml-tcgvl.mdc"
+  ],
+  "skills": [
+    "skills/twincat3-attributes",
+    "skills/twincat3-code-style",
+    "skills/twincat3-http",
+    "skills/twincat3-infosys-lookup",
+    "skills/twincat3-json-strings",
+    "skills/twincat3-logging",
+    "skills/twincat3-modbus",
+    "skills/twincat3-mqtt",
+    "skills/twincat3-new-library"
+  ],
+  "commands": [
+    "commands/twincat3-new-function-block.md",
+    "commands/twincat3-new-state-machine.md",
+    "commands/twincat3-add-method.md",
+    "commands/twincat3-add-property.md",
+    "commands/twincat3-new-library.md",
+    "commands/twincat3-new-struct.md",
+    "commands/twincat3-new-enum.md",
+    "commands/twincat3-new-gvl.md",
+    "commands/twincat3-modbus-tcp-device.md",
+    "commands/twincat3-modbus-rtu-device.md",
+    "commands/twincat3-modbus-add-write.md",
+    "commands/twincat3-mqtt-function-block.md",
+    "commands/twincat3-http-rest-client.md",
+    "commands/twincat3-json-parse.md",
+    "commands/twincat3-json-build.md",
+    "commands/twincat3-register-plcproj.md"
+  ]
 }
