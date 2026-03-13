@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+
+  <!-- Hintergrund -->
+  <rect width="512" height="512" fill="white"></rect>
+
+  <!-- TwinCAT Text -->
+  <text x="256" y="260" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="110" font-weight="bold" fill="#333333">
+        TwinCAT
+  </text>
+
+  <!-- rote Linie -->
+  <rect x="80" y="300" width="352" height="14" fill="#e2001a"></rect>
+
+</svg>

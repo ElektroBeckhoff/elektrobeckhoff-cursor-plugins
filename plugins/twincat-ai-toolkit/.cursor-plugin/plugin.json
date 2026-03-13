@@ -8,5 +8,6 @@
     "email": "info@elektrobeckhoff.de"
   },
   "license": "MIT",
-  "keywords": ["cursor", "plugin", "twincat", "beckhoff", "plc", "structured-text", "iec-61131"]
+  "keywords": ["cursor", "plugin", "twincat", "beckhoff", "plc", "structured-text", "iec-61131"],
+  "logo": "assets/logo.svg"
 }
