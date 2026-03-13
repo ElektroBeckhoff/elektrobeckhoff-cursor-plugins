@@ -1,60 +1,64 @@
-# twincat3-ai-toolkit
+# TwinCAT AI Toolkit
 
-AI-friendly coding rules, patterns, and agent skills for developing **Beckhoff TwinCAT 3** PLC projects in **IEC 61131-3 Structured Text**.
+AI rules, skills and templates for **Beckhoff TwinCAT 3** projects in **IEC 61131-3 Structured Text**.
 
----
+## Rules
 
-## Rules (`rules/`)
+Automatically applied coding rules (`rules/`).
 
-Cursor `.mdc` rules — copy to `.cursor/rules/` in your project.
+| Rule | Description |
+|------|-------------|
+| `twincat3-core` | ST syntax, cyclic execution, type safety, memory model |
+| `twincat3-naming` | Variable prefixes, type names, file naming, unit suffixes |
+| `twincat3-oop` | EXTENDS, interfaces, abstract FBs, FB_init injection |
+| `twincat3-formatting` | Indentation, alignment, line wrapping |
+| `twincat3-comments` | I/O comments, block separators, FB header |
+| `twincat3-versioning` | Version format, Global_Version GVL, changelog |
+| `twincat3-modbus` | Modbus TCP/RTU architecture, step-pair pattern |
+| `twincat3-mqtt` | MQTT connection, subscribe-on-connect, reconnection |
+| `twincat3-http` | HTTP(S) FB structure, 3-level error evaluation |
+| `twincat3-iot-patterns` | Tc3_IoT_BA, MQTT widgets |
+| `twincat3-logging` | F_IoT_Utilities_MessageLog, edge-detected logging |
+| `twincat3-plcproj` | File/folder registration, PlaceholderReference |
+| `twincat3-xml-tcpou` | TcPOU XML structure, GUIDs, methods, properties |
+| `twincat3-xml-tcdut` | TcDUT XML for STRUCT, ENUM, UNION |
+| `twincat3-xml-tcgvl` | TcGVL XML for global variable lists |
 
-| Rule | Description | Applied to |
-|------|-------------|------------|
-| `twincat3-core` | ST syntax, cyclic execution, type safety, memory model, error pattern | always |
-| `twincat3-naming` | Variable prefixes, type names, file naming, unit suffixes | always |
-| `twincat3-fb-design` | Constants inside FB, VAR_INPUT defaults, standard output pattern, execute-flag pattern | always |
-| `twincat3-state-machine` | `CASE _nStep OF` pattern, reserved step numbers, Modbus read pairs, interval timer | always |
-| `twincat3-formatting` | Indentation, alignment, line wrapping | `*.TcPOU`, `*.TcDUT`, `*.TcGVL` |
-| `twincat3-comments` | I/O comments, block separators, FB header | `*.TcPOU`, `*.TcDUT`, `*.TcGVL` |
-| `twincat3-modbus` | Unified Modbus TCP/RTU architecture, step-pair pattern, error handling | optional |
-| `twincat3-mqtt` | MQTT connection, subscribe-on-connect, payload allocation, reconnection | `*.TcPOU` |
-| `twincat3-http` | HTTP(S) FB structure, Execute method, 3-level error evaluation, auth | `*.TcPOU` |
-| `twincat3-oop` | EXTENDS, interfaces, abstract FBs, FB_init injection | optional |
-| `twincat3-iot-patterns` | Tc3_IoT_BA, MQTT widgets, FB_init | `**/Tc3_IoT_*/**` |
-| `twincat3-logging` | F_IoT_Utilities_MessageLog, edge-detected logging | `*.TcPOU`, `*.TcGVL` |
-| `twincat3-versioning` | Version format, Global_Version GVL, changelog | optional |
-| `twincat3-plcproj` | Registering files/folders, library PlaceholderReference entries | `**/*.plcproj` |
-| `twincat3-xml-tcpou` | TcPOU XML structure, GUIDs, methods, properties | `**/*.TcPOU` |
-| `twincat3-xml-tcdut` | TcDUT XML for STRUCT, ENUM, UNION | `**/*.TcDUT` |
-| `twincat3-xml-tcgvl` | TcGVL XML for global variable lists | `**/*.TcGVL` |
+## Skills
 
----
-
-## Skills (`skills/`)
-
-Agent skills — loaded on demand by the AI assistant.
+On-demand skills, loaded when the AI assistant needs them (`skills/`).
 
 | Skill | Description |
 |-------|-------------|
-| `twincat3-attributes` | All `{attribute '...'}` pragmas — hide, noinit, reflection, pack_mode, qualified_only, strict, … |
+| `twincat3-attributes` | All `{attribute '...'}` pragmas |
 | `twincat3-code-style` | Formatting and comment rules reference |
-| `twincat3-json-strings` | JSON parsing (FB_JsonDomParser, FB_JsonDynDomParser), writing (FB_JsonSaxWriter), dynamic `__NEW`/`__DELETE` |
-| `twincat3-logging` | F_IoT_Utilities_MessageLog with instance-path context |
-| `twincat3-modbus` | Modbus TCP (Tc2_ModbusSrv) and RTU (Tc3_ModbusRtuEB) device integration with protocol-specific patterns |
-| `twincat3-mqtt` | MQTT communication (FB_IotMqttClient) — publish/subscribe, topic routing, reconnection, QoS, TLS |
-| `twincat3-http` | HTTP(S) REST communication (FB_IotHttpRequest) — GET/POST, 3-level error eval, auth, JSON body |
-| `twincat3-new-library` | New library from scratch — folder layout, GUIDs, .plcproj setup, minimum files |
-| `twincat3-infosys-lookup` | Fetch Beckhoff InfoSys documentation for unknown types and FBs |
+| `twincat3-json-strings` | JSON parsing/writing, dynamic strings (`__NEW`/`__DELETE`) |
+| `twincat3-logging` | Logging with instance-path context |
+| `twincat3-modbus` | Modbus TCP + RTU device integration |
+| `twincat3-mqtt` | MQTT publish/subscribe, QoS, TLS |
+| `twincat3-http` | HTTP(S) REST, auth, JSON body |
+| `twincat3-new-library` | Create a new library from scratch |
+| `twincat3-infosys-lookup` | Look up Beckhoff InfoSys documentation |
 
----
+## Commands
 
-## Prompts (`prompts/`)
+Agent-executable commands for common tasks (`commands/`).
 
-Ready-to-paste prompts for common TwinCAT 3 tasks.
-
-| Prompt | Enthält |
-|--------|---------|
-| `modbus.md` | TCP device, RTU device, Write register |
-| `iot-communication.md` | MQTT FB, HTTP REST FB, JSON parse, JSON build |
-| `function-blocks.md` | Generic FB, State machine, Method, Property |
-| `library-types.md` | New library, Struct, Enum, GVL, .plcproj registration |
+| Command | Description |
+|---------|-------------|
+| `twincat3-modbus-tcp-device` | Create Modbus TCP device integration |
+| `twincat3-modbus-rtu-device` | Create Modbus RTU device integration |
+| `twincat3-modbus-add-write` | Add write registers to existing Modbus FB |
+| `twincat3-mqtt-function-block` | Create MQTT function block |
+| `twincat3-http-rest-client` | Create HTTP REST client FB |
+| `twincat3-json-parse` | Add JSON parsing to existing FB |
+| `twincat3-json-build` | Add JSON payload building to existing FB |
+| `twincat3-new-function-block` | Create a new function block |
+| `twincat3-new-state-machine` | Add step-based state machine to FB |
+| `twincat3-add-method` | Add method to existing FB |
+| `twincat3-add-property` | Add property to existing FB |
+| `twincat3-new-library` | Create new PLC library from scratch |
+| `twincat3-new-struct` | Create new struct (TcDUT) |
+| `twincat3-new-enum` | Create new enum (TcDUT) |
+| `twincat3-new-gvl` | Create new global variable list (TcGVL) |
+| `twincat3-register-plcproj` | Register files in .plcproj |
