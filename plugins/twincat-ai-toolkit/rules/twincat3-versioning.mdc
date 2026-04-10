@@ -55,27 +55,13 @@ Versions/
 
 ## Changelog Format
 
-Keep changelogs short and in English. One file per release version.
+For detailed changelog writing instructions, templates, and real examples, use the `twincat3-changelog` skill (`.cursor/skills/twincat3-changelog/SKILL.md`).
 
-```markdown
-# Changelog vX.Y.Z.R
-
-## New Features
-- FB_Example: brief description of what it does
-
-## Data Structures (DUTs)
-- ST_Example_Data: fields and purpose
-- E_Example_State: enum states
-
-## Bug Fixes
-- Fixed: description of fix
-
-## Breaking Changes
-- Renamed: OldName → NewName
-```
-
-Rules:
+Key rules:
 - English only
-- List every new FB, DUT, GVL, and Helper Function
-- Note breaking changes explicitly
-- No implementation details — purpose only
+- One file per version in `Versions/X.X.X.X/changelog-X.X.X.X.md`
+- Major releases: `# Changelog — Tc3_IoT_BA X.X.X.X` with Added/Changed/Fixed/Deprecated
+- Bug fix releases: `## Version X.X.X.X – Title` with categorized sections
+- Breaking changes use `> [!CAUTION]` blocks
+- Code examples use `iecst` syntax highlighting
+- No implementation details — purpose and impact only
