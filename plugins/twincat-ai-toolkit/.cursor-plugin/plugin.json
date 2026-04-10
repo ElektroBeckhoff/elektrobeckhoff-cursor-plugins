@@ -36,7 +36,8 @@
     "skills/twincat3-logging",
     "skills/twincat3-modbus",
     "skills/twincat3-mqtt",
-    "skills/twincat3-new-library"
+    "skills/twincat3-new-library",
+    "skills/twincat3-changelog"
   ],
   "commands": [
     "commands/twincat3-new-function-block.md",
