@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mcp-twincat": {
+      "command": "python",
+      "args": ["mcp-servers/mcp-twincat/server.py"],
+      "env": {}
+    }
+  }
+}

@@ -56,5 +56,6 @@
     "commands/twincat3-json-parse.md",
     "commands/twincat3-json-build.md",
     "commands/twincat3-register-plcproj.md"
-  ]
+  ],
+  "mcpServers": ".mcp.json"
 }
