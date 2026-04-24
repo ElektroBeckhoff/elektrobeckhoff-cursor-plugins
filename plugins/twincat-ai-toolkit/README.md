@@ -88,3 +88,26 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 mcp>=1.27.0
 pywin32>=306
 ```
+
+### Troubleshooting: MCP server fails to start
+
+**Symptom:** MCP logs show `python: can't open file '...\mcp-servers\mcp-twincat\server.py'` with a path rooted under the user home directory instead of the plugin folder, or `toolCount: 0`.
+
+**Root cause:** Cursor does **not** apply a `cwd` field from plugin `.mcp.json` ([confirmed bug](https://github.com/anthropics/claude-code/issues/17565), [Cursor forum](https://forum.cursor.com/t/inconsistent-working-directory-for-plugin-hook-commands/153236)). The MCP process always starts with the user home or project folder as working directory, so relative paths to `server.py` resolve to the wrong location.
+
+**Fix (applied):** The `.mcp.json` uses a `cmd /c` wrapper that `cd`s into `%CURSOR_PLUGIN_ROOT%` before launching Python. This variable is injected by Cursor into the plugin process environment.
+
+**Fallback:** If `CURSOR_PLUGIN_ROOT` is not set, add the server manually to `~/.cursor/mcp.json` with an absolute path:
+
+```json
+{
+  "mcpServers": {
+    "mcp-twincat": {
+      "command": "python",
+      "args": ["C:/.cursor/plugins/cache/.../mcp-servers/mcp-twincat/server.py"]
+    }
+  }
+}
+```
+
+Replace `...` with the actual cache path (check `%USERPROFILE%\.cursor\plugins\cache\`).

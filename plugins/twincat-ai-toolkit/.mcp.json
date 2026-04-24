@@ -1,10 +1,11 @@
 {
   "mcpServers": {
     "mcp-twincat": {
-      "type": "stdio",
-      "command": "python",
-      "args": ["mcp-servers/mcp-twincat/server.py"],
-      "cwd": ".",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "cd /d \"%CURSOR_PLUGIN_ROOT%\" && python mcp-servers\\mcp-twincat\\server.py"
+      ],
       "env": {}
     }
   }
