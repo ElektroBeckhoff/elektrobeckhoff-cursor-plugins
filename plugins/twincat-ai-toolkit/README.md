@@ -95,19 +95,19 @@ pywin32>=306
 
 **Root cause:** Cursor does **not** apply a `cwd` field from plugin `.mcp.json` ([confirmed bug](https://github.com/anthropics/claude-code/issues/17565), [Cursor forum](https://forum.cursor.com/t/inconsistent-working-directory-for-plugin-hook-commands/153236)). The MCP process always starts with the user home or project folder as working directory, so relative paths to `server.py` resolve to the wrong location.
 
-**Fix (applied):** The `.mcp.json` uses a `cmd /c` wrapper that `cd`s into `%CURSOR_PLUGIN_ROOT%` before launching Python. This variable is injected by Cursor into the plugin process environment.
+**Fix (applied):** The `.mcp.json` uses a Python bootstrap (`python -c "..."`) that locates `server.py` in the plugin cache via `~/.cursor/plugins/cache/elektrobeckhoff-cursor-plugins/twincat-ai-toolkit/*/...` using `glob` and `runpy.run_path`. This is fully self-contained and does not rely on any Cursor environment variables (`cwd`, `CURSOR_PLUGIN_ROOT`) that are not available for MCP server processes.
 
-**Fallback:** If `CURSOR_PLUGIN_ROOT` is not set, add the server manually to `~/.cursor/mcp.json` with an absolute path:
+**Fallback:** Add the server manually to `~/.cursor/mcp.json` with an absolute path:
 
 ```json
 {
   "mcpServers": {
     "mcp-twincat": {
       "command": "python",
-      "args": ["C:/.cursor/plugins/cache/.../mcp-servers/mcp-twincat/server.py"]
+      "args": ["C:/Users/<you>/.cursor/plugins/cache/elektrobeckhoff-cursor-plugins/twincat-ai-toolkit/<hash>/mcp-servers/mcp-twincat/server.py"]
     }
   }
 }
 ```
 
-Replace `...` with the actual cache path (check `%USERPROFILE%\.cursor\plugins\cache\`).
+Replace `<you>` and `<hash>` with your username and the commit hash in `%USERPROFILE%\.cursor\plugins\cache\`.

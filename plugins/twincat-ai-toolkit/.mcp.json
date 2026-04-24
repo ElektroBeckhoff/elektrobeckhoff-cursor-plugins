@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "mcp-twincat": {
-      "command": "cmd",
+      "command": "python",
       "args": [
-        "/c",
-        "cd /d \"%CURSOR_PLUGIN_ROOT%\" && python mcp-servers\\mcp-twincat\\server.py"
+        "-c",
+        "import os,sys,glob,runpy;c=os.path.join(os.path.expanduser('~'),'.cursor','plugins','cache','elektrobeckhoff-cursor-plugins','twincat-ai-toolkit');v=sorted(glob.glob(os.path.join(c,'*')),key=os.path.getmtime,reverse=True);d=os.path.join(v[0],'mcp-servers','mcp-twincat') if v else '';s=os.path.join(d,'server.py');sys.path.insert(0,d);runpy.run_path(s,run_name='__main__') if os.path.isfile(s) else sys.exit('server.py not found in plugin cache')"
       ],
       "env": {}
     }
