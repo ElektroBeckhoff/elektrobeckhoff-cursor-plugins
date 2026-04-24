@@ -23,11 +23,18 @@ PROG_ID = "TcXaeShell.DTE.15.0"
 RPC_E_CALL_REJECTED = -2147418111  # 0x80010001 signed
 
 HAS_WIN32 = False
+HAS_WIN32GUI = False
 try:
     import pythoncom
     import win32com.client
     import pywintypes
     HAS_WIN32 = True
+except ImportError:
+    pass
+try:
+    import win32gui
+    import win32con
+    HAS_WIN32GUI = True
 except ImportError:
     pass
 
@@ -155,10 +162,90 @@ class ComBridge:
         require_win32()
         result_q: queue.Queue = queue.Queue()
         self._queue.put((func, args, kwargs, result_q))
-        status, value = result_q.get(timeout=timeout)
+
+        stop_event = threading.Event()
+        watcher = threading.Thread(
+            target=self._dialog_dismiss_worker,
+            args=(stop_event,),
+            daemon=True,
+            name="Dialog-Watcher",
+        )
+        watcher.start()
+
+        try:
+            status, value = result_q.get(timeout=timeout)
+        finally:
+            stop_event.set()
+            watcher.join(timeout=5)
+
         if status == "error":
             raise value
         return value
+
+    # --------------- Modal dialog auto-dismiss ---------------
+
+    _SAFE_DIALOG_PATTERNS = [
+        "modified outside",   # EN: "has been modified outside of TwinCAT XAE"
+        "außerhalb",          # DE: "außerhalb von TwinCAT XAE geändert"
+    ]
+
+    def _dialog_dismiss_worker(self, stop_event: threading.Event):
+        """Background worker that auto-dismisses known XAE modal dialogs.
+
+        Runs alongside every COM call to prevent the STA thread from
+        getting stuck on a modal dialog (e.g. "project modified outside
+        of TwinCAT XAE -- reload?").  Only dismisses dialogs whose text
+        matches a known safe pattern.
+        """
+        if not HAS_WIN32GUI:
+            return
+
+        IDYES = 6  # MessageBox button ID for "Yes"/"Ja"
+
+        while not stop_event.is_set():
+            try:
+                dismissed = []
+
+                def enum_cb(hwnd, _):
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return True
+                    if win32gui.GetWindowText(hwnd) != "TcXaeShell":
+                        return True
+                    if win32gui.GetClassName(hwnd) != "#32770":
+                        return True
+
+                    dialog_texts = []
+                    def enum_children(child_hwnd, _):
+                        if win32gui.GetClassName(child_hwnd) == "Static":
+                            text = win32gui.GetWindowText(child_hwnd)
+                            if text:
+                                dialog_texts.append(text.lower())
+                        return True
+
+                    try:
+                        win32gui.EnumChildWindows(hwnd, enum_children, None)
+                    except Exception:
+                        return True
+
+                    full_text = " ".join(dialog_texts)
+                    if any(p in full_text for p in self._SAFE_DIALOG_PATTERNS):
+                        win32gui.PostMessage(
+                            hwnd, win32con.WM_COMMAND, IDYES, 0,
+                        )
+                        dismissed.append(hwnd)
+                    return True
+
+                win32gui.EnumWindows(enum_cb, None)
+
+                for hwnd in dismissed:
+                    log.info(
+                        "Auto-dismissed TcXaeShell file-reload dialog "
+                        "(hwnd=%s)", hwnd,
+                    )
+            except Exception:
+                pass
+
+            stop_event.wait(1.0)
 
     def _cleanup_com(self):
         if self._created_new and self._dte:
@@ -282,6 +369,7 @@ class ComBridge:
         if self._dte and norm_expected:
             current_sln = ""
             sln_is_open = False
+            dte_is_alive = True
             try:
                 sln_is_open = bool(self._dte.Solution.IsOpen)
                 if sln_is_open:
@@ -289,9 +377,19 @@ class ComBridge:
                         os.path.abspath(str(self._dte.Solution.FullName))
                     )
             except Exception:
-                pass
+                # TODO(FIX): Stale DTE after force-quit -- the COM object
+                # is dead but self._dte is not None.  Without this guard
+                # the bare Solution.Open() below would crash with
+                # "TcXaeShell.DTE.15.0.Solution" because the dead proxy
+                # cannot reach the Solution property.
+                dte_is_alive = False
+                log.warning("DTE appears stale (Solution inaccessible) "
+                            "-- dropping reference")
+                self._dte = None
 
-            if not sln_is_open:
+            if not self._dte:
+                pass  # fall through to step 3
+            elif not sln_is_open and dte_is_alive:
                 log.info("XAE running but no solution open -- opening %s",
                          expected_sln)
                 self._dte.Solution.Open(expected_sln)
