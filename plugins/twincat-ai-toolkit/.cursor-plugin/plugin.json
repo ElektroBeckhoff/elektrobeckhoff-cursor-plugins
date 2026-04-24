@@ -25,7 +25,8 @@
     "rules/twincat3-plcproj.mdc",
     "rules/twincat3-xml-tcpou.mdc",
     "rules/twincat3-xml-tcdut.mdc",
-    "rules/twincat3-xml-tcgvl.mdc"
+    "rules/twincat3-xml-tcgvl.mdc",
+    "rules/twincat3-mcp-build.mdc"
   ],
   "skills": [
     "skills/twincat3-attributes",
@@ -37,7 +38,9 @@
     "skills/twincat3-modbus",
     "skills/twincat3-mqtt",
     "skills/twincat3-new-library",
-    "skills/twincat3-changelog"
+    "skills/twincat3-changelog",
+    "skills/twincat3-validate",
+    "skills/twincat3-release"
   ],
   "commands": [
     "commands/twincat3-new-function-block.md",
@@ -55,7 +58,9 @@
     "commands/twincat3-http-rest-client.md",
     "commands/twincat3-json-parse.md",
     "commands/twincat3-json-build.md",
-    "commands/twincat3-register-plcproj.md"
+    "commands/twincat3-register-plcproj.md",
+    "commands/twincat3-validate-project.md",
+    "commands/twincat3-release-library.md"
   ],
   "mcpServers": ".mcp.json"
 }

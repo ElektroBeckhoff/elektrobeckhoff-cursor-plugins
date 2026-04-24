@@ -1,0 +1,39 @@
+---
+description: MCP build automation awareness. Tells the agent when and how to use the TwinCAT MCP tools for compiling, validating, and exporting PLC projects.
+alwaysApply: true
+---
+
+# TwinCAT MCP Build Automation
+
+## Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_open` | Open solution in XAE, locate PLC project |
+| `twincat_check_all_objects` | Compile ALL objects (not just MAIN-referenced) |
+| `twincat_build` | Full rebuild of the solution |
+| `twincat_get_errors` | Read errors, warnings, infos from last compile |
+| `twincat_reload` | Close + reopen solution (re-reads from disk) |
+| `twincat_export_library` | Export `.library` + `.compiled-library` |
+| `twincat_close` | Release session (never closes user solutions) |
+| `twincat_status` | Check if XAE is installed / running |
+| `twincat_project_info` | Read version/title from `.plcproj` (no XAE needed) |
+
+## When to Validate
+
+After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:
+
+1. `twincat_open` (with explicit `plcproj_path`)
+2. `twincat_check_all_objects`
+3. `twincat_get_errors`
+4. Fix errors → repeat from step 2
+
+For the detailed workflow, use the `twincat3-validate` skill.
+
+## Critical Rules
+
+- **Always pass explicit `plcproj_path`** to `twincat_open`. Auto-detect is unreliable in multi-project workspaces.
+- **No `twincat_reload` needed** after editing `.TcPOU` / `.TcDUT` / `.TcGVL` content — `twincat_check_all_objects` reads directly from disk.
+- **`twincat_reload` IS required** after structural changes to `.plcproj`, `.tsproj`, or `.sln` (added/removed files, version bumps, library references).
+- **Use `twincat_check_all_objects`** for library projects — it compiles every object. A normal `twincat_build` only compiles objects reachable from MAIN.
+- **`twincat_close` is always safe** — it never closes user solutions. If MCP started its own XAE instance, it quits that instance. If MCP attached to the user's XAE, it just detaches.
