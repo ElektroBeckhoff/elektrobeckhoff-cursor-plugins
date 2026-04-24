@@ -122,6 +122,7 @@ class ComBridge:
         self._sys_man = None
         self._plc_proj_item = None
         self._created_new = False
+        self._we_opened_solution = False
         self._sln_path: Optional[str] = None
         self._plcproj_file_path: Optional[str] = None
         if HAS_WIN32:
@@ -166,10 +167,7 @@ class ComBridge:
                 self._dte.Quit()
             except Exception:
                 pass
-        self._dte = None
-        self._sys_man = None
-        self._plc_proj_item = None
-        self._created_new = False
+        self._reset_state()
 
     def shutdown(self):
         if HAS_WIN32 and self._thread.is_alive():
@@ -187,11 +185,10 @@ class ComBridge:
         plcproj_path: Optional[str] = None,
         proj_name: Optional[str] = None,
         timeout_s: int = 180,
-        force_switch: bool = False,
     ) -> OpenResult:
         return self._call_sta(
             self._impl_open_solution,
-            sln_path, plcproj_path, proj_name, timeout_s, force_switch,
+            sln_path, plcproj_path, proj_name, timeout_s,
             timeout=timeout_s + 60,
         )
 
@@ -216,8 +213,8 @@ class ComBridge:
             self._impl_reload_solution, timeout_s, timeout=timeout_s + 60
         )
 
-    def close(self) -> CloseResult:
-        return self._call_sta(self._impl_close, timeout=30)
+    def close(self, force_quit: bool = False) -> CloseResult:
+        return self._call_sta(self._impl_close, force_quit, timeout=30)
 
     # ==================== STA implementations ====================
 
@@ -259,7 +256,6 @@ class ComBridge:
 
     def _impl_open_solution(
         self, sln_path, plcproj_path, proj_name, timeout_s,
-        force_switch=False,
     ) -> OpenResult:
         if plcproj_path:
             self._plcproj_file_path = plcproj_path
@@ -267,6 +263,11 @@ class ComBridge:
         expected_sln = sln_path
         if not expected_sln and plcproj_path:
             expected_sln = self._find_sln_near(plcproj_path)
+
+        norm_expected = (
+            os.path.normcase(os.path.abspath(expected_sln))
+            if expected_sln else ""
+        )
 
         # 1. Try attaching to a running instance
         if not self._dte:
@@ -278,7 +279,7 @@ class ComBridge:
                 self._dte = None
 
         # 2. If attached, check whether the loaded solution matches
-        if self._dte and expected_sln:
+        if self._dte and norm_expected:
             current_sln = ""
             sln_is_open = False
             try:
@@ -290,37 +291,26 @@ class ComBridge:
             except Exception:
                 pass
 
-            norm_expected = os.path.normcase(os.path.abspath(expected_sln))
-
             if not sln_is_open:
                 log.info("XAE running but no solution open -- opening %s",
                          expected_sln)
                 self._dte.Solution.Open(expected_sln)
                 self._wait_for_solution_open(timeout_s)
-            elif current_sln != norm_expected:
-                if not force_switch:
-                    raw_current = str(self._dte.Solution.FullName)
-                    return OpenResult(
-                        success=False,
-                        message=(
-                            f"WRONG SOLUTION: XAE has '{raw_current}' open, "
-                            f"but the library project needs "
-                            f"'{expected_sln}'. "
-                            f"Call twincat_open with force_switch=true to "
-                            f"close the current solution and open the "
-                            f"correct one, or close it manually first."
-                        ),
-                    )
+                self._we_opened_solution = True
+            elif current_sln == norm_expected:
+                log.info("Correct solution already open")
+            else:
+                # Wrong solution open -- leave it alone, start a
+                # separate XAE instance for our solution.
+                raw_current = str(self._dte.Solution.FullName)
                 log.info(
-                    "Solution mismatch: force_switch -- closing %s, "
-                    "opening %s",
-                    current_sln, norm_expected,
+                    "XAE has '%s' open -- starting separate instance "
+                    "for '%s'",
+                    raw_current, expected_sln,
                 )
-                self._dte.Solution.Close(False)
-                self._dte.Solution.Open(expected_sln)
-                self._wait_for_solution_open(timeout_s)
+                self._dte = None  # release the attached instance
 
-        # 3. No running instance -> start new one
+        # 3. No XAE available -> start a new instance
         if not self._dte:
             if not expected_sln:
                 return OpenResult(
@@ -330,13 +320,35 @@ class ComBridge:
             log.info("Starting new TcXaeShell with %s", expected_sln)
             self._dte = win32com.client.Dispatch(PROG_ID)
             self._created_new = True
+            self._we_opened_solution = True
             self._dte.SuppressUI = False
             self._dte.MainWindow.Visible = True
             self._dte.UserControl = False
-            self._dte.Solution.Open(expected_sln)
-            self._wait_for_solution_open(timeout_s)
 
-        # 4. SystemManager
+            self._wait_for_xae_idle(timeout_s)
+            self._ensure_correct_solution(expected_sln, timeout_s)
+
+        # 4. Verify the correct solution is actually loaded
+        if norm_expected:
+            actual = ""
+            try:
+                actual = os.path.normcase(
+                    os.path.abspath(str(self._dte.Solution.FullName))
+                )
+            except Exception:
+                pass
+            if actual and actual != norm_expected:
+                return OpenResult(
+                    success=False,
+                    solution_path=str(self._dte.Solution.FullName),
+                    message=(
+                        f"SOLUTION MISMATCH: Expected '{expected_sln}', "
+                        f"but XAE loaded '{self._dte.Solution.FullName}'. "
+                        f"Close TcXaeShell manually and retry."
+                    ),
+                )
+
+        # 5. SystemManager
         self._sys_man = self._get_system_manager()
         if not self._sys_man:
             return OpenResult(
@@ -344,9 +356,9 @@ class ComBridge:
                 message="SystemManager not reachable",
             )
 
-        # 5. PLC project in tree
+        # 6. PLC project in tree
         if not proj_name:
-            proj_name = "Tc3_EB_Influx"
+            proj_name = self._guess_proj_name()
         self._plc_proj_item = self._find_plc_project(proj_name)
         if not self._plc_proj_item:
             current = ""
@@ -370,6 +382,109 @@ class ComBridge:
             created_new_instance=self._created_new,
             message="Solution open, PLC project found",
         )
+
+    def _ensure_correct_solution(self, expected_sln: str, timeout_s: int):
+        """After Dispatch, ensure the correct solution is loaded.
+
+        XAE may have auto-loaded its MRU solution during startup.
+        If so, close it and open the requested one.
+        Safe here because we own this XAE instance (_created_new).
+        """
+        norm_expected = os.path.normcase(os.path.abspath(expected_sln))
+
+        try:
+            is_open = bool(self._dte.Solution.IsOpen)
+        except Exception:
+            is_open = False
+
+        if is_open:
+            current = os.path.normcase(
+                os.path.abspath(str(self._dte.Solution.FullName))
+            )
+            if current == norm_expected:
+                log.info("Correct solution already loaded by XAE")
+                self._wait_for_solution_open(timeout_s)
+                return
+            log.info("XAE auto-loaded '%s' instead of '%s' -- switching",
+                     current, norm_expected)
+            self._dte.Solution.Close(False)
+            self._wait_for_solution_closed()
+
+        self._dte.Solution.Open(expected_sln)
+        self._wait_for_solution_open(timeout_s)
+
+    def _wait_for_xae_idle(self, timeout_s: int):
+        """Wait for XAE to finish its startup / auto-load sequence."""
+        start = time.time()
+        log.info("Waiting for XAE startup to settle ...")
+
+        # Phase 1: wait until MainWindow is accessible
+        for _ in range(timeout_s * 2):
+            pythoncom.PumpWaitingMessages()
+            try:
+                _ = self._dte.MainWindow.Caption
+                break
+            except Exception:
+                time.sleep(0.5)
+
+        # Phase 2: let auto-load finish -- poll until Solution.IsOpen
+        # stabilizes (either True or stays False for 5 seconds)
+        stable_count = 0
+        last_open = None
+        while time.time() - start < min(timeout_s, 60):
+            pythoncom.PumpWaitingMessages()
+            try:
+                is_open = bool(self._dte.Solution.IsOpen)
+            except Exception:
+                is_open = False
+
+            if is_open == last_open:
+                stable_count += 1
+            else:
+                stable_count = 0
+            last_open = is_open
+
+            if is_open and stable_count >= 6:
+                log.info("XAE startup settled (solution open) after %.1fs",
+                         time.time() - start)
+                # Extra pump to let SystemManager register
+                for _ in range(4):
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(0.5)
+                return
+            if not is_open and stable_count >= 10:
+                log.info("XAE startup settled (no solution) after %.1fs",
+                         time.time() - start)
+                return
+            time.sleep(0.5)
+
+        elapsed = round(time.time() - start, 1)
+        log.info("XAE startup wait completed after %ss", elapsed)
+
+    def _wait_for_solution_closed(self, timeout_s: int = 30):
+        """Wait until Solution.IsOpen becomes False."""
+        start = time.time()
+        while time.time() - start < timeout_s:
+            pythoncom.PumpWaitingMessages()
+            try:
+                if not self._dte.Solution.IsOpen:
+                    log.info("Solution closed after %.1fs",
+                             time.time() - start)
+                    time.sleep(1)
+                    pythoncom.PumpWaitingMessages()
+                    return
+            except Exception:
+                return
+            time.sleep(0.5)
+        log.warning("Timeout (%ds) waiting for solution to close", timeout_s)
+
+    def _guess_proj_name(self) -> str:
+        """Derive PLC project name from the loaded solution file name."""
+        try:
+            sln_name = os.path.basename(str(self._dte.Solution.FullName))
+            return os.path.splitext(sln_name)[0]
+        except Exception:
+            return ""
 
     def _wait_for_solution_open(self, timeout_s: int):
         start = time.time()
@@ -806,6 +921,7 @@ class ComBridge:
         log.info("Reload: closing solution (no save) ...")
         try:
             self._dte.Solution.Close(False)
+            self._wait_for_solution_closed()
         except Exception as exc:
             return ReloadResult(
                 success=False,
@@ -849,22 +965,45 @@ class ComBridge:
 
     # -------- close --------
 
-    def _impl_close(self) -> CloseResult:
+    def _impl_close(self, force_quit: bool = False) -> CloseResult:
+        """Close only what WE opened.
+
+        - ``_created_new``: We started XAE → close solution + quit.
+        - ``_we_opened_solution``: We opened a solution into an
+          existing empty XAE → close the solution, leave XAE running.
+        - Otherwise: We just attached to the user's session →
+          detach, touch nothing.
+        - ``force_quit=True``: Always quit XAE (use with caution).
+        """
+        msg = ""
         try:
-            if self._created_new and self._dte:
-                self._dte.Solution.Close(False)
-                self._dte.Quit()
-            self._dte = None
-            self._sys_man = None
-            self._plc_proj_item = None
-            self._created_new = False
-            return CloseResult(success=True, message="XAE session closed")
+            if self._dte:
+                if self._created_new or force_quit:
+                    self._dte.Solution.Close(False)
+                    self._dte.Quit()
+                    msg = "XAE quit"
+                elif self._we_opened_solution:
+                    try:
+                        if self._dte.Solution.IsOpen:
+                            self._dte.Solution.Close(False)
+                    except Exception:
+                        pass
+                    msg = "Solution closed"
+                else:
+                    msg = "Detached (solution untouched)"
+
+            self._reset_state()
+            return CloseResult(success=True, message=msg or "Session released")
         except Exception as exc:
-            self._dte = None
-            self._sys_man = None
-            self._plc_proj_item = None
-            self._created_new = False
+            self._reset_state()
             return CloseResult(success=False, message=f"Close error: {exc}")
+
+    def _reset_state(self):
+        self._dte = None
+        self._sys_man = None
+        self._plc_proj_item = None
+        self._created_new = False
+        self._we_opened_solution = False
 
     # ==================== Helpers (STA thread only) ====================
 

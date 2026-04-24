@@ -122,18 +122,15 @@ def twincat_open(
     plcproj_path: str = "",
     proj_name: str = "",
     timeout_seconds: int = 180,
-    force_switch: bool = False,
 ) -> str:
     """Open a TwinCAT solution in XAE and locate the PLC project.
 
-    Attaches to a running instance when available, otherwise starts
-    a new TcXaeShell.  Searches the XAE project tree for the PLC
-    project node (needed by build / check / export tools).
-
-    If a DIFFERENT solution is already open, returns an error with
-    details.  Set force_switch=true to close the current solution
-    and open the correct one (use with caution -- unsaved changes
-    in the current solution will be lost!).
+    Behaviour:
+      - If XAE is running with the correct solution: reuse it.
+      - If XAE is running with a different solution: start a
+        separate XAE instance (the user's solution stays open).
+      - If XAE is running with no solution: open the requested one.
+      - If XAE is not running: start a new instance.
 
     Leave paths empty for auto-detection."""
 
@@ -151,7 +148,6 @@ def twincat_open(
             plcproj_path=plcproj_path or None,
             proj_name=proj_name or None,
             timeout_s=timeout_seconds,
-            force_switch=force_switch,
         ))
     except Exception as exc:
         return _json({"success": False, "error": str(exc)})
@@ -297,15 +293,29 @@ def twincat_export_library(
 # ================================================================
 
 @mcp.tool()
-def twincat_close() -> str:
-    """Close the TwinCAT solution and release COM resources.
+def twincat_close(force_quit: bool = False) -> str:
+    """Release the MCP session and clean up.
 
-    Only closes instances that were started by this MCP server.
-    Instances that were already running are left untouched."""
+    Only closes what WE opened:
+      - If MCP started a new XAE instance: quit it.
+      - If MCP opened a solution into an existing empty XAE: close
+        the solution, leave XAE running.
+      - If MCP just attached to the user's session: detach, touch
+        nothing.
 
+    The user's own XAE instances and solutions are never affected.
+
+    Set force_quit=true to always terminate XAE (use with caution).
+
+    Resets internal state so the next twincat_open starts fresh."""
+
+    global _bridge
     try:
-        return _json(_get_bridge().close())
+        result = _get_bridge().close(force_quit=force_quit)
+        _bridge = None
+        return _json(result)
     except Exception as exc:
+        _bridge = None
         return _json({"success": False, "error": str(exc)})
 
 
