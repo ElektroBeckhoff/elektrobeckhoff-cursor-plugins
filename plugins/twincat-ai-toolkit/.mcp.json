@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "mcp-twincat": {
+      "type": "stdio",
       "command": "python",
       "args": ["mcp-servers/mcp-twincat/server.py"],
+      "cwd": ".",
       "env": {}
     }
   }
