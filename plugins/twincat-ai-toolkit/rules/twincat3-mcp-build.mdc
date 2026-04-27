@@ -36,4 +36,13 @@ For the detailed workflow, use the `twincat3-validate` skill.
 - **No `twincat_reload` needed** after editing `.TcPOU` / `.TcDUT` / `.TcGVL` content — `twincat_check_all_objects` reads directly from disk.
 - **`twincat_reload` IS required** after structural changes to `.plcproj`, `.tsproj`, or `.sln` (added/removed files, version bumps, library references).
 - **Use `twincat_check_all_objects`** for library projects — it compiles every object. A normal `twincat_build` only compiles objects reachable from MAIN.
-- **`twincat_close` is always safe** — it never closes user solutions. If MCP started its own XAE instance, it quits that instance. If MCP attached to the user's XAE, it just detaches.
+
+## Do NOT call `twincat_close`
+
+The TwinCAT XAE solution should **stay open** between tool calls. Starting XAE and loading a solution takes significant time (~10-30 s), so keeping the session alive avoids unnecessary delays.
+
+**Never call `twincat_close`** unless:
+- TwinCAT XAE is completely unresponsive (COM calls time out or crash repeatedly).
+- The user explicitly asks to close or quit XAE.
+
+In normal workflows (validate, build, export, reload) simply leave the session open. The next `twincat_open` call will reuse the running instance automatically.

@@ -187,7 +187,15 @@ class ComBridge:
     _SAFE_DIALOG_PATTERNS = [
         "modified outside",   # EN: "has been modified outside of TwinCAT XAE"
         "außerhalb",          # DE: "außerhalb von TwinCAT XAE geändert"
+        "has changed",        # EN: alternate wording for file-change prompts
+        "reload",             # EN: generic reload prompt
+        "neu laden",          # DE: "Datei neu laden?"
+        "erneut laden",       # DE: alternate reload wording
+        "geändert",           # DE: broad "changed" pattern
     ]
+
+    _POLL_IDLE_S = 0.5
+    _POLL_BURST_S = 0.15
 
     def _dialog_dismiss_worker(self, stop_event: threading.Event):
         """Background worker that auto-dismisses known XAE modal dialogs.
@@ -196,6 +204,10 @@ class ComBridge:
         getting stuck on a modal dialog (e.g. "project modified outside
         of TwinCAT XAE -- reload?").  Only dismisses dialogs whose text
         matches a known safe pattern.
+
+        When multiple files are modified, XAE shows one dialog per file
+        in sequence.  After a successful dismiss the worker switches to
+        a fast burst-poll so that the whole queue is cleared quickly.
         """
         if not HAS_WIN32GUI:
             return
@@ -203,6 +215,7 @@ class ComBridge:
         IDYES = 6  # MessageBox button ID for "Yes"/"Ja"
 
         while not stop_event.is_set():
+            dismissed_any = False
             try:
                 dismissed = []
 
@@ -239,13 +252,14 @@ class ComBridge:
 
                 for hwnd in dismissed:
                     log.info(
-                        "Auto-dismissed TcXaeShell file-reload dialog "
-                        "(hwnd=%s)", hwnd,
+                        "Auto-dismissed TcXaeShell dialog (hwnd=%s)", hwnd,
                     )
+                dismissed_any = bool(dismissed)
             except Exception:
                 pass
 
-            stop_event.wait(1.0)
+            delay = self._POLL_BURST_S if dismissed_any else self._POLL_IDLE_S
+            stop_event.wait(delay)
 
     def _cleanup_com(self):
         if self._created_new and self._dte:

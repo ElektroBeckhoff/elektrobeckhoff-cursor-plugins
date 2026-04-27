@@ -20,7 +20,6 @@ Task Progress:
 - [ ] Step 4: Validate (0 errors required)
 - [ ] Step 5: Export library files
 - [ ] Step 6: Create changelog
-- [ ] Step 7: Close session
 ```
 
 ## Step 1: Determine Version Number
@@ -115,11 +114,9 @@ Key points:
 - Breaking changes: Use `> [!CAUTION]` blocks at the top
 - English only, professional tone
 
-## Step 7: Close Session
+## Session Handling
 
-```
-twincat_close()
-```
+Do **not** call `twincat_close()` after a release. Leave the XAE session open — it will be reused automatically. Only use `twincat_close()` if XAE is unresponsive or the user explicitly asks to close it.
 
 ## Release Checklist
 

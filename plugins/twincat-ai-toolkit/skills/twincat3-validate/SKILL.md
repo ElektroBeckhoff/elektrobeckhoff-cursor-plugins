@@ -18,7 +18,6 @@ Task Progress:
 - [ ] Step 3: Run twincat_check_all_objects
 - [ ] Step 4: Read results with twincat_get_errors
 - [ ] Step 5: Fix errors and re-check (loop)
-- [ ] Step 6: Close session with twincat_close
 ```
 
 ## Step 1: Find .plcproj Path
@@ -101,15 +100,11 @@ For each error:
 3. After fixing all errors: re-run `twincat_check_all_objects` + `twincat_get_errors`
 4. Repeat until `count: 0`
 
-## Step 6: Close Session
+## Session Handling
 
-```
-twincat_close()
-```
+Do **not** call `twincat_close()` after validation. Leave the XAE session open — it will be reused by subsequent `twincat_open` calls automatically. Starting XAE is slow (~10-30 s), so keeping it alive saves significant time.
 
-Safe to call at any time:
-- If MCP started a new XAE instance → quits it
-- If MCP attached to user's XAE → just detaches, nothing closed
+Only use `twincat_close()` if XAE is completely unresponsive or the user explicitly asks to close it.
 
 ## When to Use twincat_reload
 
