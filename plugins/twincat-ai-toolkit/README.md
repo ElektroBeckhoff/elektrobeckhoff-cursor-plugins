@@ -23,6 +23,7 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-xml-tcpou` | TcPOU XML structure, CDATA, GUIDs, methods, properties | — | `*.TcPOU` |
 | `twincat3-xml-tcdut` | TcDUT XML for STRUCT, ENUM, UNION | — | `*.TcDUT` |
 | `twincat3-xml-tcgvl` | TcGVL XML for global variable lists | — | `*.TcGVL` |
+| `twincat3-fup-safety` | Safety rules for FBD/FUP-to-ST migration (preview-first, backup, TODOs) | — | — |
 
 ## Skills
 
@@ -40,6 +41,7 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 | `twincat3-new-library` | Create a new TwinCAT3 PLC library from scratch |
 | `twincat3-infosys-lookup` | Look up Beckhoff InfoSys documentation via web search |
 | `twincat3-changelog` | Create and update changelogs for library releases |
+| `twincat3-fup-migrate` | FBD/FUP-to-ST migration workflow (analyze, preview, migrate) |
 
 ## Commands
 
@@ -63,6 +65,7 @@ Agent-executable commands for common tasks (`commands/`).
 | `twincat3-json-parse` | Add JSON parsing logic to existing FB with dynamic memory |
 | `twincat3-json-build` | Add JSON payload building logic to existing FB |
 | `twincat3-register-plcproj` | Register TcPOU, TcDUT, or TcGVL files in .plcproj |
+| `twincat3-fup-migrate` | Migrate TwinCAT FBD/FUP implementations to Structured Text |
 
 ## MCP Server
 
@@ -78,9 +81,10 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 | `twincat_reload` | Reload solution from disk (after .plcproj / .tsproj changes) |
 | `twincat_check_all_objects` | Compile ALL objects — primary validation for libraries |
 | `twincat_build` | Rebuild the TwinCAT solution |
-| `twincat_get_errors` | Read structured build/check output (errors, warnings, infos) |
+| `twincat_get_output_log` | Read structured build/check output (errors, warnings, infos) |
 | `twincat_export_library` | Export .library and .compiled-library, install to local repo |
 | `twincat_close` | Close solution and release COM resources |
+| `twincat_fup_migrate` | Convert FBD/FUP .TcPOU to Structured Text — no XAE needed |
 
 ### Requirements
 

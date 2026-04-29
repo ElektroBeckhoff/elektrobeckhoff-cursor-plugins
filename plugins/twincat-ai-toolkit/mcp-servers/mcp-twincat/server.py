@@ -1,19 +1,22 @@
 """
 TwinCAT MCP Server for Cursor IDE.
 
-Exposes TcXaeShell build automation as MCP tools that Cursor can call
-directly: status check, solution open, CheckAllObjects, build, error
-retrieval, library export, and close.
+Exposes TcXaeShell build automation and FBD/FUP-to-ST migration as MCP
+tools that Cursor can call directly: status check, solution open,
+CheckAllObjects, build, error retrieval, library export, close, and
+FBD-to-ST migration.
 
 Transport: stdio  (Cursor starts this process as a child)
 COM:       All TcXaeShell interaction runs on a dedicated STA thread
            managed by com_bridge.ComBridge.
 """
 
+import io
 import os
 import sys
 import json
 import logging
+import contextlib
 import xml.etree.ElementTree as ET
 from typing import Optional
 from dataclasses import asdict
@@ -28,6 +31,7 @@ log = logging.getLogger("twincat-mcp")
 
 from mcp.server.fastmcp import FastMCP
 from com_bridge import ComBridge, HAS_WIN32
+from twincat_fup_to_st_migrator import main as fup_main
 
 mcp = FastMCP("TwinCAT")
 
@@ -194,9 +198,11 @@ def twincat_check_all_objects() -> str:
     those referenced from MAIN.  A normal Build would miss errors
     in unreferenced POUs.
 
-    Standard workflow after editing PLC code:
-      1. twincat_check_all_objects   (validates everything)
-      2. twincat_get_errors          (read results)
+    Returns structured JSON with compile result AND all errors,
+    warnings, and infos -- no separate twincat_get_output_log call needed.
+
+    Response fields: success, method, error_count, errors[], warnings[],
+    infos[], message.
 
     No twincat_reload needed -- CheckAllObjects reads from disk.
     Requires twincat_open to have been called."""
@@ -217,7 +223,12 @@ def twincat_build(timeout_seconds: int = 180) -> str:
 
     Detects PLC compile success via _CompileInfo timestamps
     combined with SolutionBuild.LastBuildInfo.  Returns structured
-    success/failure info.
+    success/failure info AND all errors, warnings, and infos --
+    no separate twincat_get_output_log call needed.
+
+    Response fields: success, elapsed_seconds, build_state,
+    last_build_info, compile_info_updated, error_count, errors[],
+    warnings[], infos[], message.
 
     Requires twincat_open to have been called."""
 
@@ -228,12 +239,16 @@ def twincat_build(timeout_seconds: int = 180) -> str:
 
 
 # ================================================================
-#  twincat_get_errors
+#  twincat_get_output_log
 # ================================================================
 
 @mcp.tool()
-def twincat_get_errors() -> str:
+def twincat_get_output_log() -> str:
     """Read the full build / check output from XAE.
+
+    NOTE: twincat_build and twincat_check_all_objects now include
+    errors, warnings, and infos automatically.  This tool is only
+    needed if you want to re-read the output log independently.
 
     Returns structured JSON with three severity lists:
       - errors:   compile errors (with file_name, line, description)
@@ -241,14 +256,10 @@ def twincat_get_errors() -> str:
       - infos:    build messages (memory sizes, phases, summary)
 
     Each entry has: severity, description, file_name, line, project.
-    'count' is the number of ERRORS only.
-
-    Use after twincat_build or twincat_check_all_objects.
-    The infos list is useful for monitoring build progress,
-    memory usage, and debugging sample projects live."""
+    'count' is the number of ERRORS only."""
 
     try:
-        return _json(_get_bridge().get_errors())
+        return _json(_get_bridge().get_output_log())
     except Exception as exc:
         return _json({"count": 0, "errors": [], "warnings": [], "infos": [], "error": str(exc)})
 
@@ -317,6 +328,117 @@ def twincat_close(force_quit: bool = False) -> str:
     except Exception as exc:
         _bridge = None
         return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
+#  twincat_fup_migrate  (pure Python -- no COM / no XAE needed)
+# ================================================================
+
+@mcp.tool()
+def twincat_fup_migrate(
+    input: str,
+    output: str = "",
+    recursive: bool = False,
+    backup: bool = True,
+    replace: bool = False,
+    swap: bool = True,
+    dry_run: bool = False,
+    analyze_only: bool = False,
+    log: bool = True,
+    report: bool = True,
+    config: str = "",
+    encoding: str = "utf-8",
+    strict: bool = False,
+    preserve_ids: bool = True,
+    preserve_comments: bool = True,
+    mark_todo: bool = True,
+    fail_on_unclear: bool = True,
+    log_level: str = "INFO",
+) -> str:
+    """Convert TwinCAT 3 FBD/FUP .TcPOU implementations to Structured Text.
+
+    Parses NWL XML, generates functionally identical ST code, preserves
+    declarations, comments, attributes, and GUIDs.  Supports single
+    files and recursive folder processing with backup, swap, replace,
+    dry-run, and analyze-only modes.
+
+    ALWAYS start with dry_run=true or analyze_only=true before actual
+    migration.
+
+    Does NOT require a running TcXaeShell instance.  Works on any OS.
+
+    Args:
+        input: REQUIRED. Path to a .TcPOU/.TcGVL/.TcDUT file or folder.
+        output: Explicit output path. Empty = auto (swap/no-swap mode).
+        recursive: Recurse into subfolders when input is a directory.
+        backup: Create backup before modification (recommended).
+        replace: DESTRUCTIVE. Overwrite original in-place (GUIDs kept).
+        swap: DEFAULT. Backup original, write ST to original path.
+        dry_run: SAFE. Preview only, zero files written.
+        analyze_only: SAFE. Inspect FBD structure, no ST generation.
+        log: Write migration log file.
+        report: Write migration report file.
+        config: Path to JSON config file (CLI params take precedence).
+        encoding: File encoding (auto-fallback: utf-8-sig, latin-1).
+        strict: Abort on any TODO marker. Blocks replace without backup.
+        preserve_ids: Keep original GUIDs in replace mode.
+        preserve_comments: Keep FBD comments as ST header blocks.
+        mark_todo: Wrap untranslatable logic in TODO comment blocks.
+        fail_on_unclear: Warn on TODO markers (abort with strict=true).
+        log_level: Verbosity: DEBUG, INFO, WARNING, ERROR."""
+
+    argv = ["--input", input]
+
+    if output:
+        argv.extend(["--output", output])
+    if recursive:
+        argv.append("--recursive")
+    if not backup:
+        argv.append("--no-backup")
+    if replace:
+        argv.append("--replace")
+    if not swap:
+        argv.append("--no-swap")
+    if dry_run:
+        argv.append("--dry-run")
+    if analyze_only:
+        argv.append("--analyze-only")
+    if not log:
+        argv.append("--no-log")
+    if not report:
+        argv.append("--no-report")
+    if config:
+        argv.extend(["--config", config])
+    if encoding != "utf-8":
+        argv.extend(["--encoding", encoding])
+    if strict:
+        argv.append("--strict")
+    if not mark_todo:
+        argv.append("--no-mark-todo")
+    if not fail_on_unclear:
+        argv.append("--no-fail-on-unclear")
+    if log_level != "INFO":
+        argv.extend(["--log-level", log_level])
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            exit_code = fup_main(argv)
+    except SystemExit as e:
+        exit_code = int(e.code) if e.code is not None else 1
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "exit_code": 1,
+            "output": buf.getvalue(),
+            "error": str(exc),
+        })
+
+    return _json({
+        "success": exit_code == 0,
+        "exit_code": exit_code,
+        "output": buf.getvalue(),
+    })
 
 
 # ================================================================

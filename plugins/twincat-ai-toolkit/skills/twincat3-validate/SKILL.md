@@ -15,8 +15,8 @@ description: >-
 Task Progress:
 - [ ] Step 1: Find .plcproj path in workspace
 - [ ] Step 2: Open solution with twincat_open
-- [ ] Step 3: Run twincat_check_all_objects
-- [ ] Step 4: Read results with twincat_get_errors
+- [ ] Step 3: Run twincat_check_all_objects (returns errors automatically)
+- [ ] Step 4: Interpret results
 - [ ] Step 5: Fix errors and re-check (loop)
 ```
 
@@ -59,17 +59,16 @@ This is the **primary validation tool for library projects**. It compiles ALL ob
 
 `CheckAllObjects` re-reads files from disk. No `twincat_reload` needed after editing `.TcPOU` / `.TcDUT` / `.TcGVL` content.
 
-## Step 4: Read Errors
+**No separate `twincat_get_output_log()` call needed** — the response already includes all errors, warnings, and infos.
 
-```
-twincat_get_errors()
-```
+## Step 4: Interpret Results
 
-Returns structured JSON:
+The response contains:
 
 | Field | Content |
 |-------|---------|
-| `count` | Number of **errors** only |
+| `success` | `true` if 0 errors |
+| `error_count` | Number of **errors** only |
 | `errors[]` | Compile errors with `file_name`, `line`, `description` |
 | `warnings[]` | Compiler warnings with `file_name`, `line`, `description` |
 | `infos[]` | Build messages (memory sizes, compile summary) |
@@ -97,7 +96,7 @@ Returns structured JSON:
 For each error:
 1. Read the file at the reported path
 2. Fix the ST code at the reported line
-3. After fixing all errors: re-run `twincat_check_all_objects` + `twincat_get_errors`
+3. After fixing all errors: re-run `twincat_check_all_objects`
 4. Repeat until `count: 0`
 
 ## Session Handling

@@ -12,7 +12,7 @@ alwaysApply: true
 | `twincat_open` | Open solution in XAE, locate PLC project |
 | `twincat_check_all_objects` | Compile ALL objects (not just MAIN-referenced) |
 | `twincat_build` | Full rebuild of the solution |
-| `twincat_get_errors` | Read errors, warnings, infos from last compile |
+| `twincat_get_output_log` | Read errors, warnings, infos from last compile |
 | `twincat_reload` | Close + reopen solution (re-reads from disk) |
 | `twincat_export_library` | Export `.library` + `.compiled-library` |
 | `twincat_close` | Release session (never closes user solutions) |
@@ -25,7 +25,7 @@ After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:
 
 1. `twincat_open` (with explicit `plcproj_path`)
 2. `twincat_check_all_objects`
-3. `twincat_get_errors`
+3. `twincat_get_output_log`
 4. Fix errors → repeat from step 2
 
 For the detailed workflow, use the `twincat3-validate` skill.

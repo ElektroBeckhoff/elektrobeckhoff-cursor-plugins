@@ -60,6 +60,10 @@ class OpenResult:
 class CheckResult:
     success: bool
     method: str = ""
+    error_count: int = 0
+    errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    infos: list = field(default_factory=list)
     message: str = ""
 
 @dataclass
@@ -69,6 +73,10 @@ class BuildResult:
     build_state: int = 0
     last_build_info: int = 0
     compile_info_updated: bool = False
+    error_count: int = 0
+    errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    infos: list = field(default_factory=list)
     message: str = ""
 
 @dataclass
@@ -299,8 +307,8 @@ class ComBridge:
     def build(self, timeout_s: int = 180) -> BuildResult:
         return self._call_sta(self._impl_build, timeout_s, timeout=timeout_s + 60)
 
-    def get_errors(self) -> ErrorsResult:
-        return self._call_sta(self._impl_get_errors, timeout=30)
+    def get_output_log(self) -> ErrorsResult:
+        return self._call_sta(self._impl_get_output_log, timeout=30)
 
     def export_library(
         self, output_dir: str, title: str, version: str
@@ -704,11 +712,12 @@ class ComBridge:
         try:
             self._plc_proj_item.CheckAllObjects()
             self._wait_for_compile_complete(max_seconds=60)
-            return CheckResult(
+            result = CheckResult(
                 success=True,
                 method="ITcPlcIECProject",
                 message="CheckAllObjects completed via PLC project interface",
             )
+            return self._merge_errors_into_check(result)
         except Exception as exc1:
             log.warning("CheckAllObjects interface failed: %s", exc1)
 
@@ -718,11 +727,12 @@ class ComBridge:
         try:
             self._dte.ExecuteCommand("Build.Checkallobjects")
             self._wait_for_compile_complete(max_seconds=60)
-            return CheckResult(
+            result = CheckResult(
                 success=True,
                 method="DTE_Command",
                 message="CheckAllObjects completed via DTE command (fallback)",
             )
+            return self._merge_errors_into_check(result)
         except Exception as exc2:
             return CheckResult(
                 success=False,
@@ -732,6 +742,19 @@ class ComBridge:
                     f"Interface: {exc1} | DTE: {exc2}"
                 ),
             )
+
+    def _merge_errors_into_check(self, result: CheckResult) -> CheckResult:
+        err = self._impl_get_output_log()
+        result.error_count = err.count
+        result.errors = err.errors
+        result.warnings = err.warnings
+        result.infos = err.infos
+        if err.count > 0:
+            result.success = False
+            result.message += f" | {err.count} error(s)"
+        if err.warnings:
+            result.message += f" | {len(err.warnings)} warning(s)"
+        return result
 
     # -------- build --------
 
@@ -779,18 +802,25 @@ class ComBridge:
             ci_updated = self._newest_compile_info_mtime(ci_dir) > ci_before
 
         ok = ci_updated and last_info == 0
+
+        err = self._impl_get_output_log()
+
         return BuildResult(
             success=ok,
             elapsed_seconds=elapsed,
             build_state=bstate,
             last_build_info=last_info,
             compile_info_updated=ci_updated,
+            error_count=err.count,
+            errors=err.errors,
+            warnings=err.warnings,
+            infos=err.infos,
             message="Build OK" if ok else "Build FAILED",
         )
 
     # -------- errors --------
 
-    def _impl_get_errors(self) -> ErrorsResult:
+    def _impl_get_output_log(self) -> ErrorsResult:
         if not self._dte:
             return ErrorsResult(message="No XAE instance")
 

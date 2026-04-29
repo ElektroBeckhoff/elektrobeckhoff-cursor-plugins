@@ -85,8 +85,9 @@ The project must compile with **0 errors** before export:
 
 ```
 twincat_check_all_objects()
-twincat_get_errors()
 ```
+
+The response includes all errors, warnings, and infos automatically.
 
 If errors exist, fix them and re-check. Do NOT proceed to export with errors.
 
