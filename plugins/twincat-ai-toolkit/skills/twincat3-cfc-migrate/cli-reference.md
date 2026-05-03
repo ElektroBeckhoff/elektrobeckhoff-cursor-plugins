@@ -1,55 +1,55 @@
-# CLI Reference: FBD/FUP Migrator
+# CLI Reference: CFC Migrator
 
 The migrator can also be called directly from the command line.
 
 ## Synopsis
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input <PATH> [OPTIONS]
+python twincat_cfc_to_st_migrator.py --input <PATH> [OPTIONS]
 ```
 
 ## Commands by Use Case
 
-### Analyze FBD structure (read-only)
+### Analyze CFC structure (read-only)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --analyze-only
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --analyze-only
 ```
 
 ### Preview migration (read-only)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --dry-run
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --dry-run
 ```
 
 ### Migrate single file (safe output, default)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU"
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU"
 ```
 
 ### Migrate single file (swap mode)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --swap
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --swap
 ```
 
 ### Migrate folder recursively (safe output)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs" --recursive
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs" --recursive
 ```
 
 ### Force in-place overwrite (destructive)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --force
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --force
 ```
 
 ### Strict mode (safety-critical)
 
 ```bash
-python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs" --recursive --strict
+python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs" --recursive --strict
 ```
 
 ## Exit Codes
@@ -65,9 +65,9 @@ python twincat_fbd_to_st_migrator.py --input "C:\Project\POUs" --recursive --str
 |------|-------------|---------|
 | `*_ST_Generated.TcPOU` | Default mode (single file) | Generated ST file |
 | `*_st_generated_<ts>/` | Default mode (folder) | Mirror directory with ST files |
-| `*_fup_backup_*.TcPOU` | Swap mode (single file) | Original FBD file |
-| `*_fup_backup_<ts>/` | Swap mode (folder) | Mirror directory with originals |
-| `*_FUP_Backup_*.TcPOU` | Force mode | Original FBD file (backup) |
+| `*_cfc_backup_*.TcPOU` | Swap mode (single file) | Original CFC file |
+| `*_cfc_backup_<ts>/` | Swap mode (folder) | Mirror directory with originals |
+| `*_CFC_Backup_*.TcPOU` | Force mode | Original CFC file (backup) |
 | `*_migration_log_*.txt` | Unless `--no-log` | Detailed migration log |
 | `*_migration_report_*.txt` | Unless `--no-report` | Per-file summary and checklist |
 

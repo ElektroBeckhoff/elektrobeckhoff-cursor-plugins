@@ -1,8 +1,8 @@
 ---
-description: Safety rules for FBD/FUP-to-ST migration. Enforces preview-first workflow, backup requirements, and TODO reporting.
+description: Safety rules for CFC-to-ST migration. Enforces preview-first workflow, backup requirements, and TODO reporting.
 ---
 
-# TwinCAT FBD/FUP Migrator Safety
+# TwinCAT CFC Migrator Safety
 
 ## Rule 1: Never skip the preview step
 
@@ -15,7 +15,7 @@ Exception: If the user explicitly says "just run it" or "skip preview", proceed 
 
 ## Rule 2: Never use force without backup
 
-The combination `force=true` + `backup=false` permanently destroys the original FBD file with no recovery option. This combination MUST NOT be used unless:
+The combination `force=true` + `backup=false` permanently destroys the original CFC file with no recovery option. This combination MUST NOT be used unless:
 - The user explicitly requests it AND
 - The user confirms they have external version control (git, SVN, etc.)
 
@@ -35,11 +35,11 @@ If the migration produces TODO markers, always:
 1. Report the exact count
 2. List the first 5 TODO reasons
 3. Explain that these networks need manual review
-4. Suggest searching for `TODO [FBD Migration]` in the generated code
+4. Suggest searching for `TODO [CFC Migration]` in the generated code
 
-## Rule 6: Do not migrate non-NWL files
+## Rule 6: Do not migrate non-CFC files
 
-The tool automatically skips files that are already ST, CFC, SFC, or IL. Do not attempt to force migration of these files. Report them as skipped.
+The tool automatically skips files that are already ST, NWL/FBD, SFC, or IL. Do not attempt to force migration of these files. Report them as skipped.
 
 ## Rule 7: Verify after migration
 
@@ -48,6 +48,7 @@ After any non-dry-run migration, recommend:
 2. Run `twincat_check_all_objects`
 3. Review any compiler errors
 4. Search for TODO markers
+5. Verify execution order matches the original CFC behavior
 
 ## Rule 8: Respect strict for safety-critical projects
 
@@ -63,3 +64,7 @@ If the user mentions safety-critical, SIL, or PL requirements, always add `stric
 ## Rule 10: Encoding
 
 Default encoding is UTF-8. The tool auto-detects UTF-8-BOM and Latin-1 as fallbacks. Do not change `encoding` unless the user reports encoding errors.
+
+## Rule 11: CFC execution order awareness
+
+CFC execution order is derived from the XML serialization order. While this is reliable for most cases, complex feedback loops or implicit FB output accesses (e.g. `SR.Q1` read without explicit connection) may produce different execution semantics than the original CFC runtime. Always warn the user about this after migration.

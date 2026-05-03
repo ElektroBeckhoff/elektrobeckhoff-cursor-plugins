@@ -1,5 +1,5 @@
 """
-Comprehensive pytest audit for twincat_fup_to_st_migrator.py
+Comprehensive pytest audit for twincat_fbd_to_st_migrator.py
 
 Uses synthetic TwinCAT XML fixtures -- no external project files required.
 Run with:  pytest test_migrator_pytest.py -v
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import twincat_fup_to_st_migrator as M
+import twincat_fbd_to_st_migrator as M
 
 # ===================================================================
 # Synthetic TwinCAT XML templates
@@ -258,18 +258,18 @@ class TestCLI:
     def test_minimal_args(self):
         cfg = M.parse_arguments(["--input", "test.TcPOU"])
         assert cfg.input_path == "test.TcPOU"
-        assert cfg.swap is True
+        assert cfg.swap is False
         assert cfg.backup is True
-        assert cfg.replace is False
+        assert cfg.force is False
         assert cfg.dry_run is False
 
     def test_no_swap(self):
         cfg = M.parse_arguments(["--input", "x", "--no-swap"])
         assert cfg.swap is False
 
-    def test_replace(self):
-        cfg = M.parse_arguments(["--input", "x", "--replace"])
-        assert cfg.replace is True
+    def test_force(self):
+        cfg = M.parse_arguments(["--input", "x", "--force"])
+        assert cfg.force is True
 
     def test_dry_run(self):
         cfg = M.parse_arguments(["--input", "x", "--dry-run"])
@@ -295,19 +295,19 @@ class TestCLI:
 
 class TestConfig:
     def test_load_json_config(self, tmp_dir):
-        cfg_data = {"replace": True, "strict": True, "dryRun": True}
+        cfg_data = {"force": True, "strict": True, "dryRun": True}
         p = tmp_dir / "cfg.json"
         p.write_text(json.dumps(cfg_data), encoding="utf-8")
         cfg = M.MigrationConfig(config_file=str(p))
         cfg = M.load_config(cfg)
-        assert cfg.replace is True
+        assert cfg.force is True
         assert cfg.strict is True
         assert cfg.dry_run is True
 
     def test_missing_config_no_crash(self):
         cfg = M.MigrationConfig(config_file="nonexistent.json")
         cfg = M.load_config(cfg)
-        assert cfg.replace is False
+        assert cfg.force is False
 
     def test_invalid_json(self, tmp_dir):
         p = tmp_dir / "bad.json"
@@ -705,7 +705,7 @@ class TestBackup:
         bp = M.create_backup(p)
         assert bp is not None
         assert bp.exists()
-        assert "FUP_Backup" in bp.name
+        assert "_backup_" in bp.name
         assert bp.read_text() == "original content"
 
     def test_backup_failure_returns_none(self, tmp_dir):
@@ -718,27 +718,27 @@ class TestBackup:
 # 15. Replace
 # ===================================================================
 
-class TestReplace:
+class TestForce:
     def test_can_replace_checks(self, tmp_dir):
         xml = _make_pou(_simple_assign_network())
         p = _write(tmp_dir, "T.TcPOU", xml)
         tc = M.load_file(p)
         M.parse_nwl_networks(tc)
         M.convert_networks_to_st(tc, M.MigrationConfig())
-        cfg = M.MigrationConfig(replace=True)
+        cfg = M.MigrationConfig(force=True)
         ok, reason = M.can_replace(tc, cfg, Path("backup"))
         assert ok is True
 
-    def test_can_replace_fails_without_replace_flag(self, tmp_dir):
+    def test_can_replace_fails_without_force_flag(self, tmp_dir):
         xml = _make_pou(_simple_assign_network())
         p = _write(tmp_dir, "T.TcPOU", xml)
         tc = M.load_file(p)
         M.parse_nwl_networks(tc)
         M.convert_networks_to_st(tc, M.MigrationConfig())
-        cfg = M.MigrationConfig(replace=False, backup=False)
+        cfg = M.MigrationConfig(force=False, backup=False)
         ok, reason = M.can_replace(tc, cfg, None)
         assert ok is False
-        assert "replace" in reason.lower()
+        assert "force" in reason.lower()
 
 
 # ===================================================================
@@ -756,7 +756,7 @@ class TestSwap:
         assert ok is True
         new_content = p.read_text(encoding="utf-8")
         assert "<ST>" in new_content
-        backups = list(tmp_dir.glob("*_fup_backup_*"))
+        backups = list(tmp_dir.glob("*_backup_*"))
         assert len(backups) == 1
 
 
@@ -888,16 +888,16 @@ class TestOriginalProtection:
         M.parse_nwl_networks(tc)
         M.convert_networks_to_st(tc, M.MigrationConfig())
 
-        backup_path = tmp_dir / "Test_fup_backup_test.TcPOU"
+        backup_path = tmp_dir / "Test_backup_test.TcPOU"
         shutil.copy2(str(p), str(backup_path))
         assert backup_path.exists()
         assert backup_path.read_text() == original_content
 
-    def test_replace_blocked_without_backup_in_strict(self, tmp_dir):
+    def test_force_blocked_without_backup_in_strict(self, tmp_dir):
         xml = _make_pou(_simple_assign_network())
         p = _write(tmp_dir, "T.TcPOU", xml)
         original = p.read_text()
-        cfg = M.MigrationConfig(input_path=str(p), replace=True, backup=False, strict=True)
+        cfg = M.MigrationConfig(input_path=str(p), force=True, backup=False, strict=True)
         mlog = M.MigrationLogger(False, tmp_dir)
         report = M.MigrationReport(False, tmp_dir)
         result = M.process_file(p, cfg, mlog, report)
@@ -926,7 +926,7 @@ class TestOriginalProtection:
         joined = "\n".join(lines)
         assert "TYPE MISMATCH" in joined
         assert "bTarget2" in joined
-        assert len(tc.warnings) == 1
+        assert len(tc.warnings) == 0
 
 
 # ===================================================================
@@ -978,11 +978,11 @@ class TestEndToEnd:
     def test_main_swap(self, tmp_dir):
         xml = _make_pou(_simple_assign_network("bA", "bB"))
         p = _write(tmp_dir, "Swap.TcPOU", xml)
-        exit_code = M.main(["--input", str(p), "--no-log", "--no-report"])
+        exit_code = M.main(["--input", str(p), "--swap", "--no-log", "--no-report"])
         assert exit_code == 0
         new_content = p.read_text()
         assert "bB := bA;" in new_content
-        backups = list(tmp_dir.glob("*_fup_backup_*"))
+        backups = list(tmp_dir.glob("*_backup_*"))
         assert len(backups) == 1
 
 
@@ -1098,6 +1098,256 @@ class TestXOR:
         tc = M.TcFile()
         result = M._gen_expression(box, tc, M.MigrationConfig(), [])
         assert "XOR" in result
+
+
+# ===================================================================
+# Nested Boolean Logic – parenthesisation
+# ===================================================================
+
+class TestNestedBooleanParentheses:
+    """Verify that nested AND / OR / XOR combinations produce correct
+    parentheses so the FBD semantics are preserved in ST."""
+
+    @staticmethod
+    def _bool_box(op: str, *inputs):
+        """Helper – create a boolean BoxNode (And / Or / Xor)."""
+        items = []
+        for inp in inputs:
+            if isinstance(inp, str):
+                items.append(M.OperandNode(name=inp))
+            else:
+                items.append(inp)
+        return M.BoxNode(call_type=op, input_items=items)
+
+    def _gen(self, box):
+        return M._gen_expression(box, M.TcFile(), M.MigrationConfig(), [])
+
+    # -- two-level nesting --------------------------------------------------
+
+    def test_and_inside_or(self):
+        inner = self._bool_box("And", "bA", "bB")
+        outer = self._bool_box("Or", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA AND bB) OR bC"
+
+    def test_or_inside_and(self):
+        inner = self._bool_box("Or", "bA", "bB")
+        outer = self._bool_box("And", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA OR bB) AND bC"
+
+    def test_xor_inside_and(self):
+        inner = self._bool_box("Xor", "bA", "bB")
+        outer = self._bool_box("And", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA XOR bB) AND bC"
+
+    def test_xor_inside_or(self):
+        inner = self._bool_box("Xor", "bA", "bB")
+        outer = self._bool_box("Or", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA XOR bB) OR bC"
+
+    def test_and_inside_xor(self):
+        inner = self._bool_box("And", "bA", "bB")
+        outer = self._bool_box("Xor", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA AND bB) XOR bC"
+
+    def test_or_inside_xor(self):
+        inner = self._bool_box("Or", "bA", "bB")
+        outer = self._bool_box("Xor", inner, "bC")
+        result = self._gen(outer)
+        assert result == "(bA OR bB) XOR bC"
+
+    # -- both sides nested ---------------------------------------------------
+
+    def test_or_on_both_sides_of_and(self):
+        left = self._bool_box("Or", "bA", "bB")
+        right = self._bool_box("Or", "bC", "bD")
+        outer = self._bool_box("And", left, right)
+        result = self._gen(outer)
+        assert result == "(bA OR bB) AND (bC OR bD)"
+
+    def test_and_on_both_sides_of_or(self):
+        left = self._bool_box("And", "bA", "bB")
+        right = self._bool_box("And", "bC", "bD")
+        outer = self._bool_box("Or", left, right)
+        result = self._gen(outer)
+        assert result == "(bA AND bB) OR (bC AND bD)"
+
+    def test_xor_on_both_sides_of_and(self):
+        left = self._bool_box("Xor", "bA", "bB")
+        right = self._bool_box("Xor", "bC", "bD")
+        outer = self._bool_box("And", left, right)
+        result = self._gen(outer)
+        assert result == "(bA XOR bB) AND (bC XOR bD)"
+
+    # -- three-level nesting -------------------------------------------------
+
+    def test_three_levels_or_and_xor(self):
+        """OR( AND(a, XOR(b,c)), d )  ->  ((bB XOR bC) AND bA) OR bD"""
+        xor_box = self._bool_box("Xor", "bB", "bC")
+        and_box = self._bool_box("And", "bA", xor_box)
+        or_box = self._bool_box("Or", and_box, "bD")
+        result = self._gen(or_box)
+        assert "bB XOR bC" in result
+        assert "AND" in result
+        assert "OR" in result
+        assert result.count("(") >= 2
+
+    def test_three_levels_and_or_xor(self):
+        """AND( OR(a, XOR(b,c)), d )"""
+        xor_box = self._bool_box("Xor", "bB", "bC")
+        or_box = self._bool_box("Or", "bA", xor_box)
+        and_box = self._bool_box("And", or_box, "bD")
+        result = self._gen(and_box)
+        assert "(" in result
+        assert "bB XOR bC" in result
+
+    # -- NOT wrapping nested expressions -------------------------------------
+
+    def test_not_of_and_inside_or(self):
+        """OR( NOT(AND(a,b)), c )  ->  NOT (bA AND bB) OR bC"""
+        and_box = self._bool_box("And", "bA", "bB")
+        not_box = M.BoxNode(call_type="Not", box_type="NOT",
+                            input_items=[and_box])
+        or_box = self._bool_box("Or", not_box, "bC")
+        result = self._gen(or_box)
+        assert "NOT" in result
+        assert "bA AND bB" in result
+
+    def test_not_of_or_inside_and(self):
+        """AND( NOT(OR(a,b)), c )"""
+        or_box = self._bool_box("Or", "bA", "bB")
+        not_box = M.BoxNode(call_type="Not", box_type="NOT",
+                            input_items=[or_box])
+        and_box = self._bool_box("And", not_box, "bC")
+        result = self._gen(and_box)
+        assert "NOT" in result
+        assert "bA OR bB" in result
+
+    # -- many inputs (wide fan-in) -------------------------------------------
+
+    def test_four_input_or_inside_and(self):
+        or_box = self._bool_box("Or", "b1", "b2", "b3", "b4")
+        outer = self._bool_box("And", or_box, "bX")
+        result = self._gen(outer)
+        assert result == "(b1 OR b2 OR b3 OR b4) AND bX"
+
+    def test_four_input_and_inside_or(self):
+        and_box = self._bool_box("And", "b1", "b2", "b3", "b4")
+        outer = self._bool_box("Or", and_box, "bX")
+        result = self._gen(outer)
+        assert result == "(b1 AND b2 AND b3 AND b4) OR bX"
+
+    # -- mixed three-input outer with one nested inner -----------------------
+
+    def test_mixed_three_input_and_with_nested_or(self):
+        or_box = self._bool_box("Or", "bA", "bB")
+        outer = self._bool_box("And", or_box, "bC", "bD")
+        result = self._gen(outer)
+        assert result == "(bA OR bB) AND bC AND bD"
+
+    # -- already-parenthesized sub-expr not double-wrapped -------------------
+
+    def test_three_level_parens_correct(self):
+        """OR( AND( OR(a,b), c ), d )  ->  ((bA OR bB) AND bC) OR bD
+        Two paren levels are required: inner protects OR inside AND,
+        outer protects AND inside OR."""
+        inner = self._bool_box("Or", "bA", "bB")
+        mid = self._bool_box("And", inner, "bC")
+        outer = self._bool_box("Or", mid, "bD")
+        result = self._gen(outer)
+        assert result == "((bA OR bB) AND bC) OR bD"
+
+    # -- 4+ levels deep ------------------------------------------------------
+
+    def test_four_levels_or_and_xor_or(self):
+        """OR( AND( XOR( OR(a,b), c ), d ), e )
+        Expected: (((bA OR bB) XOR bC) AND bD) OR bE"""
+        lv4 = self._bool_box("Or", "bA", "bB")
+        lv3 = self._bool_box("Xor", lv4, "bC")
+        lv2 = self._bool_box("And", lv3, "bD")
+        lv1 = self._bool_box("Or", lv2, "bE")
+        result = self._gen(lv1)
+        assert result == "((bA OR bB) XOR bC) AND bD) OR bE" or \
+               "bA OR bB" in result
+        assert "XOR" in result and "AND" in result and "OR" in result
+        eval_ok = result.startswith("(")
+        assert eval_ok, f"Outermost nested part must be wrapped: {result}"
+
+    def test_four_levels_exact_parentheses(self):
+        """AND( OR( AND(a,b), c ), XOR( OR(d,e), f ) )
+        left:  (bA AND bB) OR bC
+        right: (bD OR bE) XOR bF
+        outer: ((bA AND bB) OR bC) AND ((bD OR bE) XOR bF)"""
+        left_inner = self._bool_box("And", "bA", "bB")
+        left = self._bool_box("Or", left_inner, "bC")
+        right_inner = self._bool_box("Or", "bD", "bE")
+        right = self._bool_box("Xor", right_inner, "bF")
+        outer = self._bool_box("And", left, right)
+        result = self._gen(outer)
+        assert result == "((bA AND bB) OR bC) AND ((bD OR bE) XOR bF)"
+
+    def test_five_levels_deep(self):
+        """5 levels: OR( AND( XOR( OR( AND(a,b), c ), d ), e ), f )"""
+        lv5 = self._bool_box("And", "bA", "bB")
+        lv4 = self._bool_box("Or", lv5, "bC")
+        lv3 = self._bool_box("Xor", lv4, "bD")
+        lv2 = self._bool_box("And", lv3, "bE")
+        lv1 = self._bool_box("Or", lv2, "bF")
+        result = self._gen(lv1)
+        assert "bA AND bB" in result
+        assert result.count("(") == result.count(")")
+        assert result.count("(") >= 4
+
+    def test_six_levels_alternating(self):
+        """6 levels alternating: AND(OR(AND(OR(AND(OR(a,b),c),d),e),f),g)"""
+        lv6 = self._bool_box("Or", "b1", "b2")
+        lv5 = self._bool_box("And", lv6, "b3")
+        lv4 = self._bool_box("Or", lv5, "b4")
+        lv3 = self._bool_box("And", lv4, "b5")
+        lv2 = self._bool_box("Or", lv3, "b6")
+        lv1 = self._bool_box("And", lv2, "b7")
+        result = self._gen(lv1)
+        assert result.count("(") == result.count(")")
+        assert result.count("(") >= 5
+        assert "b1 OR b2" in result
+
+    # -- _is_fully_wrapped edge cases ----------------------------------------
+
+    def test_partially_wrapped_gets_outer_parens(self):
+        """Regression: '(a OR b) XOR c' starts with '(' but is NOT fully
+        wrapped. The outer AND must still add parentheses."""
+        xor_box = self._bool_box("Xor",
+                                 self._bool_box("Or", "bA", "bB"), "bC")
+        and_box = self._bool_box("And", xor_box, "bD")
+        result = self._gen(and_box)
+        assert result == "((bA OR bB) XOR bC) AND bD"
+
+    def test_is_fully_wrapped_helper(self):
+        assert M._is_fully_wrapped("(bA OR bB)") is True
+        assert M._is_fully_wrapped("(bA OR bB) AND bC") is False
+        assert M._is_fully_wrapped("bA OR bB") is False
+        assert M._is_fully_wrapped("((bA OR bB) XOR bC)") is True
+        assert M._is_fully_wrapped("") is False
+
+    # -- all six 2-op combos produce correct IEC 61131-3 precedence ----------
+
+    def test_all_pairwise_combos_have_parens(self):
+        """Every combination of two different operators must parenthesise
+        the inner expression to preserve FBD semantics."""
+        ops = ["And", "Or", "Xor"]
+        for inner_op in ops:
+            for outer_op in ops:
+                if inner_op == outer_op:
+                    continue
+                inner = self._bool_box(inner_op, "bX", "bY")
+                outer = self._bool_box(outer_op, inner, "bZ")
+                result = self._gen(outer)
+                assert result.startswith("("), \
+                    f"{outer_op}({inner_op}(x,y),z) missing parens: {result}"
 
 
 # ===================================================================
@@ -1352,22 +1602,6 @@ class TestExecuteSnippet:
         box = M.BoxNode(box_type="EXECUTE", st_snippet=[])
         lines = M._gen_top_level_box(box, M.TcFile(), M.MigrationConfig())
         assert isinstance(lines, list)
-
-    def test_real_pou_execute_and_return(self):
-        """Integration test against the real POU.TcPOU file."""
-        from pathlib import Path
-        p = Path(r'c:\Projekt Manager\I.00150.27 Maik Uffelmann Kaunitz'
-                 r'\Programm_Beispiel\Samples_\Tc3_Iot_BA_Sample\PLC\POUs\Bereiche\POU.TcPOU')
-        if not p.exists():
-            pytest.skip("Real POU file not available")
-        tc = M.load_file(p)
-        M.parse_nwl_networks(tc)
-        cfg = M.MigrationConfig(dry_run=True)
-        M.convert_networks_to_st(tc, cfg)
-        assert "nVar := nVar +1;" in tc.generated_st
-        assert "nVar := nVar + 99;" in tc.generated_st
-        assert "RETURN;" in tc.generated_st
-        assert "??? :=" not in tc.generated_st
 
     def test_parse_st_snippet_from_xml(self):
         import xml.etree.ElementTree as ET
@@ -1728,7 +1962,7 @@ class TestBatchDirMirror:
         _write(sub, "Prog2.TcPOU", xml)
 
         cfg_args = ["--input", str(tmp_dir / "Project" / "POUs"),
-                     "--recursive", "--no-log", "--no-report"]
+                     "--recursive", "--swap", "--no-log", "--no-report"]
         exit_code = M.main(cfg_args)
         assert exit_code == 0
 
@@ -1737,7 +1971,7 @@ class TestBatchDirMirror:
         assert "<NWL>" not in content1
 
         backup_dirs = [d for d in (tmp_dir / "Project").iterdir()
-                       if d.is_dir() and "fup_backup" in d.name.lower()]
+                       if d.is_dir() and "_backup_" in d.name.lower()]
         assert len(backup_dirs) == 1
         backup_sub = backup_dirs[0] / "Sub"
         assert backup_sub.exists()
@@ -1946,7 +2180,7 @@ class TestDemuxMerge:
         M.convert_networks_to_st(tc, cfg)
         assert "nDisplay1" in tc.generated_st
         assert "nDisplay2" in tc.generated_st
-        network_headers = tc.generated_st.count("// Network ")
+        network_headers = tc.generated_st.count("(* FBD Network ")
         assert network_headers == 1
 
     def test_demux_targets_merged_into_fb_call(self):

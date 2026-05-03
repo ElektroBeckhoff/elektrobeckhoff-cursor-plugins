@@ -1,14 +1,14 @@
 """
 TwinCAT MCP Server for Cursor IDE.
 
-Exposes TcXaeShell build automation and FBD/FUP-to-ST migration as MCP
-tools that Cursor can call directly: status check, solution open,
-CheckAllObjects, build, error retrieval, library export, close, and
-FBD-to-ST migration.
+Exposes TcXaeShell build automation, FBD/FUP-to-ST migration, and
+CFC-to-ST migration as MCP tools that Cursor can call directly:
+status check, solution open, CheckAllObjects, build, error retrieval,
+library export, close, FBD-to-ST migration, and CFC-to-ST migration.
 
 Transport: stdio  (Cursor starts this process as a child)
 COM:       All TcXaeShell interaction runs on a dedicated STA thread
-           managed by com_bridge.ComBridge.
+           managed by twincat_com_bridge.ComBridge.
 """
 
 import io
@@ -30,8 +30,9 @@ logging.basicConfig(
 log = logging.getLogger("twincat-mcp")
 
 from mcp.server.fastmcp import FastMCP
-from com_bridge import ComBridge, HAS_WIN32
-from twincat_fup_to_st_migrator import main as fup_main
+from twincat_com_bridge import ComBridge, HAS_WIN32
+from twincat_fbd_to_st_migrator import main as fup_main
+from twincat_cfc_to_st_migrator import main as cfc_main
 
 mcp = FastMCP("TwinCAT")
 
@@ -340,8 +341,8 @@ def twincat_fup_migrate(
     output: str = "",
     recursive: bool = False,
     backup: bool = True,
-    replace: bool = False,
-    swap: bool = True,
+    force: bool = False,
+    swap: bool = False,
     dry_run: bool = False,
     analyze_only: bool = False,
     log: bool = True,
@@ -359,7 +360,7 @@ def twincat_fup_migrate(
 
     Parses NWL XML, generates functionally identical ST code, preserves
     declarations, comments, attributes, and GUIDs.  Supports single
-    files and recursive folder processing with backup, swap, replace,
+    files and recursive folder processing with backup, swap, force,
     dry-run, and analyze-only modes.
 
     ALWAYS start with dry_run=true or analyze_only=true before actual
@@ -369,19 +370,19 @@ def twincat_fup_migrate(
 
     Args:
         input: REQUIRED. Path to a .TcPOU/.TcGVL/.TcDUT file or folder.
-        output: Explicit output path. Empty = auto (swap/no-swap mode).
+        output: Explicit output path. Empty = auto (default/swap mode).
         recursive: Recurse into subfolders when input is a directory.
         backup: Create backup before modification (recommended).
-        replace: DESTRUCTIVE. Overwrite original in-place (GUIDs kept).
-        swap: DEFAULT. Backup original, write ST to original path.
+        force: DESTRUCTIVE. Overwrite original in-place (GUIDs kept).
+        swap: Backup original, write ST to original path.
         dry_run: SAFE. Preview only, zero files written.
         analyze_only: SAFE. Inspect FBD structure, no ST generation.
         log: Write migration log file.
         report: Write migration report file.
         config: Path to JSON config file (CLI params take precedence).
         encoding: File encoding (auto-fallback: utf-8-sig, latin-1).
-        strict: Abort on any TODO marker. Blocks replace without backup.
-        preserve_ids: Keep original GUIDs in replace mode.
+        strict: Abort on any TODO marker. Blocks force without backup.
+        preserve_ids: Keep original GUIDs in force mode.
         preserve_comments: Keep FBD comments as ST header blocks.
         mark_todo: Wrap untranslatable logic in TODO comment blocks.
         fail_on_unclear: Warn on TODO markers (abort with strict=true).
@@ -395,10 +396,10 @@ def twincat_fup_migrate(
         argv.append("--recursive")
     if not backup:
         argv.append("--no-backup")
-    if replace:
-        argv.append("--replace")
-    if not swap:
-        argv.append("--no-swap")
+    if force:
+        argv.append("--force")
+    if swap:
+        argv.append("--swap")
     if dry_run:
         argv.append("--dry-run")
     if analyze_only:
@@ -424,6 +425,118 @@ def twincat_fup_migrate(
     try:
         with contextlib.redirect_stdout(buf):
             exit_code = fup_main(argv)
+    except SystemExit as e:
+        exit_code = int(e.code) if e.code is not None else 1
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "exit_code": 1,
+            "output": buf.getvalue(),
+            "error": str(exc),
+        })
+
+    return _json({
+        "success": exit_code == 0,
+        "exit_code": exit_code,
+        "output": buf.getvalue(),
+    })
+
+
+# ================================================================
+#  twincat_cfc_migrate  (pure Python -- no COM / no XAE needed)
+# ================================================================
+
+@mcp.tool()
+def twincat_cfc_migrate(
+    input: str,
+    output: str = "",
+    recursive: bool = False,
+    backup: bool = True,
+    force: bool = False,
+    swap: bool = False,
+    dry_run: bool = False,
+    analyze_only: bool = False,
+    log: bool = True,
+    report: bool = True,
+    config: str = "",
+    encoding: str = "utf-8",
+    strict: bool = False,
+    preserve_ids: bool = True,
+    preserve_comments: bool = True,
+    mark_todo: bool = True,
+    fail_on_unclear: bool = True,
+    log_level: str = "INFO",
+) -> str:
+    """Convert TwinCAT 3 CFC .TcPOU implementations to Structured Text.
+
+    Parses CFC XML (CFCInputElement, CFCOutputElement, CFCBoxElement),
+    resolves execution order from XML serialization, generates
+    functionally equivalent ST code, preserves declarations, comments,
+    attributes, and GUIDs.  Supports single files and recursive folder
+    processing with backup, swap, force, dry-run, and analyze-only modes.
+
+    ALWAYS start with dry_run=true or analyze_only=true before actual
+    migration.
+
+    Does NOT require a running TcXaeShell instance.  Works on any OS.
+
+    Args:
+        input: REQUIRED. Path to a .TcPOU file or folder containing CFC POUs.
+        output: Explicit output path. Empty = auto (default/swap mode).
+        recursive: Recurse into subfolders when input is a directory.
+        backup: Create backup before modification (recommended).
+        force: DESTRUCTIVE. Overwrite original in-place (GUIDs kept).
+        swap: Backup original, write ST to original path.
+        dry_run: SAFE. Preview only, zero files written.
+        analyze_only: SAFE. Inspect CFC structure, no ST generation.
+        log: Write migration log file.
+        report: Write migration report file.
+        config: Path to JSON config file (CLI params take precedence).
+        encoding: File encoding (auto-fallback: utf-8-sig, latin-1).
+        strict: Abort on any TODO marker. Blocks force without backup.
+        preserve_ids: Keep original GUIDs in force mode.
+        preserve_comments: Keep CFC comments as ST header blocks.
+        mark_todo: Wrap untranslatable logic in TODO comment blocks.
+        fail_on_unclear: Warn on TODO markers (abort with strict=true).
+        log_level: Verbosity: DEBUG, INFO, WARNING, ERROR."""
+
+    argv = ["--input", input]
+
+    if output:
+        argv.extend(["--output", output])
+    if recursive:
+        argv.append("--recursive")
+    if not backup:
+        argv.append("--no-backup")
+    if force:
+        argv.append("--force")
+    if swap:
+        argv.append("--swap")
+    if dry_run:
+        argv.append("--dry-run")
+    if analyze_only:
+        argv.append("--analyze-only")
+    if not log:
+        argv.append("--no-log")
+    if not report:
+        argv.append("--no-report")
+    if config:
+        argv.extend(["--config", config])
+    if encoding != "utf-8":
+        argv.extend(["--encoding", encoding])
+    if strict:
+        argv.append("--strict")
+    if not mark_todo:
+        argv.append("--no-mark-todo")
+    if not fail_on_unclear:
+        argv.append("--no-fail-on-unclear")
+    if log_level != "INFO":
+        argv.extend(["--log-level", log_level])
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            exit_code = cfc_main(argv)
     except SystemExit as e:
         exit_code = int(e.code) if e.code is not None else 1
     except Exception as exc:

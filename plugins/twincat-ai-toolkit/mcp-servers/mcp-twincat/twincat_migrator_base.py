@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """
-Universal TwinCAT 3 FBD/FUP to Structured Text (ST) Migration Tool.
+Shared base module for TwinCAT 3 graphical-to-ST migration tools.
 
-Reads .TcPOU files containing FBD (NWL) implementations and converts them
-to functionally identical ST code while preserving declarations, comments,
-attributes, IDs and project structure.
-
-Usage:
-    python twincat_fup_to_st_migrator.py --input "path/to/File.TcPOU"
-    python twincat_fup_to_st_migrator.py --input "path/to/project" --recursive
-    python twincat_fup_to_st_migrator.py --input "File.TcPOU" --dry-run
-    python twincat_fup_to_st_migrator.py --input "File.TcPOU" --analyze-only
+Contains format-agnostic components used by both the FBD/NWL and CFC
+migrators: IR dataclasses, ST code generation, constants, XML helpers,
+validation, file I/O, backup, logging, reporting, and CLI argument parsing.
 """
 
 from __future__ import annotations
@@ -145,9 +139,10 @@ class MigrationConfig:
     output_path: str = ""
     recursive: bool = False
     backup: bool = True
-    replace: bool = False
-    swap: bool = True
+    force: bool = False
+    swap: bool = False
     batch_dir: Optional[str] = None
+    backup_dir: Optional[str] = None
     dry_run: bool = False
     analyze_only: bool = False
     log_enabled: bool = True
@@ -163,28 +158,95 @@ class MigrationConfig:
 
 
 # ---------------------------------------------------------------------------
+# Generated header
+# ---------------------------------------------------------------------------
+
+def calculate_accuracy(tc: 'TcFile') -> float:
+    """Calculate migration accuracy as percentage with two decimals (0.00-100.00).
+
+    Based on the ratio of problem items to total items (networks or
+    ST-networks).  Each TODO counts as 1 failed item, each warning
+    as 0.5.  Files with zero items default to 100 when clean,
+    0 when issues exist.
+    """
+    total = max(len(tc.networks), len(tc.st_networks), 1)
+    penalty = len(tc.todos) + len(tc.warnings) * 0.5
+    if penalty <= 0:
+        return 100.0
+    return max(0.0, round((total - penalty) / total * 100, 2))
+
+
+def build_generated_header(source_type: str, source_file: str,
+                           tool_name: str, version: str = "",
+                           accuracy: float = 100.0,
+                           type_mismatches: int = 0) -> str:
+    """Build a uniform warning header for auto-generated ST code.
+
+    Parameters
+    ----------
+    source_type : str
+        The original implementation language, e.g. ``"FBD/FUP"`` or ``"CFC"``.
+    source_file : str
+        Filename of the source ``.TcPOU`` being migrated.
+    tool_name : str
+        Name of the migration tool, e.g. ``"twincat_fbd_to_st_migrator"``
+        or ``"twincat_cfc_to_st_migrator"``.
+    version : str
+        Script version string, e.g. ``"1.0.0"``.
+    accuracy : float
+        Migration accuracy percentage (0.00-100.00).
+    type_mismatches : int
+        Number of TYPE MISMATCH occurrences in the generated code.
+    """
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ver_line = f"   Version:          {version}\n" if version else ""
+    acc_line = f"   Accuracy:         {accuracy:.2f} %\n"
+    if type_mismatches > 0:
+        tm_line = f"   Type Mismatches:  {type_mismatches} !\n"
+    else:
+        tm_line = ""
+    return (
+        f"(* {'=' * 76}\n"
+        f"   AUTO-GENERATED from {source_type} by {tool_name}\n"
+        f"   Source:           {source_file}\n"
+        f"{ver_line}"
+        f"   Date:             {ts}\n"
+        f"{acc_line}"
+        f"{tm_line}"
+        f"\n"
+        f"   WARNING: This code was automatically converted from a "
+        f"{source_type} implementation.\n"
+        f"   Statement order is derived from the execution order stored "
+        f"in the XML.\n"
+        f"   MANUAL VERIFICATION REQUIRED before productive use.\n"
+        f"   {'=' * 76} *)\n"
+        f"\n"
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
     p = argparse.ArgumentParser(
         description=(
-            "Universal TwinCAT 3 FBD/FUP to Structured Text (ST) migration tool.\n"
+            "TwinCAT 3 graphical-to-ST migration tool (FBD/FUP + CFC).\n"
             "\n"
-            "Converts .TcPOU files containing FBD (NWL) implementations to functionally\n"
-            "identical ST code. Preserves declarations, comments, attributes, IDs and\n"
-            "project structure.\n"
+            "Converts .TcPOU files containing FBD/NWL or CFC implementations to\n"
+            "functionally identical Structured Text (ST) code. Preserves declarations,\n"
+            "comments, attributes, IDs and project structure.\n"
             "\n"
             "SAFETY MODES (no files modified):\n"
             "  --dry-run        Parse, convert, preview result. Zero file writes.\n"
-            "  --analyze-only   Parse and inspect FBD structure. No ST generation.\n"
+            "  --analyze-only   Parse and inspect structure. No ST generation.\n"
             "\n"
             "OUTPUT MODES (files created/modified):\n"
-            "  Default (swap):  Backup original -> _fup_backup_*, write ST to original path.\n"
-            "  --no-swap:       Write ST to new *_ST_Generated file. Original untouched.\n"
-            "  --replace:       Overwrite original in-place (backup created unless --no-backup).\n"
+            "  Default:         Write ST to new *_ST_Generated file. Original untouched.\n"
+            "  --swap:          Backup original, write ST to original path.\n"
+            "  --force / -f:    Overwrite original in-place (backup created unless --no-backup).\n"
             "\n"
-            "PRIORITY: --dry-run > --analyze-only > --replace > --swap > --no-swap"
+            "PRIORITY: --dry-run > --analyze-only > --force > --swap > default"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -196,9 +258,10 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
                          "GVL and DUT files are loaded but skipped during migration (no implementation)."))
 
     p.add_argument("--output", default="",
-                   help=("Optional. Explicit output path for the generated ST file. "
-                         "If a directory, the output file is named <stem>_ST<suffix> inside it. "
-                         "If a file path, that exact path is used. "
+                   help=("Optional. Explicit output path. "
+                         "Single file: if a directory, output is <dir>/<stem>_ST<suffix>; "
+                         "if a file path, that exact path is used. "
+                         "Folder input: the directory structure is mirrored into the given path. "
                          "When set, --swap is ignored and the original file is never modified. "
                          "When empty (default), output location is determined by --swap/--no-swap. "
                          "Default: '' (empty, auto-determined)."))
@@ -210,52 +273,52 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
 
     p.add_argument("--backup", action="store_true", default=True,
                    help=("Create a backup copy of the original file before any modification. "
-                         "In --replace mode: backup is named <stem>_FUP_Backup_<timestamp><suffix> "
-                         "in the same directory. In --swap mode: backup goes to a timestamped "
-                         "mirror directory for folder input, or <stem>_fup_backup_<timestamp> for "
-                         "single files. Backup is ALWAYS recommended. Default: true."))
+                         "In --force mode: backup is named <stem>_backup_<timestamp><suffix> "
+                         "for single files, or mirrored into a <folder>_backup_<timestamp>/ "
+                         "directory for folder input. "
+                         "Backup is ALWAYS recommended. Default: true."))
 
     p.add_argument("--no-backup", dest="backup", action="store_false",
-                   help=("DANGEROUS. Disable backup creation. If combined with --replace, the "
-                         "original FBD file is overwritten with NO recovery option. In --strict "
-                         "mode, --replace without backup is blocked entirely. "
+                   help=("DANGEROUS. Disable backup creation. If combined with --force, the "
+                         "original file is overwritten with NO recovery option. In --strict "
+                         "mode, --force without backup is blocked entirely. "
                          "Only use this if you have external version control (e.g. git)."))
 
-    p.add_argument("--replace", action="store_true",
+    p.add_argument("--force", "-f", action="store_true",
                    help=("DESTRUCTIVE. Overwrite the original .TcPOU file in-place with the "
-                         "generated ST version. The original FBD/NWL implementation is permanently "
+                         "generated ST version. The original implementation is permanently "
                          "replaced. GUIDs are preserved (not regenerated). A backup is created "
                          "unless --no-backup is set. Takes priority over --swap. "
                          "Use only when you are certain the migration is correct. Default: false."))
 
-    p.add_argument("--swap", action="store_true", default=True,
-                   help=("DEFAULT MODE. Renames/copies the original FBD file to a backup location, "
+    p.add_argument("--swap", action="store_true", default=False,
+                   help=("Renames/copies the original file to a backup location, "
                          "then writes the new ST version to the ORIGINAL file path. This ensures "
                          "the TwinCAT project automatically references the new ST file without "
                          "manual re-linking. GUIDs are regenerated (new file identity). "
-                         "For single files: backup is <stem>_fup_backup_<timestamp><suffix>. "
-                         "For folders: backups go into a <folder>_fup_backup_<timestamp>/ mirror. "
-                         "Ignored when --replace or --output is set. Default: true."))
+                         "For single files: backup is <stem>_backup_<timestamp><suffix>. "
+                         "For folders: backups go into a <folder>_backup_<timestamp>/ mirror. "
+                         "Ignored when --force or --output is set. Default: false."))
 
     p.add_argument("--no-swap", dest="swap", action="store_false",
-                   help=("Write the generated ST file to a NEW path instead of the original. "
-                         "The original file is NEVER touched. "
+                   help=("DEFAULT MODE. Write the generated ST file to a NEW path instead of the "
+                         "original. The original file is NEVER touched. "
                          "For single files: output is <stem>_ST_Generated<suffix>. "
                          "For folders: output goes into <folder>_st_generated_<timestamp>/. "
                          "Safe for testing migration quality before committing changes."))
 
     p.add_argument("--dry-run", action="store_true",
-                   help=("SAFE READ-ONLY. Parses FBD, generates ST in memory, prints a preview "
+                   help=("SAFE READ-ONLY. Parses source, generates ST in memory, prints a preview "
                          "of the first 50 lines, and reports statistics. ZERO files are written "
                          "to disk (no output, no backup, no log, no report files). "
                          "Use this to preview migration results before actual execution. "
                          "Takes highest priority -- overrides all other output modes. Default: false."))
 
     p.add_argument("--analyze-only", action="store_true",
-                   help=("SAFE READ-ONLY. Parses the FBD/NWL structure and prints a detailed "
-                         "analysis (network count, items per network, box types, actions). "
+                   help=("SAFE READ-ONLY. Parses the source structure and prints a detailed "
+                         "analysis (network/element count, items, box types, actions). "
                          "Does NOT generate any ST code. ZERO files are written to disk. "
-                         "Use this to inspect FBD complexity before deciding on migration. "
+                         "Use this to inspect complexity before deciding on migration. "
                          "Default: false."))
 
     p.add_argument("--log", action="store_true", default=True,
@@ -276,7 +339,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
 
     p.add_argument("--config", default="",
                    help=("Optional. Path to a JSON configuration file. Keys in the JSON override "
-                         "CLI defaults. Supported keys: backup, replace, swap, recursive, dryRun, "
+                         "CLI defaults. Supported keys: backup, force, swap, recursive, dryRun, "
                          "strict, createLog, createReport, preserveComments, preserveIds, "
                          "markUnclearLogicWithTodo, failOnUnclearLogic, encoding, logLevel. "
                          "CLI flags always take final precedence over config file values. "
@@ -289,12 +352,12 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
 
     p.add_argument("--strict", action="store_true",
                    help=("Abort migration for a file if ANY unclear logic (TODO marker) is "
-                         "detected. In strict mode, --replace without --backup is also blocked. "
+                         "detected. In strict mode, --force without --backup is also blocked. "
                          "Use this for safety-critical projects where incomplete migration must "
                          "not be deployed. Default: false."))
 
     p.add_argument("--preserve-ids", action="store_true", default=True,
-                   help=("Preserve original XML element IDs in the output when using --replace. "
+                   help=("Preserve original XML element IDs in the output when using --force. "
                          "When creating new files (--swap or --no-swap), GUIDs are always "
                          "regenerated regardless of this flag. Default: true."))
 
@@ -333,7 +396,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
         output_path=args.output,
         recursive=args.recursive,
         backup=args.backup,
-        replace=args.replace,
+        force=args.force,
         swap=args.swap,
         dry_run=args.dry_run,
         analyze_only=args.analyze_only,
@@ -362,7 +425,7 @@ def load_config(cfg: MigrationConfig) -> MigrationConfig:
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
         mapping = {
-            "backup": "backup", "replace": "replace", "swap": "swap", "recursive": "recursive",
+            "backup": "backup", "force": "force", "swap": "swap", "recursive": "recursive",
             "dryRun": "dry_run", "strict": "strict", "createLog": "log_enabled",
             "createReport": "report_enabled", "preserveComments": "preserve_comments",
             "preserveIds": "preserve_ids", "markUnclearLogicWithTodo": "mark_todo",
@@ -485,325 +548,6 @@ def _detect_impl_type(impl_element) -> str:
 
 
 # ---------------------------------------------------------------------------
-# NWL parser
-# ---------------------------------------------------------------------------
-
-def parse_nwl_networks(tc: TcFile) -> None:
-    pou = tc.xml_root.find("POU")
-    if pou is None:
-        return
-    impl = pou.find("Implementation")
-    if impl is None:
-        return
-    nwl = impl.find("NWL")
-    if nwl is None:
-        return
-
-    tc.networks = _parse_network_list(nwl)
-
-    for action in tc.actions:
-        if action.impl_type == "NWL" and action.xml_element is not None:
-            action_impl = action.xml_element.find("Implementation")
-            if action_impl is not None:
-                action_nwl = action_impl.find("NWL")
-                if action_nwl is not None:
-                    action.networks = _parse_network_list(action_nwl)
-
-
-def _parse_network_list(nwl_element) -> List[NwlNetwork]:
-    networks: List[NwlNetwork] = []
-    archive = nwl_element.find("XmlArchive")
-    if archive is None:
-        return networks
-    data = archive.find("Data")
-    if data is None:
-        return networks
-
-    nwl_obj = None
-    for o in data.findall("o"):
-        if o.get("t") == "NWLImplementationObject":
-            nwl_obj = o
-            break
-    if nwl_obj is None:
-        for o in data.findall("o"):
-            nwl_obj = o
-            break
-    if nwl_obj is None:
-        return networks
-
-    network_list = None
-    for l2 in nwl_obj.findall("l2"):
-        if l2.get("n") == "NetworkList":
-            network_list = l2
-            break
-    if network_list is None:
-        return networks
-
-    for idx, net_o in enumerate(network_list.findall("o")):
-        nw = NwlNetwork(index=idx)
-        nw.comment = _get_v_str(net_o, "Comment")
-        nw.title = _get_v_str(net_o, "Title")
-        nw.label = _get_v_str(net_o, "Label")
-        nw.out_commented = _get_v_str(net_o, "OutCommented").lower() == "true"
-        nw.xml_id = _get_v_str(net_o, "Id")
-
-        items_el = None
-        for l2 in net_o.findall("l2"):
-            if l2.get("n") == "NetworkItems":
-                items_el = l2
-                break
-        if items_el is not None:
-            cet = items_el.get("cet", "")
-            for item_o in items_el.findall("o"):
-                t_attr = item_o.get("t", "")
-                if t_attr == "BoxTreeDemux":
-                    nw.items.append(_parse_demux(item_o))
-                elif cet == "BoxTreeAssign" or _has_rvalue(item_o):
-                    nw.items.append(_parse_assign(item_o))
-                else:
-                    nw.items.append(_parse_box(item_o))
-        networks.append(nw)
-
-    return networks
-
-
-def _has_rvalue(element) -> bool:
-    for child in element:
-        if child.get("n") == "RValue":
-            return True
-    return False
-
-
-def _parse_box(element) -> BoxNode:
-    box = BoxNode()
-    box.box_type = _get_v_str(element, "BoxType")
-    box.xml_id = _get_v_str(element, "Id")
-
-    call_type_el = _find_v(element, "CallType")
-    if call_type_el is not None:
-        box.call_type = (call_type_el.text or "").strip()
-
-    box.en = _get_v_str(element, "EN").lower() == "true"
-    box.eno = _get_v_str(element, "ENO").lower() == "true"
-
-    inst_el = _find_child_by_name(element, "Instance")
-    if inst_el is not None:
-        box.instance = _parse_operand(inst_el)
-
-    box.output_items = _parse_output_items(element)
-    box.input_items = _parse_input_items(element)
-    box.input_flags = _parse_input_flags(element)
-
-    ip = _find_child_by_name(element, "InputParam")
-    if ip is not None:
-        box.input_param_names = _parse_param_list_names(ip)
-        box.input_param_types = _parse_param_list_types(ip)
-
-    op = _find_child_by_name(element, "OutputParam")
-    if op is not None:
-        box.output_param_names = _parse_param_list_names(op)
-        box.output_param_types = _parse_param_list_types(op)
-
-    snippet_el = _find_child_by_name(element, "STSnippet")
-    if snippet_el is not None:
-        box.st_snippet = _parse_st_snippet(snippet_el)
-
-    return box
-
-
-def _parse_assign(element) -> AssignNode:
-    assign = AssignNode()
-    assign.xml_id = _get_v_str(element, "Id")
-    assign.outputs = _parse_output_items(element)
-    flags_el = _find_child_by_name(element, "Flags")
-    if flags_el is not None:
-        try:
-            assign.flags = int(_get_v_str(flags_el, "Flags") or "0")
-        except ValueError:
-            assign.flags = 0
-
-    rv = _find_child_by_name(element, "RValue")
-    if rv is not None:
-        t_attr = rv.get("t", "")
-        if "BoxTreeDemux" in t_attr:
-            assign.rvalue = _parse_demux(rv)
-        elif "BoxTreeAssign" in t_attr:
-            assign.rvalue = _parse_assign(rv)
-        elif ("BoxTreeOperand" in t_attr
-              or (rv.tag == "o"
-                  and _find_child_by_name(rv, "Operand") is not None
-                  and _find_v(rv, "BoxType") is None
-                  and "BoxTreeAssign" not in t_attr)):
-            assign.rvalue = _parse_operand(rv)
-        else:
-            assign.rvalue = _parse_box(rv)
-
-    return assign
-
-
-def _parse_demux(element) -> DemuxNode:
-    demux = DemuxNode()
-    demux.xml_id = _get_v_str(element, "Id")
-    input_el = _find_child_by_name(element, "Input")
-    if input_el is not None and input_el.tag == "o":
-        demux.input = _parse_operand(input_el)
-    return demux
-
-
-def _parse_operand(element) -> OperandNode:
-    op = OperandNode()
-
-    inner = _find_child_by_name(element, "Operand")
-    if inner is not None:
-        target = inner
-    else:
-        target = element
-
-    raw = _get_v_str(target, "Operand")
-    op.name = _strip_quotes(raw)
-    op.type_str = _get_v_str(target, "Type")
-    op.is_lvalue = _get_v_str(target, "LValue").lower() == "true"
-    op.is_instance = _get_v_str(target, "IsInstance").lower() == "true"
-    op.xml_id = _get_v_str(target, "Id")
-    op.comment = _get_v_str(target, "Comment")
-    for src in (target, element):
-        flags_el = _find_child_by_name(src, "Flags")
-        if flags_el is not None:
-            try:
-                op.flags = int(_get_v_str(flags_el, "Flags") or "0")
-            except ValueError:
-                op.flags = 0
-            break
-
-    if not op.name:
-        raw2 = _get_v_str(element, "Operand")
-        if raw2:
-            op.name = _strip_quotes(raw2)
-        op.type_str = op.type_str or _get_v_str(element, "Type")
-        op.is_lvalue = op.is_lvalue or _get_v_str(element, "LValue").lower() == "true"
-        op.is_instance = op.is_instance or _get_v_str(element, "IsInstance").lower() == "true"
-        op.xml_id = op.xml_id or _get_v_str(element, "Id")
-
-    return op
-
-
-def _parse_output_items(element) -> List[OperandNode]:
-    results = []
-    oi = _find_child_by_name(element, "OutputItems")
-    if oi is None:
-        return results
-
-    inner_l2 = None
-    for l2 in oi.findall("l2"):
-        if l2.get("n") == "OutputItems":
-            inner_l2 = l2
-            break
-    if inner_l2 is None:
-        inner_l2 = oi
-
-    for child in inner_l2:
-        if child.tag == "n":
-            results.append(OperandNode(is_null=True))
-        elif child.tag == "o":
-            results.append(_parse_operand(child))
-    return results
-
-
-def _is_assign_element(element) -> bool:
-    t = element.get("t", "")
-    if "BoxTreeAssign" in t:
-        return True
-    if _has_rvalue(element) and _find_child_by_name(element, "OutputItems") is not None:
-        if not _is_box_element(element):
-            return True
-    return False
-
-
-def _parse_input_items(element) -> List[Union[BoxNode, OperandNode, AssignNode]]:
-    results = []
-    for l2 in element.findall("l2"):
-        if l2.get("n") == "InputItems":
-            for child in l2:
-                if child.tag == "n":
-                    results.append(OperandNode())
-                elif child.tag == "o":
-                    if _is_assign_element(child):
-                        results.append(_parse_assign(child))
-                    elif _is_box_element(child):
-                        results.append(_parse_box(child))
-                    else:
-                        results.append(_parse_operand(child))
-            break
-    return results
-
-
-def _parse_input_flags(element) -> List[int]:
-    flags = []
-    for l2 in element.findall("l2"):
-        if l2.get("n") == "InputFlags":
-            for child in l2:
-                if child.tag == "o":
-                    val = _get_v_str(child, "Flags")
-                    try:
-                        flags.append(int(val))
-                    except (ValueError, TypeError):
-                        flags.append(0)
-                elif child.tag == "n":
-                    flags.append(0)
-            break
-    return flags
-
-
-def _parse_param_list_names(element) -> List[str]:
-    names = []
-    for l2 in element.findall("l2"):
-        if l2.get("n") == "Names":
-            for v in l2.findall("v"):
-                names.append((v.text or "").strip())
-            break
-    return names
-
-
-def _parse_param_list_types(element) -> List[str]:
-    types = []
-    for l2 in element.findall("l2"):
-        if l2.get("n") == "Types":
-            for v in l2.findall("v"):
-                types.append((v.text or "").strip())
-            break
-    return types
-
-
-def _parse_st_snippet(element) -> List[str]:
-    """Extract ST code lines from an STSnippet element (Execute box)."""
-    lines = []
-    for inner in element.iter("o"):
-        if inner.get("t") == "STImplementationObject":
-            for doc in inner.iter("o"):
-                if doc.get("t") == "TextDocument":
-                    for text_line in doc.iter("o"):
-                        text_v = _get_v_str(text_line, "Text")
-                        if text_v:
-                            lines.append(text_v)
-            break
-    return lines
-
-
-def _is_box_element(element) -> bool:
-    for child in element:
-        if child.tag == "v" and child.get("n") == "BoxType":
-            return True
-    t = element.get("t", "")
-    if "BoxTreeBox" in t:
-        return True
-    cet_hints = ["BoxTreeBox"]
-    for child in element:
-        if child.tag == "l2" and child.get("n") == "InputItems":
-            return True
-    return False
-
-
-# ---------------------------------------------------------------------------
 # XML helpers
 # ---------------------------------------------------------------------------
 
@@ -856,7 +600,7 @@ IEC_FUNCTIONS = {
     "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
     "TRUNC", "SIZEOF", "ADR", "BITADR", "INDEXOF",
 }
-FB_CALL_TYPES = {"FunctionBlock", "Function"}
+FB_CALL_TYPES = {"FunctionBlock", "Function", "Program", "Method"}
 
 
 def _clean_bool_expr(expr: str) -> str:
@@ -972,23 +716,14 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
             header_parts.append(nw.comment)
 
         nw_label = f"Network {nw.index + 1}"
-        if header_parts:
-            stn.comment_header = (
-                f"// {'=' * 60}\n"
-                f"// {nw_label}: {header_parts[0]}\n"
-            )
-            for part in header_parts[1:]:
-                stn.comment_header += f"// {part}\n"
-            stn.comment_header += f"// {'=' * 60}"
+        comment_text = ": ".join(header_parts) if header_parts else ""
+        oc_suffix = " [OutCommented]" if nw.out_commented else ""
+        if comment_text:
+            stn.comment_header = f"(* FBD {nw_label}: {comment_text}{oc_suffix} *)"
         else:
-            stn.comment_header = (
-                f"// {'=' * 60}\n"
-                f"// {nw_label}\n"
-                f"// {'=' * 60}"
-            )
+            stn.comment_header = f"(* FBD {nw_label}{oc_suffix} *)"
 
         if nw.out_commented:
-            stn.comment_header += "\n// [OutCommented in original FBD]"
             commented_lines = _generate_network_code(nw, tc, cfg, demux_merge_map)
             wrapped = ["(* OutCommented network:"]
             for line in commented_lines:
@@ -1153,7 +888,7 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
             fb_out_names[0] if fb_out_names else "")
         negated = bool(assign.flags & 1)
 
-        inst_name = (box.box_type if box.call_type == "Function"
+        inst_name = (box.box_type if box.call_type in ("Function", "Program", "Method")
                      else (box.instance.name if box.instance else ""))
 
         param_targets: Dict[str, List[Tuple[str, str, bool]]] = {}
@@ -1185,21 +920,17 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
             if len(targets) == 1 and not targets[0][2]:
                 target, t_type, _ = targets[0]
                 if p_type and t_type and _check_type_mismatch(p_type, t_type):
-                    warn = f"// TODO [FBD Migration]: TYPE MISMATCH {pname}: {p_type} => {t_type}"
-                    tc.warnings.append(warn)
                     inline_outs.append((pname,
-                        f"(* {target} TYPE MISMATCH: {p_type} -> {t_type} *)", ""))
+                        f"{target} (* TYPE MISMATCH: {p_type} -> {t_type} *)", ""))
                 else:
                     inline_outs.append((pname, target, t_type))
             else:
                 for target, t_type, is_neg in targets:
                     neg_prefix = "NOT " if is_neg else ""
                     if p_type and t_type and _check_type_mismatch(p_type, t_type):
-                        warn = f"// TODO [FBD Migration]: TYPE MISMATCH {pname}: {p_type} => {t_type}"
-                        tc.warnings.append(warn)
                         post_call_lines.append(
-                            f"(* {target} := {neg_prefix}{inst_name}.{pname}; "
-                            f"TYPE MISMATCH: {p_type} -> {t_type} *)")
+                            f"{target} := {neg_prefix}{inst_name}.{pname}; "
+                            f"(* TYPE MISMATCH: {p_type} -> {t_type} *)")
                     else:
                         post_call_lines.append(
                             f"{target} := {neg_prefix}{inst_name}.{pname};")
@@ -1208,7 +939,10 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
                                 skip_output_items=True)
         lines.extend(hoisted)
         lines.extend(fb_lines)
-        lines.extend(post_call_lines)
+        if post_call_lines:
+            lines.append("")
+            lines.append(f"(* {inst_name} output mappings *)")
+            lines.extend(_align_assignments(post_call_lines))
         return lines
 
     hoisted: List[str] = []
@@ -1229,7 +963,14 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
             tc.todos.append(todo)
     else:
         for target in targets:
-            lines.append(f"{target.name} := {rvalue_expr};")
+            prefix = f"{target.name} := "
+            wrapped = _wrap_bool_chain(rvalue_expr, prefix)
+            if wrapped != prefix + rvalue_expr:
+                lines.append(f"{wrapped};")
+            else:
+                lines.append(f"{prefix}{rvalue_expr};")
+        if len(targets) > 1:
+            lines[-len(targets):] = _align_assignments(lines[-len(targets):])
     return lines
 
 
@@ -1238,7 +979,7 @@ def _gen_top_level_box(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
     if box.call_type in FB_CALL_TYPES:
         hoisted: List[str] = []
         extra_outs: Optional[List[Tuple[str, str]]] = None
-        inst_name = box.box_type if box.call_type == "Function" else (box.instance.name if box.instance else "")
+        inst_name = box.box_type if box.call_type in ("Function", "Program", "Method") else (box.instance.name if box.instance else "")
         if demux_merge_map and inst_name in demux_merge_map:
             extra_outs = list(demux_merge_map[inst_name])
         lines = _gen_fb_call(box, tc, cfg, hoisted, extra_outs)
@@ -1291,9 +1032,34 @@ def _gen_top_level_box(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
     result = list(hoisted)
     outputs = [o for o in box.output_items if not o.is_empty]
     if outputs:
-        result.extend([f"{o.name} := {expr};" for o in outputs])
+        raw = [f"{o.name} := {expr};" for o in outputs]
+        if len(raw) > 1:
+            result.extend(_align_assignments(raw))
+        else:
+            result.extend(raw)
     elif expr:
         result.append(f"{expr};")
+    return result
+
+
+def _align_assignments(lines: List[str]) -> List[str]:
+    """Align := operators across multiple assignment lines."""
+    parsed: List[Tuple[str, str]] = []
+    for line in lines:
+        idx = line.find(":=")
+        if idx > 0:
+            parsed.append((line[:idx].rstrip(), line[idx:]))
+        else:
+            parsed.append((line, ""))
+    if not parsed or all(r == "" for _, r in parsed):
+        return lines
+    max_lhs = max(len(lhs) for lhs, rhs in parsed if rhs)
+    result = []
+    for lhs, rhs in parsed:
+        if rhs:
+            result.append(f"{lhs.ljust(max_lhs)} {rhs}")
+        else:
+            result.append(lhs)
     return result
 
 
@@ -1303,11 +1069,16 @@ def _check_type_mismatch(param_type: str, target_type: str) -> bool:
     return param_type.upper().strip() != target_type.upper().strip()
 
 
+_BOOL_OPS_RE = re.compile(r'\s+(OR|AND|XOR)\s+')
+
+
 def _format_call_params(mappings: List[Tuple[str, str, str]], indent: str = "    ") -> List[str]:
     """Align := and => operators in parameter lists.
 
     Each mapping is (param_name, operator, value).
     Returns formatted lines WITHOUT trailing comma/semicolon.
+    Long boolean chains (OR / AND / XOR with 3+ operands) are broken
+    across multiple lines, each operator aligned below the first operand.
     """
     if not mappings:
         return []
@@ -1320,15 +1091,58 @@ def _format_call_params(mappings: List[Tuple[str, str, str]], indent: str = "   
     for n, op, v in positional:
         lines.append(f"{indent}{v}")
     for n, op, v in named:
-        lines.append(f"{indent}{n.ljust(max_name)} {op} {v}")
+        prefix = f"{indent}{n.ljust(max_name)} {op} "
+        formatted = _wrap_bool_chain(v, prefix)
+        lines.append(formatted)
     return lines
+
+
+def _split_top_level(expr: str, op: str) -> List[str]:
+    """Split *expr* by *op* only at parenthesis depth 0."""
+    parts: List[str] = []
+    depth = 0
+    current: List[str] = []
+    tokens = expr.split()
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == op and depth == 0 and current:
+            parts.append(" ".join(current))
+            current = []
+        else:
+            depth += tok.count("(") - tok.count(")")
+            current.append(tok)
+        i += 1
+    if current:
+        parts.append(" ".join(current))
+    return parts
+
+
+def _wrap_bool_chain(expr: str, prefix: str) -> str:
+    """Break long boolean chains across lines with aligned operators.
+
+    Only wraps when the expression contains 3+ operands joined by the
+    same boolean operator (OR / AND / XOR) at parenthesis depth 0.
+    """
+    for op in ("OR", "AND", "XOR"):
+        parts = _split_top_level(expr, op)
+        if len(parts) >= 3:
+            continuation_indent = " " * len(prefix)
+            joined = [f"{parts[0]} {op}"]
+            for i, p in enumerate(parts[1:], 1):
+                if i < len(parts) - 1:
+                    joined.append(f"{continuation_indent}{p} {op}")
+                else:
+                    joined.append(f"{continuation_indent}{p}")
+            return prefix + ("\n".join(joined))
+    return prefix + expr
 
 
 def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                  hoisted: List[str],
                  extra_outputs: Optional[List[Tuple[str, str]]] = None,
                  skip_output_items: bool = False) -> List[str]:
-    if box.call_type == "Function":
+    if box.call_type in ("Function", "Program", "Method"):
         inst_name = box.box_type
     elif box.instance and box.instance.name:
         inst_name = box.instance.name
@@ -1362,10 +1176,8 @@ def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                 p_type = out_types[i] if i < len(out_types) else ""
                 t_type = out_op.type_str
                 if _check_type_mismatch(p_type, t_type):
-                    warn = f"// TODO [FBD Migration]: TYPE MISMATCH {out_names[i]}: {p_type} => {t_type}"
-                    tc.warnings.append(warn)
                     mappings.append((out_names[i], "=>",
-                                     f"(* {out_op.name} TYPE MISMATCH: {p_type} -> {t_type} *)"))
+                                     f"{out_op.name} (* TYPE MISMATCH: {p_type} -> {t_type} *)"))
                 else:
                     mappings.append((out_names[i], "=>", out_op.name))
 
@@ -1379,10 +1191,8 @@ def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
             p_idx = next((j for j, n in enumerate(out_names) if n == pname), -1)
             p_type = out_types[p_idx] if 0 <= p_idx < len(out_types) else ""
             if p_type and t_type and _check_type_mismatch(p_type, t_type):
-                warn = f"// TODO [FBD Migration]: TYPE MISMATCH {pname}: {p_type} => {t_type}"
-                tc.warnings.append(warn)
                 mappings.append((pname, "=>",
-                                 f"(* {target} TYPE MISMATCH: {p_type} -> {t_type} *)"))
+                                 f"{target} (* TYPE MISMATCH: {p_type} -> {t_type} *)"))
             else:
                 mappings.append((pname, "=>", target))
 
@@ -1401,11 +1211,6 @@ def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
 
 def _gen_function_call_expr(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                             hoisted: List[str]) -> str:
-    """Generate a function call as an inline expression (no semicolon).
-
-    Multi-line with alignment when named parameters exist,
-    single-line for positional-only or no-arg calls.
-    """
     func_name = box.box_type
     param_names = box.input_param_names
     indent = "        "
@@ -1488,7 +1293,8 @@ def _gen_expression(node: Union[BoxNode, OperandNode, AssignNode, None], tc: TcF
 
     op_str = COMPARISON_OPS.get(box.box_type)
     if op_str:
-        return _gen_infix_op(box, op_str, tc, cfg, hoisted)
+        expr = _gen_infix_op(box, op_str, tc, cfg, hoisted)
+        return f"({expr})" if expr else expr
 
     op_str = ARITHMETIC_OPS.get(box.box_type)
     if op_str:
@@ -1558,6 +1364,21 @@ def _gen_expression(node: Union[BoxNode, OperandNode, AssignNode, None], tc: TcF
     return ""
 
 
+def _is_fully_wrapped(expr: str) -> bool:
+    """Return True only if the outermost parens span the entire expression."""
+    if not expr.startswith("("):
+        return False
+    depth = 0
+    for i, ch in enumerate(expr):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if depth == 0:
+            return i == len(expr) - 1
+    return False
+
+
 def _gen_bool_expression(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                          hoisted: List[str]) -> str:
     op_word = INFIX_OPERATORS.get(box.call_type, "AND")
@@ -1575,11 +1396,11 @@ def _gen_bool_expression(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
     if len(parts) == 1:
         return parts[0]
 
-    needs_parens = any(" OR " in p or " AND " in p for p in parts)
+    needs_parens = any(" OR " in p or " AND " in p or " XOR " in p for p in parts)
     if needs_parens:
         wrapped = []
         for p in parts:
-            if (" OR " in p or " AND " in p) and not p.startswith("("):
+            if (" OR " in p or " AND " in p or " XOR " in p) and not _is_fully_wrapped(p):
                 wrapped.append(f"({p})")
             else:
                 wrapped.append(p)
@@ -1624,7 +1445,7 @@ def _gen_iec_func(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
 def _gen_fb_inline_expr(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                         hoisted: List[str]) -> str:
     """Hoist nested FB call or inline function call, return expression reference."""
-    if box.call_type == "Function":
+    if box.call_type in ("Function", "Program", "Method"):
         return _gen_function_call_expr(box, tc, cfg, hoisted)
     if not box.instance or not box.instance.name:
         todo = f"(* TODO [FBD Migration]: FB call without instance: {box.box_type} *)"
@@ -1645,7 +1466,8 @@ def _gen_operator_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                        hoisted: List[str]) -> str:
     op_str = COMPARISON_OPS.get(box.box_type)
     if op_str:
-        return _gen_infix_op(box, op_str, tc, cfg, hoisted)
+        expr = _gen_infix_op(box, op_str, tc, cfg, hoisted)
+        return f"({expr})" if expr else expr
     op_str = ARITHMETIC_OPS.get(box.box_type)
     if op_str:
         return _gen_infix_op(box, op_str, tc, cfg, hoisted)
@@ -1700,99 +1522,13 @@ def _gen_unknown_box(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
 
 
 # ---------------------------------------------------------------------------
-# XML writer — replace NWL with ST in the .TcPOU
+# GUID regeneration
 # ---------------------------------------------------------------------------
 
 def _regenerate_guids(xml_text: str) -> str:
     def _new_guid(match):
         return f'Id="{{{str(uuid.uuid4())}}}"'
     return re.sub(r'Id="\{[0-9a-fA-F\-]+\}"', _new_guid, xml_text)
-
-
-def _replace_nwl_block(text: str, start_tag: str, st_code: str) -> str:
-    """Replace an <Implementation><NWL>...</NWL></Implementation> block following *start_tag*.
-
-    Uses explicit tag boundary search instead of greedy/non-greedy regex,
-    which is robust against XML comments and nested elements inside <NWL>.
-    """
-    anchor = text.find(start_tag)
-    if anchor < 0:
-        return text
-
-    search_from = anchor + len(start_tag)
-    impl_open = text.find("<Implementation>", search_from)
-    if impl_open < 0:
-        return text
-
-    nwl_open = text.find("<NWL>", impl_open)
-    if nwl_open < 0:
-        return text
-
-    nwl_close = text.find("</NWL>", nwl_open)
-    if nwl_close < 0:
-        return text
-
-    impl_close = text.find("</Implementation>", nwl_close)
-    if impl_close < 0:
-        return text
-    impl_close_end = impl_close + len("</Implementation>")
-
-    indent = "      "
-    new_impl = (
-        "<Implementation>\n"
-        f"{indent}<ST><![CDATA[{st_code}]]></ST>\n"
-        "    </Implementation>"
-    )
-    return text[:impl_open] + new_impl + text[impl_close_end:]
-
-
-def write_st_to_xml(tc: TcFile, regenerate_ids: bool = False) -> Optional[str]:
-    if tc.xml_root is None:
-        return None
-
-    raw_text = tc.path.read_text(encoding=tc.encoding)
-
-    if "<POU " not in raw_text and "<POU>" not in raw_text:
-        return None
-    if "<NWL>" not in raw_text:
-        return None
-
-    pou_tag_match = re.search(r'<POU\s[^>]*>', raw_text)
-    if not pou_tag_match:
-        return None
-    pou_tag = pou_tag_match.group(0)
-
-    result = _replace_nwl_block(raw_text, pou_tag, tc.generated_st)
-    if result == raw_text:
-        return None
-
-    if tc.edge_vars:
-        unique_vars = list(dict.fromkeys(tc.edge_vars))
-        decl_lines = "\n".join(f"    {name} : {etype};" for name, etype in unique_vars)
-        edge_block = (
-            "\nVAR\n"
-            "    // Auto-generated edge detection instances [FBD Migration]\n"
-            f"{decl_lines}\n"
-            "END_VAR"
-        )
-        cdata_open = result.find("<Declaration><![CDATA[")
-        if cdata_open >= 0:
-            cdata_start = cdata_open + len("<Declaration><![CDATA[")
-            cdata_close = result.find("]]></Declaration>", cdata_start)
-            if cdata_close >= 0:
-                old_decl = result[cdata_start:cdata_close]
-                new_decl = old_decl.rstrip() + "\n" + edge_block + "\n"
-                result = result[:cdata_start] + new_decl + result[cdata_close:]
-
-    for action in tc.actions:
-        if action.st_code and action.name:
-            action_tag = f'<Action Name="{action.name}"'
-            result = _replace_nwl_block(result, action_tag, action.st_code)
-
-    if regenerate_ids:
-        result = _regenerate_guids(result)
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1828,11 +1564,19 @@ def validate_generated_st(tc: TcFile, cfg: MigrationConfig) -> bool:
         tc.warnings.append(f"Variables from NWL not found in ST: {', '.join(missing[:10])}")
 
     expected_networks = len(tc.networks)
-    actual_separators = tc.generated_st.count("// ====")
-    if actual_separators < expected_networks:
-        tc.warnings.append(
-            f"Network count mismatch: {expected_networks} networks, {actual_separators} comment blocks"
-        )
+    if tc.impl_type == "CFC":
+        actual_separators = tc.generated_st.count("(* CFC Exec Order:")
+        if expected_networks > 0 and actual_separators == 0:
+            tc.warnings.append(
+                f"CFC exec-order comments missing: expected at least 1, found 0"
+            )
+    else:
+        actual_separators = tc.generated_st.count("(* FBD Network ")
+        if actual_separators < expected_networks:
+            tc.warnings.append(
+                f"Network count mismatch: {expected_networks} networks, "
+                f"{actual_separators} comment blocks"
+            )
 
     if tc.todos and cfg.fail_on_unclear:
         tc.warnings.append(f"Contains {len(tc.todos)} TODO markers")
@@ -1840,12 +1584,14 @@ def validate_generated_st(tc: TcFile, cfg: MigrationConfig) -> bool:
             tc.errors.append("Strict mode: TODOs present, aborting")
             ok = False
 
+    type_mismatches = tc.generated_st.count("TYPE MISMATCH:")
     tc.stats = {
         "networks": len(tc.networks),
         "st_lines": len(tc.generated_st.splitlines()),
         "todos": len(tc.todos),
         "warnings": len(tc.warnings),
         "errors": len(tc.errors),
+        "type_mismatches": type_mismatches,
         "variables_referenced": len(nwl_vars),
     }
 
@@ -1892,13 +1638,30 @@ def _collect_vars_node(node, var_set: set):
 # Backup and file operations
 # ---------------------------------------------------------------------------
 
-def create_backup(path: Path) -> Optional[Path]:
-    ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-    stem = path.stem
-    suffix = path.suffix
-    backup_name = f"{stem}_FUP_Backup_{ts}{suffix}"
-    backup_path = path.parent / backup_name
+def create_backup(path: Path, backup_dir: Optional[Path] = None,
+                  input_root: Optional[Path] = None) -> Optional[Path]:
+    """Create a backup copy of *path* before it is overwritten.
+
+    When *backup_dir* is given (directory-level backup), the file is
+    copied into *backup_dir* keeping its relative position from
+    *input_root*.  Otherwise a timestamped copy is placed next to the
+    original.
+    """
     try:
+        if backup_dir is not None:
+            if input_root is not None:
+                try:
+                    rel = path.relative_to(input_root)
+                except ValueError:
+                    rel = Path(path.name)
+            else:
+                rel = Path(path.name)
+            backup_path = backup_dir / rel
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
+            backup_name = f"{path.stem}_backup_{ts}{path.suffix}"
+            backup_path = path.parent / backup_name
         shutil.copy2(str(path), str(backup_path))
         return backup_path
     except Exception as exc:
@@ -1932,12 +1695,12 @@ def can_replace(tc: TcFile, cfg: MigrationConfig, backup_path: Optional[Path]) -
         (bool(tc.path and tc.path.is_file()), "Original file readable"),
         (tc.file_type in SUPPORTED_EXTENSIONS, "File type supported"),
         (bool(tc.pou_name), "POU recognized"),
-        (tc.impl_type == "NWL", "FBD/FUP logic detected"),
+        (tc.impl_type in ("NWL", "CFC"), "FBD/FUP or CFC logic detected"),
         (bool(tc.declaration), "Declarations preserved"),
         (bool(tc.generated_st and tc.generated_st.strip()), "ST implementation generated"),
         (not tc.errors, "No critical errors"),
         (cfg.backup is False or backup_path is not None, "Backup created or disabled"),
-        (cfg.replace, "--replace is set"),
+        (cfg.force, "--force is set"),
         (not cfg.dry_run, "Not in dry-run mode"),
     ]
     for condition, desc in checks:
@@ -1983,6 +1746,7 @@ class MigrationReport:
 
     def add(self, tc: TcFile, backup_path: Optional[Path], output_path: Optional[Path],
             replaced: bool):
+        acc = calculate_accuracy(tc) if tc.generated_st else None
         entry = {
             "source": str(tc.path),
             "pou_name": tc.pou_name,
@@ -1994,6 +1758,7 @@ class MigrationReport:
             "backup": str(backup_path) if backup_path else "none",
             "output": str(output_path) if output_path else "none",
             "replaced": replaced,
+            "accuracy": acc,
             "todos": tc.todos,
             "warnings": tc.warnings,
             "errors": tc.errors,
@@ -2005,13 +1770,29 @@ class MigrationReport:
         if not self.enabled or not self.file_reports:
             return
         lines = [
-            f"TwinCAT FBD-to-ST Migration Report",
+            f"TwinCAT Migration Report",
             f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"Script version: {SCRIPT_VERSION}",
             f"Files processed: {len(self.file_reports)}",
             "=" * 70,
             "",
         ]
+        converted = [r for r in self.file_reports if r["accuracy"] is not None]
+        skipped = [r for r in self.file_reports if r["accuracy"] is None]
+        failed = [r for r in converted if r["errors"]]
+        success = [r for r in converted if not r["errors"]]
+
+        acc_values = [r["accuracy"] for r in converted if r["accuracy"] is not None]
+        overall_acc = round(sum(acc_values) / len(acc_values), 2) if acc_values else 100.0
+
+        lines.append(f"Converted:       {len(converted)}")
+        lines.append(f"Skipped:         {len(skipped)}")
+        lines.append(f"Success:         {len(success)}")
+        lines.append(f"Failed:          {len(failed)}")
+        lines.append(f"Overall Accuracy: {overall_acc:.2f} %")
+        lines.append("=" * 70)
+        lines.append("")
+
         for r in self.file_reports:
             lines.append(f"File: {r['source']}")
             lines.append(f"  POU: {r['pou_name']} ({r['pou_type']})")
@@ -2019,6 +1800,8 @@ class MigrationReport:
             lines.append(f"  Language after:  {r['impl_type_after']}")
             lines.append(f"  Networks: {r['networks']}")
             lines.append(f"  ST lines: {r['st_lines']}")
+            if r["accuracy"] is not None:
+                lines.append(f"  Accuracy: {r['accuracy']:.2f} %")
             lines.append(f"  Backup: {r['backup']}")
             lines.append(f"  Output: {r['output']}")
             lines.append(f"  Replaced: {r['replaced']}")
@@ -2074,176 +1857,8 @@ def _final_checklist() -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Main processing pipeline
+# Output path and print helpers
 # ---------------------------------------------------------------------------
-
-def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
-                 report: MigrationReport) -> bool:
-    mlog.log(f"Processing: {path}")
-
-    tc = load_file(path, cfg.encoding)
-    if tc is None:
-        mlog.log(f"  ERROR: Cannot load file")
-        return False
-
-    if tc.errors:
-        for e in tc.errors:
-            mlog.log(f"  ERROR: {e}")
-        report.add(tc, None, None, False)
-        return False
-
-    mlog.log(f"  File type: {tc.file_type}")
-    mlog.log(f"  POU: {tc.pou_name} ({tc.pou_type})")
-    mlog.log(f"  Implementation: {tc.impl_type}")
-
-    if tc.file_type in (".tcgvl", ".tcdut"):
-        mlog.log(f"  SKIP: {tc.file_type} has no implementation to migrate")
-        return True
-
-    if tc.impl_type != "NWL":
-        if tc.impl_type in ("CFC", "SFC", "IL"):
-            mlog.log(f"  SKIP: {tc.impl_type} migration not supported")
-            tc.warnings.append(f"{tc.impl_type} migration not supported")
-        else:
-            mlog.log(f"  SKIP: Implementation is {tc.impl_type}, not FBD/NWL")
-        return True
-
-    parse_nwl_networks(tc)
-    mlog.log(f"  Networks parsed: {len(tc.networks)}")
-    for nw in tc.networks:
-        mlog.log(f"    Network {nw.index + 1}: {len(nw.items)} items"
-                 + (", OutCommented" if nw.out_commented else ""))
-
-    action_nwl_count = sum(1 for a in tc.actions if a.networks)
-    if action_nwl_count:
-        mlog.log(f"  Actions with NWL: {action_nwl_count}")
-
-    if cfg.analyze_only:
-        mlog.log(f"  ANALYZE-ONLY: No ST generation")
-        _print_analysis(tc)
-        report.add(tc, None, None, False)
-        return True
-
-    convert_networks_to_st(tc, cfg)
-    mlog.log(f"  ST generated: {len(tc.generated_st.splitlines())} lines")
-    if tc.todos:
-        mlog.log(f"  TODOs: {len(tc.todos)}")
-        for t in tc.todos:
-            mlog.log(f"    {t}")
-
-    valid = validate_generated_st(tc, cfg)
-    if tc.warnings:
-        for w in tc.warnings:
-            mlog.log(f"  WARNING: {w}")
-    if tc.errors:
-        for e in tc.errors:
-            mlog.log(f"  ERROR: {e}")
-
-    if not valid and cfg.strict:
-        mlog.log(f"  ABORTED: Validation failed in strict mode")
-        report.add(tc, None, None, False)
-        return False
-
-    if cfg.dry_run:
-        mlog.log(f"  DRY-RUN: No files changed")
-        _print_dry_run(tc, cfg)
-        report.add(tc, None, None, False)
-        return True
-
-    use_swap = cfg.swap and not cfg.replace and not cfg.output_path
-    new_file = not cfg.replace
-    xml_content = write_st_to_xml(tc, regenerate_ids=new_file)
-    if xml_content is None:
-        mlog.log(f"  ERROR: Failed to generate output XML")
-        tc.errors.append("XML generation failed")
-        report.add(tc, None, None, False)
-        return False
-
-    backup_path: Optional[Path] = None
-
-    if cfg.replace:
-        output_path = tc.path
-        if cfg.backup:
-            backup_path = create_backup(tc.path)
-            if backup_path is None:
-                mlog.log(f"  ERROR: Backup failed, will not replace")
-                tc.errors.append("Backup creation failed")
-                report.add(tc, None, None, False)
-                return False
-            mlog.log(f"  Backup: {backup_path}")
-        elif cfg.strict:
-            mlog.log(f"  ERROR: Strict mode requires backup for replace")
-            tc.errors.append("Strict mode: cannot replace without backup")
-            report.add(tc, None, None, False)
-            return False
-        else:
-            mlog.log(f"  WARNING: Replacing without backup!")
-
-        replaceable, reason = can_replace(tc, cfg, backup_path)
-        if not replaceable:
-            mlog.log(f"  BLOCKED: {reason}")
-            report.add(tc, backup_path, None, False)
-            return False
-
-        ok = write_output_file(xml_content, tc.path, tc.encoding)
-        if ok:
-            mlog.log(f"  REPLACED: {tc.path}")
-        else:
-            mlog.log(f"  ERROR: Replace failed")
-        report.add(tc, backup_path, tc.path, ok)
-        return ok
-
-    if use_swap:
-        if cfg.batch_dir:
-            input_root = Path(cfg.input_path)
-            try:
-                rel = tc.path.relative_to(input_root)
-            except ValueError:
-                rel = Path(tc.path.name)
-            backup_path = Path(cfg.batch_dir) / rel
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-            backup_path = tc.path.parent / f"{tc.path.stem}_fup_backup_{ts}{tc.path.suffix}"
-        try:
-            shutil.copy2(str(tc.path), str(backup_path))
-        except Exception as exc:
-            mlog.log(f"  ERROR: Cannot copy to backup: {exc}")
-            tc.errors.append(f"Swap backup failed: {exc}")
-            report.add(tc, None, None, False)
-            return False
-        mlog.log(f"  BACKUP: {backup_path}")
-
-        ok = write_output_file(xml_content, tc.path, tc.encoding)
-        if ok:
-            mlog.log(f"  OUTPUT: {tc.path} (original path)")
-        else:
-            mlog.log(f"  ERROR: Write failed, restoring original from backup")
-            try:
-                shutil.copy2(str(backup_path), str(tc.path))
-            except Exception:
-                mlog.log(f"  CRITICAL: Restore failed! Backup at {backup_path}")
-        report.add(tc, backup_path, tc.path if ok else None, False)
-        return ok
-
-    if cfg.batch_dir:
-        input_root = Path(cfg.input_path)
-        try:
-            rel = tc.path.relative_to(input_root)
-        except ValueError:
-            rel = Path(tc.path.name)
-        output_path = Path(cfg.batch_dir) / rel
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        output_path = _resolve_output_path(tc.path, cfg)
-    ok = write_output_file(xml_content, output_path, tc.encoding)
-    if ok:
-        mlog.log(f"  OUTPUT: {output_path}")
-    else:
-        mlog.log(f"  ERROR: Write failed: {output_path}")
-    report.add(tc, None, output_path, False)
-    return ok
-
 
 def _resolve_output_path(source: Path, cfg: MigrationConfig) -> Path:
     if cfg.output_path:
@@ -2288,21 +1903,23 @@ def _print_dry_run(tc: TcFile, cfg: MigrationConfig):
     print(f"  Impl after:   ST")
     print(f"  Networks:     {len(tc.networks)}")
     print(f"  ST lines:     {len(tc.generated_st.splitlines())}")
+    acc = calculate_accuracy(tc)
+    print(f"  Accuracy:     {acc:.2f} %")
     print(f"  TODOs:        {len(tc.todos)}")
     print(f"  Warnings:     {len(tc.warnings)}")
     print(f"  Errors:       {len(tc.errors)}")
-    use_swap = cfg.swap and not cfg.replace and not cfg.output_path
-    if cfg.replace:
+    use_swap = cfg.swap and not cfg.force and not cfg.output_path
+    if cfg.force:
         if cfg.backup:
             ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-            print(f"  Would backup: {tc.path.stem}_FUP_Backup_{ts}{tc.path.suffix}")
-        print(f"  Would replace: {tc.path}")
+            print(f"  Would backup: {tc.path.stem}_backup_{ts}{tc.path.suffix}")
+        print(f"  Would force-overwrite: {tc.path}")
     elif use_swap:
         if cfg.batch_dir:
             print(f"  Would backup:  -> {cfg.batch_dir}/<relative path>")
         else:
             ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-            print(f"  Would backup:  {tc.path.stem}_fup_backup_{ts}{tc.path.suffix}")
+            print(f"  Would backup:  {tc.path.stem}_backup_{ts}{tc.path.suffix}")
         print(f"  Would create:  {tc.path} (ST at original path)")
     else:
         if cfg.batch_dir:
@@ -2319,86 +1936,3 @@ def _print_dry_run(tc: TcFile, cfg: MigrationConfig):
     for line in tc.generated_st.splitlines()[:50]:
         print(f"  {line}")
     print("--- end preview ---\n")
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-def main(argv: Optional[List[str]] = None) -> int:
-    cfg = parse_arguments(argv)
-    logging.basicConfig(level=getattr(logging, cfg.log_level, logging.INFO),
-                        format="%(levelname)s: %(message)s")
-    cfg = load_config(cfg)
-
-    input_p = Path(cfg.input_path)
-    prefix = input_p.stem.lower() if input_p.is_file() else input_p.name.lower()
-    ts_batch = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-
-    if input_p.is_dir() and not cfg.dry_run and not cfg.analyze_only:
-        use_swap = cfg.swap and not cfg.replace and not cfg.output_path
-        if use_swap:
-            batch_name = f"{input_p.name}_fup_backup_{ts_batch}"
-        elif not cfg.replace and not cfg.output_path:
-            batch_name = f"{input_p.name}_st_generated_{ts_batch}"
-        else:
-            batch_name = None
-        if batch_name:
-            bd = input_p.parent / batch_name
-            bd.mkdir(parents=True, exist_ok=True)
-            cfg.batch_dir = str(bd)
-            base_path = bd
-        else:
-            base_path = input_p
-    else:
-        base_path = input_p.parent if input_p.is_file() else input_p
-
-    mlog = MigrationLogger(cfg.log_enabled, base_path, prefix)
-    report = MigrationReport(cfg.report_enabled, base_path, prefix)
-
-    mlog.log(f"TwinCAT FBD-to-ST Migrator v{SCRIPT_VERSION}")
-    mlog.log(f"Input: {cfg.input_path}")
-    mlog.log(f"Mode: {'dry-run' if cfg.dry_run else 'analyze-only' if cfg.analyze_only else 'migrate'}")
-    mlog.log(f"Replace: {cfg.replace}, Swap: {cfg.swap}, Backup: {cfg.backup}, Strict: {cfg.strict}")
-
-    files = collect_input_files(cfg)
-    if not files:
-        mlog.log("No supported files found.")
-        print("No supported files found.")
-        mlog.save()
-        return 1
-
-    mlog.log(f"Files to process: {len(files)}")
-
-    success_count = 0
-    fail_count = 0
-    skip_count = 0
-
-    for f in files:
-        try:
-            result = process_file(f, cfg, mlog, report)
-            if result:
-                success_count += 1
-            else:
-                fail_count += 1
-        except Exception as exc:
-            mlog.log(f"EXCEPTION processing {f}: {exc}")
-            mlog.log(traceback.format_exc())
-            fail_count += 1
-
-    mlog.log(f"Done. Success: {success_count}, Failed: {fail_count}")
-    print(f"\nMigration complete. Success: {success_count}, Failed: {fail_count}")
-
-    mlog.save()
-    report.save()
-
-    if mlog.enabled and mlog.entries:
-        print(f"Log: {mlog.log_path}")
-    if report.enabled and report.file_reports:
-        print(f"Report: {report.report_path}")
-
-    return 0 if fail_count == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -24,6 +24,7 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-xml-tcdut` | TcDUT XML for STRUCT, ENUM, UNION | — | `*.TcDUT` |
 | `twincat3-xml-tcgvl` | TcGVL XML for global variable lists | — | `*.TcGVL` |
 | `twincat3-fup-safety` | Safety rules for FBD/FUP-to-ST migration (preview-first, backup, TODOs) | — | — |
+| `twincat3-cfc-safety` | Safety rules for CFC-to-ST migration (preview-first, backup, execution order) | — | — |
 
 ## Skills
 
@@ -42,6 +43,7 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 | `twincat3-infosys-lookup` | Look up Beckhoff InfoSys documentation via web search |
 | `twincat3-changelog` | Create and update changelogs for library releases |
 | `twincat3-fup-migrate` | FBD/FUP-to-ST migration workflow (analyze, preview, migrate) |
+| `twincat3-cfc-migrate` | CFC-to-ST migration workflow (analyze, preview, migrate) |
 
 ## Commands
 
@@ -66,6 +68,7 @@ Agent-executable commands for common tasks (`commands/`).
 | `twincat3-json-build` | Add JSON payload building logic to existing FB |
 | `twincat3-register-plcproj` | Register TcPOU, TcDUT, or TcGVL files in .plcproj |
 | `twincat3-fup-migrate` | Migrate TwinCAT FBD/FUP implementations to Structured Text |
+| `twincat3-cfc-migrate` | Migrate TwinCAT CFC implementations to Structured Text |
 
 ## MCP Server
 
@@ -85,6 +88,7 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 | `twincat_export_library` | Export .library and .compiled-library, install to local repo |
 | `twincat_close` | Close solution and release COM resources |
 | `twincat_fup_migrate` | Convert FBD/FUP .TcPOU to Structured Text — no XAE needed |
+| `twincat_cfc_migrate` | Convert CFC .TcPOU to Structured Text — no XAE needed |
 
 ### Requirements
 
