@@ -1,0 +1,35 @@
+---
+description: Safety rules for PlcProject sync operations. Enforces verify-first workflow, backup requirements, and reload-after-sync.
+---
+
+# TwinCAT PlcProject Sync Safety
+
+## Rule 1: Always verify before sync
+
+Before syncing, always run `twincat_plcproj_verify` first to understand the current drift. If verify shows no drift, no sync is needed.
+
+Exception: If the user explicitly says "just sync it" or "force sync", proceed with `force=true`.
+
+## Rule 2: Always use dry-run before writing
+
+Before writing changes, preview with `dry_run=true` to confirm what will change. Skip only when the user explicitly requests immediate execution.
+
+## Rule 3: Never skip backup with force
+
+The combination `force=true` + `backup=false` overwrites the .plcproj with no recovery. This MUST NOT be used unless:
+- The user explicitly requests it AND
+- The user confirms they have version control (git)
+
+Default is `backup=true` -- always keep it unless the user asks otherwise.
+
+## Rule 4: Reload after sync
+
+After `twincat_plcproj_sync` modifies the .plcproj, ALWAYS call `twincat_reload()` before `twincat_check_all_objects()`. The .plcproj is a structural file that requires a solution reload -- unlike .TcPOU content changes which are read from disk automatically.
+
+## Rule 5: Report drift clearly
+
+When verify detects drift, always report:
+1. The exact files missing from plcproj (on disk but not registered)
+2. The exact files extra in plcproj (registered but not on disk)
+3. The folder differences (if folder sync is enabled)
+4. A recommendation to use `force=true` for sync

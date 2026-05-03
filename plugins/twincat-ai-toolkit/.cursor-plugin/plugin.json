@@ -28,7 +28,8 @@
     "rules/twincat3-xml-tcgvl.mdc",
     "rules/twincat3-mcp-build.mdc",
     "rules/twincat3-fup-safety.mdc",
-    "rules/twincat3-cfc-safety.mdc"
+    "rules/twincat3-cfc-safety.mdc",
+    "rules/twincat3-plcproj-safety.mdc"
   ],
   "skills": [
     "skills/twincat3-attributes",
@@ -44,7 +45,8 @@
     "skills/twincat3-validate",
     "skills/twincat3-release",
     "skills/twincat3-fup-migrate",
-    "skills/twincat3-cfc-migrate"
+    "skills/twincat3-cfc-migrate",
+    "skills/twincat3-plcproj-sync"
   ],
   "commands": [
     "commands/twincat3-new-function-block.md",
@@ -66,7 +68,8 @@
     "commands/twincat3-validate-project.md",
     "commands/twincat3-release-library.md",
     "commands/twincat3-fup-migrate.md",
-    "commands/twincat3-cfc-migrate.md"
+    "commands/twincat3-cfc-migrate.md",
+    "commands/twincat3-plcproj-sync.md"
   ],
   "mcpServers": ".mcp.json"
 }

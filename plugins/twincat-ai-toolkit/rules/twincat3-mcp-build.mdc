@@ -18,6 +18,8 @@ alwaysApply: true
 | `twincat_close` | Release session (never closes user solutions) |
 | `twincat_status` | Check if XAE is installed / running |
 | `twincat_project_info` | Read version/title from `.plcproj` (no XAE needed) |
+| `twincat_plcproj_verify` | Verify `.plcproj` matches disk (no XAE needed) |
+| `twincat_plcproj_sync` | Sync `.plcproj` from disk — force/dry-run/backup (no XAE needed) |
 
 ## When to Validate
 
