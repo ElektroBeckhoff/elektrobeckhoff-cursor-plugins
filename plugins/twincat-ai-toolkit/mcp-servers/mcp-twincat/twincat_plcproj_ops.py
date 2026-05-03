@@ -5,11 +5,6 @@ TwinCAT 3 PlcProject File Operations.
 Verify and sync .plcproj files against the actual disk state.  Optionally
 repair missing / duplicate / invalid object GUIDs in Tc* source files.
 
-Port of the PowerShell scripts:
-  - Verify-TwinCAT-PlcProject.ps1  (read-only check)
-  - Sync-TwinCAT-PlcProject.ps1    (rebuild from disk)
-  - TwinCAT-PlcProject.Core.ps1    (shared helpers)
-
 Usage:
     python twincat_plcproj_ops.py --input "path/to/project"
     python twincat_plcproj_ops.py --input "path/to/project" --verify-only
