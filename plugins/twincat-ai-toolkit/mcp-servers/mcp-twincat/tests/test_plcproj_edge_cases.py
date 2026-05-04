@@ -19,14 +19,12 @@ import json
 import os
 import re
 import stat
-import sys
 import textwrap
 import uuid
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import twincat_plcproj_ops as P
 from server import twincat_plcproj_verify, twincat_plcproj_sync
 

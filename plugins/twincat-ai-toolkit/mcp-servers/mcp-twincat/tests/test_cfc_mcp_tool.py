@@ -5,13 +5,9 @@ Verifies parameter-to-argv mapping, JSON response format, and
 error handling without requiring TcXaeShell or pywin32.
 """
 import json
-import sys
 import textwrap
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import twincat_cfc_migrate
 
@@ -142,13 +138,13 @@ class TestMcpToolParameterMapping:
     def test_dry_run_no_output_files_written(self, tmp_dir):
         pou = _write(tmp_dir / "Test.TcPOU", MINIMAL_CFC_POU)
         twincat_cfc_migrate(input=str(pou), dry_run=True, log=False, report=False)
-        generated = list(tmp_dir.glob("*_ST_Generated*")) + list(tmp_dir.glob("*_cfc_backup_*"))
+        generated = list(tmp_dir.glob("*_st_generated*")) + list(tmp_dir.glob("*_backup_*"))
         assert generated == []
 
     def test_analyze_only_no_output_files_written(self, tmp_dir):
         pou = _write(tmp_dir / "Test.TcPOU", MINIMAL_CFC_POU)
         twincat_cfc_migrate(input=str(pou), analyze_only=True, log=False, report=False)
-        generated = list(tmp_dir.glob("*_ST_Generated*")) + list(tmp_dir.glob("*_cfc_backup_*"))
+        generated = list(tmp_dir.glob("*_st_generated*")) + list(tmp_dir.glob("*_backup_*"))
         assert generated == []
 
     def test_no_swap_creates_generated_file(self, tmp_dir):
@@ -158,7 +154,7 @@ class TestMcpToolParameterMapping:
         )
         result = json.loads(raw)
         assert result["success"] is True
-        generated = list(tmp_dir.glob("*_ST_Generated*"))
+        generated = list(tmp_dir.glob("*_st_generated*"))
         assert len(generated) == 1
 
     def test_swap_mode_creates_backup(self, tmp_dir):
@@ -168,7 +164,7 @@ class TestMcpToolParameterMapping:
         )
         result = json.loads(raw)
         assert result["success"] is True
-        backups = list(tmp_dir.glob("*_cfc_backup_*"))
+        backups = list(tmp_dir.glob("*_backup_*"))
         assert len(backups) == 1
 
     def test_recursive_folder(self, tmp_dir):
@@ -202,7 +198,7 @@ class TestMcpToolParameterMapping:
         )
         result = json.loads(raw)
         assert result["success"] is True
-        generated = list(tmp_dir.glob("*_ST_Generated*"))
+        generated = list(tmp_dir.glob("*_st_generated*"))
         assert len(generated) == 1
         content = generated[0].read_text(encoding="utf-8")
         assert "AUTO-GENERATED from CFC" in content

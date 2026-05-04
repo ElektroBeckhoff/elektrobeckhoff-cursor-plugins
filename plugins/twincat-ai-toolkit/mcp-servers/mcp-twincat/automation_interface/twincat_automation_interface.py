@@ -1,9 +1,12 @@
 """
-STA-threaded COM bridge for TcXaeShell automation.
+TwinCAT 3 Automation Interface (TE1000) COM bridge for TcXaeShell.
 
-All COM interactions run on a dedicated Single-Threaded Apartment thread
-to satisfy Windows COM threading requirements.  The public API is
-thread-safe and can be called from any thread (including asyncio pools).
+Implements the Beckhoff TwinCAT 3 Automation Interface (TE1000) on a dedicated
+Single-Threaded Apartment thread to satisfy Windows COM threading requirements.
+The public API is thread-safe and can be called from any thread (including
+asyncio pools).
+
+Reference: https://infosys.beckhoff.com/content/1031/tc3_automationinterface/
 """
 
 import os
@@ -125,8 +128,8 @@ def require_win32():
         )
 
 
-class ComBridge:
-    """Thread-safe bridge to TcXaeShell COM automation."""
+class TcAutomationInterface:
+    """Thread-safe TwinCAT 3 Automation Interface (TE1000) bridge to TcXaeShell."""
 
     def __init__(self):
         self._queue: queue.Queue = queue.Queue()

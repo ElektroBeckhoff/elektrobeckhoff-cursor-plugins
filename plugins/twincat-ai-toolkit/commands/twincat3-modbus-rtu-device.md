@@ -14,8 +14,17 @@ Register map (from datasheet):
 
 Unit ID: [1], Baud: [9600], Hardware: [KL6x22B / PcCOM]
 
-## Instructions
+## Required Context
 
-Look up all relevant rules and skills for Modbus RTU, naming, formatting, comments, and XML formats. Read and follow them completely before generating code.
+**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Skills:** `twincat3-modbus` (SKILL.md + modbus-rtu-patterns.md)
 
-Generate all required files: data struct, control struct, BYTE helper functions, device FB with state machine + FIFO buffer, MAIN example, .plcproj registration. Generate GUIDs with `[guid]::NewGuid()`.
+## Deliverables
+
+1. `ST_[Device]_Data.TcDUT` -- parsed process data
+2. `ST_[Device]_Control.TcDUT` -- write control (if write registers exist)
+3. `F_[Device]_*.TcPOU` -- type conversion helpers (BYTE-based)
+4. `FB_[Device].TcPOU` -- device FB with dual state machine + FIFO buffer
+5. MAIN example with `ST_ModbusComBuffer` wiring
+6. Register all files in `.plcproj`
+7. Generate GUIDs with `[guid]::NewGuid()`

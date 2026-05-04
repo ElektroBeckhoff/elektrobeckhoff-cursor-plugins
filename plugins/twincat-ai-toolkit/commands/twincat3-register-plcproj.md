@@ -11,8 +11,12 @@ Files:
   [relative/path/to/file.TcPOU]
   [relative/path/to/file.TcDUT]
 
+## Required Context
+
+**Rules:** `twincat3-plcproj`
+
+For automated sync (adding many files, fixing drift), use the `twincat3-plcproj-sync` command with `twincat_plcproj_sync` instead.
+
 ## Instructions
 
-Look up the rule for .plcproj editing. Read and follow it before generating code.
-
-Check if files are already registered before adding.
+Check if files are already registered before adding. Add `<Compile Include="..."><SubType>Code</SubType></Compile>` entries. Add `<Folder Include="..." />` for new folders.

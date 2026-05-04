@@ -1,78 +1,43 @@
 ---
 name: twincat3-code-style
-description: TwinCAT3 ST code formatting and style rules. Indentation, alignment, blank lines, THEN/DO placement, comments, headers, section separators. Use when writing or reviewing TwinCAT3 Structured Text formatting.
+description: TwinCAT3 ST code formatting and style rules quick reference. Delegates to detailed references for complete specs.
 ---
 
-# Skill: twincat3-code-style
+# TwinCAT3 Code Style
 
-## Trigger
+The authoritative rules are:
+- `twincat3-formatting.mdc` — indentation, alignment, control flow, declarations
+- `twincat3-comments.mdc` — I/O comments, headers, section separators
 
-Use this skill when:
-- Writing or reviewing TwinCAT3 ST code formatting
-- Unsure about indentation, alignment, or blank line rules
-- Writing comments, headers, or section separators
-- Generating DUTs, GVLs, FBs, Functions
-- User asks "how should this look" / "is this formatted correctly"
+## Quick Decision Table
 
-## Quick Reference
-
-### Indentation
-| Context | Spaces |
+| Question | Answer |
 |---|---|
-| Inside FUNCTION_BLOCK / FUNCTION body | 4 |
-| Inside IF / FOR / WHILE / CASE body | +4 |
-| Inside STRUCT members | 8 (TYPE → STRUCT → member) |
-| Continuation lines | +4 from statement start |
-| CASE body (multi-statement) | align under first statement |
+| Indentation | 4 spaces, never tabs |
+| THEN / DO placement | Same line as IF / FOR / WHILE |
+| ELSIF / ELSE placement | Column 0 |
+| Wrap function calls | >4 params → multiline with aligned `:=` / `=>` |
+| Max line length | 200 characters |
+| Binary operator wrap | After operator, not before |
+| Array initializer wrap | >30 elements → multiline |
+| Enum inline wrap | >5 members → multiline |
+| VAR_INPUT / VAR_OUTPUT comments | Every variable: `// [unit] Purpose` |
+| STRUCT member comments | Every member: `// [unit] Purpose` |
+| FB header | `//` one-line purpose before FUNCTION_BLOCK |
+| VAR group sections (>=5 vars) | `(* section name *)` header |
+| Code logical sections (>=3 related lines) | `(* --- purpose --- *)` separator |
+| STRUCT indentation | 4 spaces inside STRUCT |
+| Single-line IF | Never — body always on next line |
 
-### THEN / DO placement
-| Keyword | Placement |
-|---|---|
-| `THEN` | **Same line** as IF / ELSIF |
-| `ELSIF` | col 0 |
-| `ELSE` | col 0 |
-| `DO` (FOR loop) | **Same line** as FOR |
-| `DO` (WHILE loop) | **Same line** as WHILE |
+### Unit Bracket Format
 
-### Function call param count rule
-| Params | Format |
-|---|---|
-| ≤4 | Single line |
-| >4 | Multiline, break after `(`, `:=` / `=>` aligned |
-
-### Wrap limits
-| Item | Threshold |
-|---|---|
-| Function call params | >3 → wrap |
-| Array initializer elements | >30 → wrap |
-| Enum members inline | >5 → wrap |
-| Line length | 200 chars |
-| Binary operator wrap position | After operator (not before) |
-
-### Mandatory comments
-| Location | Comment required |
-|---|---|
-| VAR_INPUT / VAR_OUTPUT each variable | `// [unit] Purpose` |
-| STRUCT members | `// [unit] Purpose` |
-| FB / Function header | `//` one-line purpose before declaration |
-| VAR group sections (≥5 vars) | `(* section name *)` header |
-| Code logical sections (≥3 related lines) | `(* --- purpose --- *)` separator |
-
-### Unit bracket format
 ```
-// [A]    amperes
-// [V]    volts
-// [W]    watts
-// [kWh]  kilowatt-hours
-// [%]    percent
-// [°C]   celsius
-// [ms]   milliseconds
-// [s]    seconds
+// [A] amperes    // [V] volts      // [W] watts
+// [kWh] kWh      // [%] percent    // [ms] milliseconds
 ```
 
 ## Reference Files
 
-- `references/formatting-rules.md` — complete formatting spec with all examples
-- `references/comment-rules.md` — complete comment spec with all examples
-
-Read them when generating any non-trivial TwinCAT3 code.
+For complete specifications with all examples, read:
+- [references/formatting-rules.md](references/formatting-rules.md)
+- [references/comment-rules.md](references/comment-rules.md)

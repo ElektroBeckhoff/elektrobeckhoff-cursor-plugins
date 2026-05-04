@@ -12,8 +12,17 @@ Subscribe topics: [TOPIC1, TOPIC2, ...]
 Publish topics: [TOPIC1, TOPIC2, ...]
 Payload format: [JSON / Plain String]
 
-## Instructions
+## Required Context
 
-Look up all relevant rules and skills for MQTT, naming, formatting, comments, JSON, and XML formats. Read and follow them completely before generating code.
+**Rules:** `twincat3-mqtt`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`, `twincat3-formatting`
+**Skills:** `twincat3-mqtt` (SKILL.md + mqtt-patterns.md), `twincat3-json-strings` (if JSON payload)
 
-Generate all required files: device FB with MQTT client + message queue, subscribe-on-connect, reconnection, receive with dynamic payload allocation, publish, topic routing, data struct, .plcproj registration. Generate GUIDs with `[guid]::NewGuid()`.
+## Deliverables
+
+1. Device FB with MQTT client + message queue
+2. Subscribe-on-connect with reconnection handling
+3. Receive with dynamic payload allocation (`__NEW`/`__DELETE`)
+4. Publish method(s)
+5. Topic routing
+6. Data struct for parsed payloads
+7. Register all files in `.plcproj`, generate GUIDs with `[guid]::NewGuid()`

@@ -11,8 +11,10 @@ Fields:
   [fieldname] : [TYPE] // [DESCRIPTION]
   [fieldname] : [TYPE] // [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`, `twincat3-xml-tcdut`, `twincat3-comments`
+
 ## Instructions
 
-Look up the rules for TcDUT XML, naming, and comments. Read and follow them before generating code.
-
-Generate as valid TcDUT XML with GUID (`[guid]::NewGuid()`).
+Generate as valid TcDUT XML with GUID (`[guid]::NewGuid()`). Register in `.plcproj`.

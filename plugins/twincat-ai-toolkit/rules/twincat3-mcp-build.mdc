@@ -1,34 +1,45 @@
 ---
 description: MCP build automation awareness. Tells the agent when and how to use the TwinCAT MCP tools for compiling, validating, and exporting PLC projects.
-alwaysApply: true
+alwaysApply: false
 ---
 
 # TwinCAT MCP Build Automation
 
 ## Available MCP Tools
 
+### Requires TcXaeShell (XAE)
+
 | Tool | Purpose |
 |------|---------|
+| `twincat_status` | Check if XAE is installed / running |
 | `twincat_open` | Open solution in XAE, locate PLC project |
-| `twincat_check_all_objects` | Compile ALL objects (not just MAIN-referenced) |
+| `twincat_check_all_objects` | Compile ALL objects — returns errors, warnings, infos directly |
 | `twincat_build` | Full rebuild of the solution |
-| `twincat_get_output_log` | Read errors, warnings, infos from last compile |
-| `twincat_reload` | Close + reopen solution (re-reads from disk) |
+| `twincat_get_output_log` | Read errors/warnings from last `twincat_build` (not needed after `twincat_check_all_objects`) |
+| `twincat_reload` | Close + reopen solution (re-reads structural files from disk) |
 | `twincat_export_library` | Export `.library` + `.compiled-library` |
 | `twincat_close` | Release session (never closes user solutions) |
-| `twincat_status` | Check if XAE is installed / running |
-| `twincat_project_info` | Read version/title from `.plcproj` (no XAE needed) |
-| `twincat_plcproj_verify` | Verify `.plcproj` matches disk (no XAE needed) |
-| `twincat_plcproj_sync` | Sync `.plcproj` from disk — force/dry-run/backup (no XAE needed) |
+
+### No XAE needed (pure file operations)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_plcproj_info` | Read version/title from `.plcproj` |
+| `twincat_plcproj_verify` | Verify `.plcproj` matches disk |
+| `twincat_plcproj_sync` | Sync `.plcproj` from disk — force/dry-run/backup |
+| `twincat_migrate` | Auto-detect FBD/CFC, convert to ST in one pass |
+| `twincat_fup_migrate` | Convert FBD/FUP to ST |
+| `twincat_cfc_migrate` | Convert CFC to ST |
 
 ## When to Validate
 
 After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:
 
 1. `twincat_open` (with explicit `plcproj_path`)
-2. `twincat_check_all_objects`
-3. `twincat_get_output_log`
-4. Fix errors → repeat from step 2
+2. `twincat_check_all_objects` — errors, warnings, and infos are included in the response
+3. Fix errors → repeat from step 2
+
+`twincat_get_output_log` is only needed after `twincat_build`. Do NOT call it after `twincat_check_all_objects` — the response already contains all diagnostics.
 
 For the detailed workflow, use the `twincat3-validate` skill.
 

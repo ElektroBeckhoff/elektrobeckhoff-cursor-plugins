@@ -10,8 +10,10 @@ Add a step-based state machine to FB_[NAME].
 Purpose: [DESCRIPTION]
 Steps: [LIST OF OPERATIONS]
 
+## Required Context
+
+**Rules:** `twincat3-core`, `twincat3-naming`, `twincat3-formatting`
+
 ## Instructions
 
-Look up the rules for state machines and step-pair pattern. Read and follow them before generating code.
-
-Use `CASE _nStep OF` with standard steps (idle, operations, success, error, delay).
+Use `CASE _nStep OF` with standard steps (idle=0, operations=1+, success=90, error=100, delay=200).

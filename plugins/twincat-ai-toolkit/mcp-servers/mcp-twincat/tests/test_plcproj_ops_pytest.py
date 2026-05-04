@@ -6,14 +6,12 @@ Run with:  pytest test_plcproj_ops_pytest.py -v
 """
 import os
 import re
-import sys
 import textwrap
 import uuid
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import twincat_plcproj_ops as P
 
 

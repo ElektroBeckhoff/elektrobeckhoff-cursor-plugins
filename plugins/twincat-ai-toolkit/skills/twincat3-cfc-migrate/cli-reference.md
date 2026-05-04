@@ -63,11 +63,10 @@ python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs" --recursive --str
 
 | File | Created when | Content |
 |------|-------------|---------|
-| `*_ST_Generated.TcPOU` | Default mode (single file) | Generated ST file |
+| `*_st_generated.TcPOU` | Default mode (single file) | Generated ST file |
 | `*_st_generated_<ts>/` | Default mode (folder) | Mirror directory with ST files |
-| `*_cfc_backup_*.TcPOU` | Swap mode (single file) | Original CFC file |
-| `*_cfc_backup_<ts>/` | Swap mode (folder) | Mirror directory with originals |
-| `*_CFC_Backup_*.TcPOU` | Force mode | Original CFC file (backup) |
+| `*_backup_<ts>.TcPOU` | Swap/force mode (single file) | Backup of original CFC file |
+| `*_backup_<ts>/` | Swap/force mode (folder) | Backup directory with original CFC files |
 | `*_migration_log_*.txt` | Unless `--no-log` | Detailed migration log |
 | `*_migration_report_*.txt` | Unless `--no-report` | Per-file summary and checklist |
 

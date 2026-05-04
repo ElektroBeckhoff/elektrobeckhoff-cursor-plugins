@@ -62,7 +62,7 @@ Choose the appropriate mode based on user intent:
 ```
 twincat_fup_migrate(input="<path>")
 ```
-Original files untouched. Generated files in `*_ST_Generated` or `*_st_generated_<ts>/`.
+Original files untouched. Generated files in `*_st_generated` or `*_st_generated_<ts>/`.
 
 **Swap migration (backup + overwrite original path):**
 ```
@@ -81,7 +81,7 @@ Requires explicit user confirmation. Never use `backup=false` with this.
 After any non-dry-run migration, recommend:
 1. Open the TwinCAT project in XAE (`twincat_open`)
 2. Run `twincat_check_all_objects`
-3. Review compiler errors with `twincat_get_errors`
+3. Review compiler errors (included in `twincat_check_all_objects` response)
 4. Search for `TODO [FBD Migration]` markers in generated code
 5. Verify I/O mapping and task assignment
 6. Test runtime behavior against original FBD version

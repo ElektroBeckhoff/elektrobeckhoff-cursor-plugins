@@ -8,7 +8,7 @@ library export, close, FBD-to-ST migration, and CFC-to-ST migration.
 
 Transport: stdio  (Cursor starts this process as a child)
 COM:       All TcXaeShell interaction runs on a dedicated STA thread
-           managed by twincat_com_bridge.ComBridge.
+           managed by twincat_automation_interface.TcAutomationInterface (TE1000).
 """
 
 import io
@@ -17,9 +17,14 @@ import sys
 import json
 import logging
 import contextlib
-import xml.etree.ElementTree as ET
 from typing import Optional
 from dataclasses import asdict
+
+_server_dir = os.path.dirname(os.path.abspath(__file__))
+for _subdir in ("migrator", "automation_interface", "plcproj"):
+    _p = os.path.join(_server_dir, _subdir)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # stdout is the MCP JSON-RPC wire -- all logging goes to stderr
 logging.basicConfig(
@@ -30,20 +35,21 @@ logging.basicConfig(
 log = logging.getLogger("twincat-mcp")
 
 from mcp.server.fastmcp import FastMCP
-from twincat_com_bridge import ComBridge, HAS_WIN32
+from twincat_automation_interface import TcAutomationInterface, HAS_WIN32
 from twincat_fbd_to_st_migrator import main as fup_main
 from twincat_cfc_to_st_migrator import main as cfc_main
-from twincat_plcproj_ops import main as plcproj_main
+from twincat_plcproj_ops import main as plcproj_main, read_project_info
+from twincat_unified_migrator import main as unified_main
 
 mcp = FastMCP("TwinCAT")
 
-_bridge: Optional[ComBridge] = None
+_bridge: Optional[TcAutomationInterface] = None
 
 
-def _get_bridge() -> ComBridge:
+def _get_bridge() -> TcAutomationInterface:
     global _bridge
     if _bridge is None:
-        _bridge = ComBridge()
+        _bridge = TcAutomationInterface()
     return _bridge
 
 
@@ -54,11 +60,11 @@ def _json(obj) -> str:
 
 
 # ================================================================
-#  twincat_project_info  (pure XML -- no COM / no XAE needed)
+#  twincat_plcproj_info  (pure XML -- no COM / no XAE needed)
 # ================================================================
 
 @mcp.tool()
-def twincat_project_info(plcproj_path: str = "") -> str:
+def twincat_plcproj_info(plcproj_path: str = "") -> str:
     """Read TwinCAT PLC project metadata from .plcproj XML.
 
     Returns Title, Version, Company, Name, Released.
@@ -70,28 +76,8 @@ def twincat_project_info(plcproj_path: str = "") -> str:
         if not plcproj_path:
             return _json({"error": "No .plcproj found. Provide plcproj_path."})
 
-    if not os.path.isfile(plcproj_path):
-        return _json({"error": f"File not found: {plcproj_path}"})
-
     try:
-        tree = ET.parse(plcproj_path)
-        ns = {"ms": "http://schemas.microsoft.com/developer/msbuild/2003"}
-
-        def txt(xpath: str) -> str:
-            el = tree.getroot().find(xpath, ns)
-            return el.text.strip() if el is not None and el.text else ""
-
-        title = txt(".//ms:Title") or txt(".//ms:Name")
-        version = txt(".//ms:ProjectVersion") or "0.0.0.0"
-
-        return _json({
-            "title": title,
-            "version": version,
-            "company": txt(".//ms:Company"),
-            "name": txt(".//ms:Name"),
-            "released": txt(".//ms:Released"),
-            "plcproj_path": plcproj_path,
-        })
+        return _json(read_project_info(plcproj_path))
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -556,6 +542,118 @@ def twincat_cfc_migrate(
 
 
 # ================================================================
+#  twincat_migrate  (pure Python -- no COM / no XAE needed)
+# ================================================================
+
+@mcp.tool()
+def twincat_migrate(
+    input: str,
+    output: str = "",
+    recursive: bool = False,
+    backup: bool = True,
+    force: bool = False,
+    swap: bool = False,
+    dry_run: bool = False,
+    analyze_only: bool = False,
+    log: bool = True,
+    report: bool = True,
+    config: str = "",
+    encoding: str = "utf-8",
+    strict: bool = False,
+    preserve_ids: bool = True,
+    preserve_comments: bool = True,
+    mark_todo: bool = True,
+    fail_on_unclear: bool = True,
+    log_level: str = "INFO",
+) -> str:
+    """Convert TwinCAT 3 FBD/FUP and CFC implementations to Structured Text
+    in a single pass.
+
+    Auto-detects the implementation type (NWL / CFC) per file and routes
+    to the appropriate converter.  Produces a single combined report and
+    shared backup directory.  Files that are already ST or use unsupported
+    languages (SFC, IL, LD) are skipped gracefully.
+
+    ALWAYS start with dry_run=true or analyze_only=true before actual
+    migration.
+
+    Does NOT require a running TcXaeShell instance.  Works on any OS.
+
+    Args:
+        input: REQUIRED. Path to a .TcPOU file or folder.
+        output: Explicit output path. Empty = auto (default/swap mode).
+        recursive: Recurse into subfolders when input is a directory.
+        backup: Create backup before modification (recommended).
+        force: DESTRUCTIVE. Overwrite original in-place (GUIDs kept).
+        swap: Backup original, write ST to original path.
+        dry_run: SAFE. Preview only, zero files written.
+        analyze_only: SAFE. Inspect structure, no ST generation.
+        log: Write migration log file.
+        report: Write migration report file.
+        config: Path to JSON config file (CLI params take precedence).
+        encoding: File encoding (auto-fallback: utf-8-sig, latin-1).
+        strict: Abort on any TODO marker. Blocks force without backup.
+        preserve_ids: Keep original GUIDs in force mode.
+        preserve_comments: Keep comments as ST header blocks.
+        mark_todo: Wrap untranslatable logic in TODO comment blocks.
+        fail_on_unclear: Warn on TODO markers (abort with strict=true).
+        log_level: Verbosity: DEBUG, INFO, WARNING, ERROR."""
+
+    argv = ["--input", input]
+
+    if output:
+        argv.extend(["--output", output])
+    if recursive:
+        argv.append("--recursive")
+    if not backup:
+        argv.append("--no-backup")
+    if force:
+        argv.append("--force")
+    if swap:
+        argv.append("--swap")
+    if dry_run:
+        argv.append("--dry-run")
+    if analyze_only:
+        argv.append("--analyze-only")
+    if not log:
+        argv.append("--no-log")
+    if not report:
+        argv.append("--no-report")
+    if config:
+        argv.extend(["--config", config])
+    if encoding != "utf-8":
+        argv.extend(["--encoding", encoding])
+    if strict:
+        argv.append("--strict")
+    if not mark_todo:
+        argv.append("--no-mark-todo")
+    if not fail_on_unclear:
+        argv.append("--no-fail-on-unclear")
+    if log_level != "INFO":
+        argv.extend(["--log-level", log_level])
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            exit_code = unified_main(argv)
+    except SystemExit as e:
+        exit_code = int(e.code) if e.code is not None else 1
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "exit_code": 1,
+            "output": buf.getvalue(),
+            "error": str(exc),
+        })
+
+    return _json({
+        "success": exit_code == 0,
+        "exit_code": exit_code,
+        "output": buf.getvalue(),
+    })
+
+
+# ================================================================
 #  twincat_plcproj_verify  (pure Python -- no COM / no XAE needed)
 # ================================================================
 
@@ -705,9 +803,7 @@ def _auto_detect_plcproj() -> str:
 
 def _read_proj_name(plcproj_path: str) -> str:
     try:
-        ns = {"ms": "http://schemas.microsoft.com/developer/msbuild/2003"}
-        el = ET.parse(plcproj_path).getroot().find(".//ms:Name", ns)
-        return el.text.strip() if el is not None and el.text else ""
+        return read_project_info(plcproj_path).get("name", "")
     except Exception:
         return ""
 
@@ -716,19 +812,8 @@ def _read_plcproj_meta(plcproj_path: str) -> dict:
     if not plcproj_path or not os.path.isfile(plcproj_path):
         return {}
     try:
-        tree = ET.parse(plcproj_path)
-        ns = {"ms": "http://schemas.microsoft.com/developer/msbuild/2003"}
-
-        def txt(xp: str) -> str:
-            el = tree.getroot().find(xp, ns)
-            return el.text.strip() if el is not None and el.text else ""
-
-        return {
-            "title": txt(".//ms:Title") or txt(".//ms:Name"),
-            "version": txt(".//ms:ProjectVersion") or "0.0.0.0",
-            "company": txt(".//ms:Company"),
-            "name": txt(".//ms:Name"),
-        }
+        info = read_project_info(plcproj_path)
+        return {k: info[k] for k in ("title", "version", "company", "name")}
     except Exception:
         return {}
 

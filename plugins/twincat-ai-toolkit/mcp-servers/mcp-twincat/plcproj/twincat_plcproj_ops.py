@@ -23,9 +23,10 @@ import re
 import shutil
 import sys
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 SCRIPT_VERSION = "1.0.0"
 
@@ -719,6 +720,38 @@ def sync_plcproj(cfg: PlcProjConfig) -> SyncReport:
         report.guids_repaired = repairs
 
     return report
+
+
+# ================================================================
+#  Project info
+# ================================================================
+
+def read_project_info(plcproj_path: str) -> Dict[str, Any]:
+    """Read TwinCAT PLC project metadata from .plcproj XML.
+
+    Returns a dict with keys: title, version, company, name, released,
+    plcproj_path.  Raises FileNotFoundError or ET.ParseError on failure.
+    Does NOT require a running TcXaeShell instance.
+    """
+    p = Path(plcproj_path).resolve()
+    if not p.is_file():
+        raise FileNotFoundError(f"plcproj not found: {plcproj_path}")
+
+    tree = ET.parse(str(p))
+    ns = {"ms": "http://schemas.microsoft.com/developer/msbuild/2003"}
+
+    def _txt(xpath: str) -> str:
+        el = tree.getroot().find(xpath, ns)
+        return el.text.strip() if el is not None and el.text else ""
+
+    return {
+        "title":        _txt(".//ms:Title") or _txt(".//ms:Name"),
+        "version":      _txt(".//ms:ProjectVersion") or "0.0.0.0",
+        "company":      _txt(".//ms:Company"),
+        "name":         _txt(".//ms:Name"),
+        "released":     _txt(".//ms:Released"),
+        "plcproj_path": str(p),
+    }
 
 
 # ================================================================

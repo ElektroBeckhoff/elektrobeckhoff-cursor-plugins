@@ -14,8 +14,16 @@ Register map (from datasheet):
 
 IP: [192.168.1.x], Unit ID: [1], Read Interval: [T#5S]
 
-## Instructions
+## Required Context
 
-Look up all relevant rules and skills for Modbus TCP, naming, formatting, comments, and XML formats. Read and follow them completely before generating code.
+**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Skills:** `twincat3-modbus` (SKILL.md + modbus-tcp-patterns.md)
 
-Generate all required files: data struct, control struct, helper functions, device FB with state machine, .plcproj registration. Generate GUIDs with `[guid]::NewGuid()`.
+## Deliverables
+
+1. `ST_[Device]_Data.TcDUT` -- parsed process data
+2. `ST_[Device]_Control.TcDUT` -- write control (if write registers exist)
+3. `F_[Device]_*.TcPOU` -- type conversion helpers (WORD-based)
+4. `FB_[Device].TcPOU` -- device FB with dual state machine
+5. Register all files in `.plcproj`
+6. Generate GUIDs with `[guid]::NewGuid()`

@@ -8,14 +8,12 @@ import json
 import os
 import re
 import shutil
-import sys
 import textwrap
 import uuid
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import twincat_fbd_to_st_migrator as M
 
 # ===================================================================
@@ -775,7 +773,7 @@ class TestDryRun:
         ok = M.process_file(p, cfg, mlog, report)
         assert ok is True
         assert p.read_text() == original
-        gen_files = list(tmp_dir.glob("*_ST_Generated*"))
+        gen_files = list(tmp_dir.glob("*_st_generated*"))
         assert len(gen_files) == 0
 
 
@@ -970,7 +968,7 @@ class TestEndToEnd:
         p = _write(tmp_dir, "E2E.TcPOU", xml)
         exit_code = M.main(["--input", str(p), "--no-swap", "--no-log", "--no-report"])
         assert exit_code == 0
-        gen = tmp_dir / "E2E_ST_Generated.TcPOU"
+        gen = tmp_dir / "E2E_st_generated.TcPOU"
         assert gen.exists()
         content = gen.read_text()
         assert "bDst := bSrc;" in content
@@ -2125,10 +2123,10 @@ class TestChainedAssign:
 
 
 # ===================================================================
-# Demux-Merge: E2E test with Demux + FB network
+# Demux: E2E test -- Demux networks generate standalone assignments
 # ===================================================================
 
-class TestDemuxMerge:
+class TestDemuxStandalone:
     def _make_demux_network(self):
         """Build networks: NW0 = FB call, NW1 = Demux branching FB output to 2 targets."""
         fb_box = M.BoxNode(
@@ -2159,20 +2157,7 @@ class TestDemuxMerge:
 
         return [nw0, nw1]
 
-    def test_demux_merge_map_built_correctly(self):
-        networks = self._make_demux_network()
-        merge_map, skip = M._build_demux_merge_map(networks)
-        assert "fbMotor" in merge_map
-        entries = merge_map["fbMotor"]
-        assert len(entries) == 2
-        param_names = [e[0] for e in entries]
-        assert all(p == "nSpeed" for p in param_names)
-        targets = [e[1] for e in entries]
-        assert "nDisplay1" in targets
-        assert "nDisplay2" in targets
-        assert 1 in skip
-
-    def test_demux_network_skipped_in_output(self):
+    def test_demux_network_gets_own_header(self):
         networks = self._make_demux_network()
         tc = M.TcFile()
         tc.networks = networks
@@ -2181,17 +2166,25 @@ class TestDemuxMerge:
         assert "nDisplay1" in tc.generated_st
         assert "nDisplay2" in tc.generated_st
         network_headers = tc.generated_st.count("(* FBD Network ")
-        assert network_headers == 1
+        assert network_headers == 2
 
-    def test_demux_targets_merged_into_fb_call(self):
+    def test_demux_generates_simple_assignments(self):
         networks = self._make_demux_network()
         tc = M.TcFile()
         tc.networks = networks
         cfg = M.MigrationConfig()
         M.convert_networks_to_st(tc, cfg)
-        assert "nSpeed" in tc.generated_st
-        assert "nDisplay1" in tc.generated_st
-        assert "nDisplay2" in tc.generated_st
+        assert "nDisplay1 := fbMotor.nSpeed;" in tc.generated_st
+        assert "nDisplay2 := fbMotor.nSpeed;" in tc.generated_st
+
+    def test_demux_not_merged_into_fb_call(self):
+        networks = self._make_demux_network()
+        tc = M.TcFile()
+        tc.networks = networks
+        cfg = M.MigrationConfig()
+        M.convert_networks_to_st(tc, cfg)
+        assert "nDisplay1 =>" not in tc.generated_st
+        assert "nDisplay2 =>" not in tc.generated_st
 
     def test_demux_unresolved_gives_todo(self):
         demux = M.DemuxNode()

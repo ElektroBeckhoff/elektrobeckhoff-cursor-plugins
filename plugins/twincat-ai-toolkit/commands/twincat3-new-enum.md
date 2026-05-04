@@ -11,8 +11,11 @@ Values:
   [VALUE1] = [DESCRIPTION]
   [VALUE2] = [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`, `twincat3-xml-tcdut`
+**Skills:** `twincat3-attributes` (for `qualified_only` and `strict` pragmas)
+
 ## Instructions
 
-Look up the rules and skills for TcDUT XML, naming, and attribute pragmas. Read and follow them before generating code.
-
-Generate as valid TcDUT XML with GUID (`[guid]::NewGuid()`).
+Generate as valid TcDUT XML with GUID (`[guid]::NewGuid()`). Always include `{attribute 'qualified_only'}` and `{attribute 'strict'}`. Register in `.plcproj`.

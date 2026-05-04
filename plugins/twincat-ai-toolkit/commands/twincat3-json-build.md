@@ -11,6 +11,11 @@ Fields:
   [fieldname] : [TYPE] = [DESCRIPTION]
   [fieldname] : [TYPE] = [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`
+**Skills:** `twincat3-json-strings` (SKILL.md + json-write-patterns.md)
+
 ## Instructions
 
-Look up the relevant rules and skills for JSON writing and naming. Read and follow them before generating code.
+Use `FB_JsonSaxWriter` for building. Use `GetDocument()` for small payloads (<255 chars), `CopyDocument` with `__NEW`/`__DELETE` for larger payloads.

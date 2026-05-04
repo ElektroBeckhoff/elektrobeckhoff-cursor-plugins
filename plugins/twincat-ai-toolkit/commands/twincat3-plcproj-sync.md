@@ -7,10 +7,14 @@ description: Verify and sync TwinCAT .plcproj file against the actual project fi
 
 Verify that the TwinCAT .plcproj matches the files on disk, and rebuild it if needed.
 
-## Instructions
+## Required Context
 
-Follow the `twincat3-plcproj-sync` skill completely. Always verify first, then preview with dry-run, then sync.
+**Rules:** `twincat3-plcproj-safety`
+**Skills:** `twincat3-plcproj-sync` (follow completely)
 
-The `twincat_plcproj_verify` MCP tool checks for drift (read-only). The `twincat_plcproj_sync` MCP tool rebuilds the Compile and Folder ItemGroups from disk with backup, force, dry-run, and GUID repair options.
+## Mandatory Workflow
 
-After syncing, reload the solution with `twincat_reload` before running `twincat_check_all_objects`.
+1. **Verify:** `twincat_plcproj_verify` -- check current drift
+2. **Preview:** `twincat_plcproj_sync(force=true, dry_run=true)` -- preview changes
+3. **Sync:** `twincat_plcproj_sync(force=true)` -- write changes
+4. **Reload:** `twincat_reload` before `twincat_check_all_objects`

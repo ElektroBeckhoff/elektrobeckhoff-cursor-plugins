@@ -44,7 +44,7 @@ from twincat_migrator_base import (
     _detect_impl_type, _detect_pou_type, _find_child_by_name,
     _find_v, _get_v_str, _strip_quotes,
     # Private codegen
-    _apply_input_flag, _build_demux_merge_map, _check_type_mismatch,
+    _apply_input_flag, _check_type_mismatch,
     _clean_bool_expr, _collect_vars, _collect_vars_node,
     _final_checklist, _format_call_params,
     _gen_assign, _gen_bool_expression, _gen_expression,
@@ -523,11 +523,6 @@ def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
 
     convert_networks_to_st(tc, cfg)
 
-    acc = calculate_accuracy(tc)
-    tm_count = tc.generated_st.count("TYPE MISMATCH:")
-    header = build_generated_header(FBD_SOURCE_TYPE, tc.path.name, FBD_TOOL_NAME, SCRIPT_VERSION, acc, tm_count)
-    tc.generated_st = header + tc.generated_st
-
     mlog.log(f"  ST generated: {len(tc.generated_st.splitlines())} lines")
     if tc.todos:
         mlog.log(f"  TODOs: {len(tc.todos)}")
@@ -541,6 +536,11 @@ def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
     if tc.errors:
         for e in tc.errors:
             mlog.log(f"  ERROR: {e}")
+
+    acc = calculate_accuracy(tc)
+    tm_count = tc.generated_st.count("TYPE MISMATCH:")
+    header = build_generated_header(FBD_SOURCE_TYPE, tc.path.name, FBD_TOOL_NAME, SCRIPT_VERSION, acc, tm_count)
+    tc.generated_st = header + tc.generated_st
 
     if not valid and cfg.strict:
         mlog.log(f"  ABORTED: Validation failed in strict mode")

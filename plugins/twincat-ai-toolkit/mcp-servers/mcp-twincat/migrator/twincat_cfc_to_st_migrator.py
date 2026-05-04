@@ -814,11 +814,6 @@ def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
 
     _inject_exec_order_comments(tc)
 
-    acc = calculate_accuracy(tc)
-    tm_count = tc.generated_st.count("TYPE MISMATCH:")
-    header = build_generated_header(CFC_SOURCE_TYPE, tc.path.name, CFC_TOOL_NAME, SCRIPT_VERSION, acc, tm_count)
-    tc.generated_st = header + tc.generated_st
-
     mlog.log(f"  ST generated: {len(tc.generated_st.splitlines())} lines")
     if tc.todos:
         mlog.log(f"  TODOs: {len(tc.todos)}")
@@ -832,6 +827,11 @@ def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
     if tc.errors:
         for e in tc.errors:
             mlog.log(f"  ERROR: {e}")
+
+    acc = calculate_accuracy(tc)
+    tm_count = tc.generated_st.count("TYPE MISMATCH:")
+    header = build_generated_header(CFC_SOURCE_TYPE, tc.path.name, CFC_TOOL_NAME, SCRIPT_VERSION, acc, tm_count)
+    tc.generated_st = header + tc.generated_st
 
     if not valid and cfg.strict:
         mlog.log(f"  ABORTED: Validation failed in strict mode")
@@ -901,7 +901,7 @@ def process_file(path: Path, cfg: MigrationConfig, mlog: MigrationLogger,
             backup_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             ts = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-            backup_path = tc.path.parent / f"{tc.path.stem}_cfc_backup_{ts}{tc.path.suffix}"
+            backup_path = tc.path.parent / f"{tc.path.stem}_backup_{ts}{tc.path.suffix}"
         try:
             shutil.copy2(str(tc.path), str(backup_path))
         except Exception as exc:
@@ -995,7 +995,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             cfg.batch_dir = str(bd)
             base_path = bd
         elif use_swap:
-            batch_name = f"{input_p.name}_cfc_backup_{ts_batch}"
+            batch_name = f"{input_p.name}_backup_{ts_batch}"
             bd = input_p.parent / batch_name
             bd.mkdir(parents=True, exist_ok=True)
             cfg.batch_dir = str(bd)
@@ -1010,7 +1010,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             base_path = input_p
 
         if cfg.force and cfg.backup:
-            bkp_name = f"{input_p.name}_cfc_backup_{ts_batch}"
+            bkp_name = f"{input_p.name}_backup_{ts_batch}"
             bkp_dir = input_p.parent / bkp_name
             bkp_dir.mkdir(parents=True, exist_ok=True)
             cfg.backup_dir = str(bkp_dir)

@@ -9,13 +9,11 @@ Run with:  pytest test_cfc_migrator_pytest.py -v
 import os
 import re
 import shutil
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import twincat_cfc_to_st_migrator as C
 from twincat_migrator_base import (
     AssignNode, BoxNode, MigrationConfig, MigrationLogger, MigrationReport,
@@ -685,5 +683,5 @@ class TestMainEntryPoint:
         p.write_text(xml, encoding="utf-8")
         rc = C.main(["--input", str(p), "--no-swap", "--no-log", "--no-report"])
         assert rc == 0
-        gen_files = list(tmp_path.glob("*_ST_Generated*"))
+        gen_files = list(tmp_path.glob("*_st_generated*"))
         assert len(gen_files) == 1

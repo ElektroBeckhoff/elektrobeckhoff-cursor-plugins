@@ -10,8 +10,10 @@ Add write functionality to FB_[DEVICE_NAME].
 Write registers:
 [ADDR] [TYPE] = [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-modbus` (dual state machine, write change detection, signed write values)
+
 ## Instructions
 
-Look up the Modbus rules for dual state machine, write change detection, and signed write values. Read and follow them before generating code.
-
-Add: control struct, change detection, write state machine, bWriteEnable.
+Add: control struct, change detection via memory struct, write state machine with `_nWriteStep`, `bWriteEnable` input. Follow the step-pair pattern for write operations.

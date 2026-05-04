@@ -11,8 +11,10 @@ Purpose: [DESCRIPTION]
 Parameters: [LIST]
 Return type: [TYPE]
 
+## Required Context
+
+**Rules:** `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`
+
 ## Instructions
 
-Look up the rules for naming, XML formats, and comments. Read and follow them before generating code.
-
-Generate method XML with its own GUID (`[guid]::NewGuid()`).
+Generate method XML with its own GUID (`[guid]::NewGuid()`). Method is placed inside the POU element, after `</Implementation>`.

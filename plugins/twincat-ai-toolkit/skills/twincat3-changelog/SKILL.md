@@ -35,7 +35,7 @@ Two header styles depending on release scope:
 
 ---
 
-## ⭐ Highlights
+## Highlights
 
 **1. Feature Title**
 Brief description of the feature and its impact.

@@ -11,8 +11,15 @@ Purpose: [DESCRIPTION]
 Inputs: [LIST]
 Outputs: [LIST]
 
+## Required Context
+
+Read and follow these before generating code:
+
+**Rules:** `twincat3-core`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`, `twincat3-formatting`
+
 ## Instructions
 
-Look up all relevant rules for TwinCAT3 core, naming, formatting, comments, and XML formats. Read and follow them completely before generating code.
-
-Generate FB as valid TcPOU XML with GUID (`[guid]::NewGuid()`).
+1. Generate FB as valid TcPOU XML with GUID (`[guid]::NewGuid()`)
+2. XML `Name` attribute must match the FUNCTION_BLOCK name in CDATA
+3. All VAR_INPUT/VAR_OUTPUT must have inline comments
+4. Register the file in `.plcproj`

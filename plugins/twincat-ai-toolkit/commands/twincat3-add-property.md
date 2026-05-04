@@ -11,8 +11,10 @@ Type: [TYPE]
 Access: [GET / SET / both]
 Purpose: [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`, `twincat3-oop`, `twincat3-xml-tcpou`
+
 ## Instructions
 
-Look up the rules for naming, OOP, and XML formats. Read and follow them before generating code.
-
-Generate property XML with 3 GUIDs (`[guid]::NewGuid()`).
+Generate property XML with 3 GUIDs (`[guid]::NewGuid()`) -- one for property, one for Get, one for Set. Property names use PascalCase without prefix.

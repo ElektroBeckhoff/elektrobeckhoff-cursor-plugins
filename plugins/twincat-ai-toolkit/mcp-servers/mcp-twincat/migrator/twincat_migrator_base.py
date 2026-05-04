@@ -242,7 +242,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
             "  --analyze-only   Parse and inspect structure. No ST generation.\n"
             "\n"
             "OUTPUT MODES (files created/modified):\n"
-            "  Default:         Write ST to new *_ST_Generated file. Original untouched.\n"
+            "  Default:         Write ST to new *_st_generated file. Original untouched.\n"
             "  --swap:          Backup original, write ST to original path.\n"
             "  --force / -f:    Overwrite original in-place (backup created unless --no-backup).\n"
             "\n"
@@ -303,7 +303,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> MigrationConfig:
     p.add_argument("--no-swap", dest="swap", action="store_false",
                    help=("DEFAULT MODE. Write the generated ST file to a NEW path instead of the "
                          "original. The original file is NEVER touched. "
-                         "For single files: output is <stem>_ST_Generated<suffix>. "
+                         "For single files: output is <stem>_st_generated<suffix>. "
                          "For folders: output goes into <folder>_st_generated_<timestamp>/. "
                          "Safe for testing migration quality before committing changes."))
 
@@ -638,62 +638,6 @@ def _apply_input_flag(expr: str, flag: int, box: BoxNode, input_idx: int,
     return expr
 
 
-def _build_demux_merge_map(networks: List[NwlNetwork]) -> Tuple[
-        Dict[str, List[Tuple[str, str]]], set]:
-    """Pre-scan networks for Demux patterns that can be merged into FB calls.
-
-    Returns:
-        merge_map: {instance_name: [(param_name, target_var), ...]}
-        skip_networks: set of network indices that are fully merged
-    """
-    merge_map: Dict[str, List[Tuple[str, str]]] = {}
-    skip_networks: set = set()
-
-    for nw in networks:
-        demux_source: Optional[OperandNode] = None
-        has_demux = False
-        for item in nw.items:
-            if isinstance(item, DemuxNode):
-                has_demux = True
-                if item.input and not item.input.is_empty:
-                    demux_source = item.input
-
-        if not has_demux or not demux_source:
-            continue
-
-        src = demux_source.name
-        dot_pos = src.rfind(".")
-        if dot_pos <= 0:
-            continue
-
-        inst_name = src[:dot_pos]
-        param_name = src[dot_pos + 1:]
-
-        targets: List[Tuple[str, str]] = []
-        all_resolved = True
-        for item in nw.items:
-            if isinstance(item, DemuxNode):
-                continue
-            if isinstance(item, AssignNode):
-                if isinstance(item.rvalue, DemuxNode):
-                    for o in item.outputs:
-                        if not o.is_empty:
-                            targets.append((o.name, o.type_str))
-                else:
-                    all_resolved = False
-            else:
-                all_resolved = False
-
-        if targets:
-            if inst_name not in merge_map:
-                merge_map[inst_name] = []
-            for t_name, t_type in targets:
-                merge_map[inst_name].append((param_name, t_name, t_type))
-            if all_resolved:
-                skip_networks.add(nw.index)
-
-    return merge_map, skip_networks
-
 
 def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
     tc.st_networks = []
@@ -701,12 +645,7 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
     tc.edge_vars = []
     all_lines: List[str] = []
 
-    demux_merge_map, demux_skip = _build_demux_merge_map(tc.networks)
-
     for nw in tc.networks:
-        if nw.index in demux_skip:
-            continue
-
         stn = StNetwork(index=nw.index, out_commented=nw.out_commented)
 
         header_parts = []
@@ -724,7 +663,7 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
             stn.comment_header = f"(* FBD {nw_label}{oc_suffix} *)"
 
         if nw.out_commented:
-            commented_lines = _generate_network_code(nw, tc, cfg, demux_merge_map)
+            commented_lines = _generate_network_code(nw, tc, cfg)
             wrapped = ["(* OutCommented network:"]
             for line in commented_lines:
                 wrapped.append(f"   {line}")
@@ -732,7 +671,7 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
             stn.lines = wrapped
         else:
             todos_before = len(tc.todos)
-            generated = _generate_network_code(nw, tc, cfg, demux_merge_map)
+            generated = _generate_network_code(nw, tc, cfg)
             new_todos = tc.todos[todos_before:]
             if new_todos and cfg.mark_todo:
                 reasons = []
@@ -763,13 +702,10 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
 
     for action in tc.actions:
         if action.networks:
-            action_merge_map, action_skip = _build_demux_merge_map(action.networks)
             action_lines: List[str] = []
             for nw in action.networks:
-                if nw.index in action_skip:
-                    continue
                 todos_before = len(tc.todos)
-                code = _generate_network_code(nw, tc, cfg, action_merge_map)
+                code = _generate_network_code(nw, tc, cfg)
                 new_todos = tc.todos[todos_before:]
                 if new_todos and cfg.mark_todo:
                     reasons = []
@@ -789,8 +725,7 @@ def convert_networks_to_st(tc: TcFile, cfg: MigrationConfig) -> None:
             action.st_code = "\n".join(action_lines).rstrip() + "\n"
 
 
-def _generate_network_code(nw: NwlNetwork, tc: TcFile, cfg: MigrationConfig,
-                           demux_merge_map: Optional[Dict[str, List[Tuple[str, str]]]] = None) -> List[str]:
+def _generate_network_code(nw: NwlNetwork, tc: TcFile, cfg: MigrationConfig) -> List[str]:
     lines: List[str] = []
 
     demux_source: Optional[OperandNode] = None
@@ -817,9 +752,9 @@ def _generate_network_code(nw: NwlNetwork, tc: TcFile, cfg: MigrationConfig,
                     lines.append(todo)
                     tc.todos.append(todo)
                     continue
-            lines.extend(_gen_assign(item, tc, cfg, demux_merge_map))
+            lines.extend(_gen_assign(item, tc, cfg))
         elif isinstance(item, BoxNode):
-            lines.extend(_gen_top_level_box(item, tc, cfg, demux_merge_map))
+            lines.extend(_gen_top_level_box(item, tc, cfg))
     return lines
 
 
@@ -829,8 +764,7 @@ def _is_return_assign(assign: AssignNode) -> bool:
             and all(o.name == "???" and o.flags == 8 for o in assign.outputs))
 
 
-def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
-                demux_merge_map: Optional[Dict[str, List[Tuple[str, str]]]] = None) -> List[str]:
+def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig) -> List[str]:
     lines: List[str] = []
     if assign.rvalue is None:
         return lines
@@ -862,7 +796,7 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
         return lines
 
     if isinstance(assign.rvalue, AssignNode):
-        inner_lines = _gen_assign(assign.rvalue, tc, cfg, demux_merge_map)
+        inner_lines = _gen_assign(assign.rvalue, tc, cfg)
         lines.extend(inner_lines)
         inner_targets = [o for o in assign.rvalue.outputs if not o.is_empty]
         outer_targets = [o for o in assign.outputs if not o.is_empty]
@@ -902,13 +836,6 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
             for out_op in assign_targets:
                 param_targets.setdefault(assign_out_param, []).append(
                     (out_op.name, out_op.type_str, negated))
-
-        if demux_merge_map and inst_name in demux_merge_map:
-            for entry in demux_merge_map[inst_name]:
-                pname = entry[0]
-                target = entry[1]
-                t_type = entry[2] if len(entry) == 3 else ""
-                param_targets.setdefault(pname, []).append((target, t_type, False))
 
         inline_outs: List[Tuple[str, str, str]] = []
         post_call_lines: List[str] = []
@@ -974,15 +901,10 @@ def _gen_assign(assign: AssignNode, tc: TcFile, cfg: MigrationConfig,
     return lines
 
 
-def _gen_top_level_box(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
-                       demux_merge_map: Optional[Dict[str, List[Tuple[str, str]]]] = None) -> List[str]:
+def _gen_top_level_box(box: BoxNode, tc: TcFile, cfg: MigrationConfig) -> List[str]:
     if box.call_type in FB_CALL_TYPES:
         hoisted: List[str] = []
-        extra_outs: Optional[List[Tuple[str, str]]] = None
-        inst_name = box.box_type if box.call_type in ("Function", "Program", "Method") else (box.instance.name if box.instance else "")
-        if demux_merge_map and inst_name in demux_merge_map:
-            extra_outs = list(demux_merge_map[inst_name])
-        lines = _gen_fb_call(box, tc, cfg, hoisted, extra_outs)
+        lines = _gen_fb_call(box, tc, cfg, hoisted)
         result = list(hoisted) + lines
         return result
 
@@ -1140,7 +1062,7 @@ def _wrap_bool_chain(expr: str, prefix: str) -> str:
 
 def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                  hoisted: List[str],
-                 extra_outputs: Optional[List[Tuple[str, str]]] = None,
+                 extra_outputs: Optional[List[Tuple[str, str, str]]] = None,
                  skip_output_items: bool = False) -> List[str]:
     if box.call_type in ("Function", "Program", "Method"):
         inst_name = box.box_type
@@ -1182,12 +1104,7 @@ def _gen_fb_call(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
                     mappings.append((out_names[i], "=>", out_op.name))
 
     if extra_outputs:
-        for extra in extra_outputs:
-            if len(extra) == 3:
-                pname, target, t_type = extra
-            else:
-                pname, target = extra[0], extra[1]
-                t_type = ""
+        for pname, target, t_type in extra_outputs:
             p_idx = next((j for j, n in enumerate(out_names) if n == pname), -1)
             p_type = out_types[p_idx] if 0 <= p_idx < len(out_types) else ""
             if p_type and t_type and _check_type_mismatch(p_type, t_type):
@@ -1866,7 +1783,7 @@ def _resolve_output_path(source: Path, cfg: MigrationConfig) -> Path:
         if out.is_dir():
             return out / f"{source.stem}_ST{source.suffix}"
         return out
-    return source.parent / f"{source.stem}_ST_Generated{source.suffix}"
+    return source.parent / f"{source.stem}_st_generated{source.suffix}"
 
 
 def _print_analysis(tc: TcFile):

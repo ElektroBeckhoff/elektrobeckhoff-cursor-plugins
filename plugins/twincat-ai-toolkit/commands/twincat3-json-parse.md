@@ -11,8 +11,11 @@ Fields:
   [fieldname] : [TYPE] = [DESCRIPTION]
   [fieldname] : [TYPE] = [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`
+**Skills:** `twincat3-json-strings` (SKILL.md + json-parse-patterns.md)
+
 ## Instructions
 
-Look up the relevant rules and skills for JSON parsing and naming. Read and follow them before generating code.
-
-Create data struct and parse logic with dynamic memory allocation.
+Create data struct and parse logic with dynamic memory allocation. Always check `_jsonDoc <> 0` after `ParseDocument`/`GetJsonDomContent`. Always `__DELETE` in the same scope as `__NEW`.

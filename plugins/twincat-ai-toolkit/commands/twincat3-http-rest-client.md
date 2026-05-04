@@ -13,8 +13,16 @@ Endpoints:
   [GET/POST] [/api/endpoint] = [DESCRIPTION]
 Auth: [API-Key / Bearer Token / None]
 
-## Instructions
+## Required Context
 
-Look up all relevant rules and skills for HTTP, naming, formatting, comments, JSON, and XML formats. Read and follow them completely before generating code.
+**Rules:** `twincat3-http`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Skills:** `twincat3-http` (SKILL.md + http-patterns.md), `twincat3-json-strings` (for JSON parsing/writing)
 
-Generate all required files: client FB with execute + send methods, error mapping function, param struct, GVL, properties, data structs, .plcproj registration. Generate GUIDs with `[guid]::NewGuid()`.
+## Deliverables
+
+1. `FB_[Lib]_Client.TcPOU` -- client FB with Execute + Send methods
+2. `F_[Lib]_HttpRequestErrorToString.TcPOU` -- error mapping function
+3. `ST_[Lib]_HttpParam.TcDUT` -- param struct
+4. Data structs for response parsing
+5. Properties: IsConnected, IsBusy, IsError, ErrorText
+6. Register all files in `.plcproj`, generate GUIDs with `[guid]::NewGuid()`

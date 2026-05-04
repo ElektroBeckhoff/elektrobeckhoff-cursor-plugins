@@ -1,0 +1,76 @@
+---
+description: Safety rules for FBD/FUP and CFC to ST migration. Enforces preview-first workflow, backup requirements, TODO reporting, and post-migration verification. Applies to twincat_fup_migrate, twincat_cfc_migrate, and twincat_migrate.
+---
+
+# TwinCAT Migration Safety Rules
+
+These rules apply to ALL migration tools: `twincat_fup_migrate`, `twincat_cfc_migrate`, and `twincat_migrate`.
+
+## Rule 1: Never skip the preview step
+
+Before writing any files, always run with `dry_run=true` first and verify:
+- Error count is 0
+- TODO count is acceptable
+- Generated ST preview looks correct
+
+Exception: If the user explicitly says "just run it" or "skip preview", proceed with the default safe mode (new file, original untouched).
+
+## Rule 2: Never use force without backup
+
+The combination `force=true` + `backup=false` permanently destroys the original file with no recovery option. This combination MUST NOT be used unless:
+- The user explicitly requests it AND
+- The user confirms they have external version control (git, SVN, etc.)
+
+If the user asks for `force=true`, always keep `backup=true` (which is the default).
+
+## Rule 3: Default is safe (no-swap)
+
+The default mode writes ST to a new file (`*_st_generated`), leaving the original untouched. Only use `swap=true` when the user confirms the migration quality is acceptable. Only use `force=true` when the user explicitly requests in-place overwrite.
+
+## Rule 4: Always use recursive for folders
+
+When the input is a folder, always add `recursive=true` unless the user explicitly says "top-level only" or "no subfolders".
+
+## Rule 5: Report TODOs clearly
+
+If the migration produces TODO markers, always:
+1. Report the exact count
+2. List the first 5 TODO reasons
+3. Explain that these networks need manual review
+4. Suggest searching for `TODO [FBD Migration]` or `TODO [CFC Migration]` in the generated code
+
+## Rule 6: Do not migrate unsupported implementations
+
+The tools automatically skip files with unsupported implementation types:
+- `twincat_fup_migrate`: skips ST, CFC, SFC, IL
+- `twincat_cfc_migrate`: skips ST, NWL/FBD, SFC, IL
+- `twincat_migrate`: auto-detects FBD and CFC, skips ST/SFC/IL
+
+Do not attempt to force migration of skipped files. Report them as skipped.
+
+## Rule 7: Verify after migration
+
+After any non-dry-run migration, recommend:
+1. Open the TwinCAT project in XAE (`twincat_open`)
+2. Run `twincat_check_all_objects` (errors included in response)
+3. Search for TODO markers
+4. For CFC migrations: verify execution order matches original CFC behavior
+
+## Rule 8: Respect strict for safety-critical projects
+
+If the user mentions safety-critical, SIL, or PL requirements, always add `strict=true` to abort on any unclear logic. Do not proceed with partial migration in these contexts.
+
+## Rule 9: File types
+
+- `.TcPOU` -- primary migration target (PROGRAM, FUNCTION_BLOCK, FUNCTION, METHOD, ACTION)
+- `.TcGVL` -- loaded but skipped (Global Variable Lists have no implementation)
+- `.TcDUT` -- loaded but skipped (Data Unit Types have no implementation)
+- Other extensions -- rejected at file collection stage
+
+## Rule 10: Encoding
+
+Default encoding is UTF-8. The tools auto-detect UTF-8-BOM and Latin-1 as fallbacks. Do not change `encoding` unless the user reports encoding errors.
+
+## Rule 11: CFC execution order awareness
+
+CFC execution order is derived from the XML serialization order. While this is reliable for most cases, complex feedback loops or implicit FB output accesses (e.g. `SR.Q1` read without explicit connection) may produce different execution semantics than the original CFC runtime. Always warn the user about this after CFC migration.

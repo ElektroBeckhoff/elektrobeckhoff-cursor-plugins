@@ -11,8 +11,10 @@ Variables:
   [name] : [TYPE] := [VALUE]; // [DESCRIPTION]
   [name] : [TYPE] := [VALUE]; // [DESCRIPTION]
 
+## Required Context
+
+**Rules:** `twincat3-naming`, `twincat3-xml-tcgvl`
+
 ## Instructions
 
-Look up the rules for TcGVL XML and naming. Read and follow them before generating code.
-
-Generate as valid TcGVL XML with GUID (`[guid]::NewGuid()`).
+Generate as valid TcGVL XML with GUID (`[guid]::NewGuid()`). Use `VAR_GLOBAL CONSTANT` for param GVLs, `VAR_GLOBAL` for runtime GVLs. Register in `.plcproj`.

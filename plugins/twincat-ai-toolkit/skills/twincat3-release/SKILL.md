@@ -27,7 +27,7 @@ Task Progress:
 Read current version:
 
 ```
-twincat_project_info(plcproj_path="<path>")
+twincat_plcproj_info(plcproj_path="<path>")
 ```
 
 Increment according to change scope:
