@@ -189,8 +189,9 @@ def twincat_check_all_objects() -> str:
     Returns structured JSON with compile result AND all errors,
     warnings, and infos -- no separate twincat_get_output_log call needed.
 
-    Response fields: success, method, error_count, errors[], warnings[],
-    infos[], message.
+    Response fields: success, method, error_count, warning_count,
+    errors[], warnings[], infos[], message.
+    Always inspect warning_count and warnings[] even when success=true.
 
     No twincat_reload needed -- CheckAllObjects reads from disk.
     Requires twincat_open to have been called."""

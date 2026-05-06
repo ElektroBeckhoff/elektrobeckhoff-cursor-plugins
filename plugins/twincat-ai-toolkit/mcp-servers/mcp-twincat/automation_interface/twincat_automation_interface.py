@@ -64,6 +64,7 @@ class CheckResult:
     success: bool
     method: str = ""
     error_count: int = 0
+    warning_count: int = 0
     errors: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     infos: list = field(default_factory=list)
@@ -749,6 +750,7 @@ class TcAutomationInterface:
     def _merge_errors_into_check(self, result: CheckResult) -> CheckResult:
         err = self._impl_get_output_log()
         result.error_count = err.count
+        result.warning_count = len(err.warnings)
         result.errors = err.errors
         result.warnings = err.warnings
         result.infos = err.infos

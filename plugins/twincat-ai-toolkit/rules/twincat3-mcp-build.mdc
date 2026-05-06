@@ -13,7 +13,7 @@ alwaysApply: false
 |------|---------|
 | `twincat_status` | Check if XAE is installed / running |
 | `twincat_open` | Open solution in XAE, locate PLC project |
-| `twincat_check_all_objects` | Compile ALL objects — returns errors, warnings, infos directly |
+| `twincat_check_all_objects` | Compile ALL objects — returns `error_count`, `warning_count`, `errors[]`, `warnings[]`, `infos[]` directly |
 | `twincat_build` | Full rebuild of the solution |
 | `twincat_get_output_log` | Read errors/warnings from last `twincat_build` (not needed after `twincat_check_all_objects`) |
 | `twincat_reload` | Close + reopen solution (re-reads structural files from disk) |
