@@ -23,7 +23,8 @@ from dataclasses import dataclass, field, asdict
 log = logging.getLogger("twincat-mcp")
 
 PROG_ID = "TcXaeShell.DTE.15.0"
-RPC_E_CALL_REJECTED = -2147418111  # 0x80010001 signed
+RPC_E_CALL_REJECTED = -2147418111   # 0x80010001 signed
+RPC_S_SERVER_UNAVAILABLE = -2147023174  # 0x800706BA signed
 
 HAS_WIN32 = False
 HAS_WIN32GUI = False
@@ -387,6 +388,7 @@ class TcAutomationInterface:
             try:
                 self._dte = win32com.client.GetActiveObject(PROG_ID)
                 self._created_new = False
+                _ = self._dte.MainWindow.Caption  # health check
                 log.info("Attached to running TcXaeShell")
             except Exception:
                 self._dte = None
@@ -403,11 +405,6 @@ class TcAutomationInterface:
                         os.path.abspath(str(self._dte.Solution.FullName))
                     )
             except Exception:
-                # TODO(FIX): Stale DTE after force-quit -- the COM object
-                # is dead but self._dte is not None.  Without this guard
-                # the bare Solution.Open() below would crash with
-                # "TcXaeShell.DTE.15.0.Solution" because the dead proxy
-                # cannot reach the Solution property.
                 dte_is_alive = False
                 log.warning("DTE appears stale (Solution inaccessible) "
                             "-- dropping reference")
@@ -445,9 +442,21 @@ class TcAutomationInterface:
             self._dte = win32com.client.Dispatch(PROG_ID)
             self._created_new = True
             self._we_opened_solution = True
-            self._dte.SuppressUI = False
-            self._dte.MainWindow.Visible = True
-            self._dte.UserControl = False
+
+            for _init_retry in range(10):
+                try:
+                    self._dte.SuppressUI = False
+                    self._dte.MainWindow.Visible = True
+                    self._dte.UserControl = False
+                    break
+                except Exception as _init_exc:
+                    if self._is_retryable_com_error(_init_exc) and _init_retry < 9:
+                        log.info("XAE not ready yet (retry %d/10): %s",
+                                 _init_retry + 1, _init_exc)
+                        pythoncom.PumpWaitingMessages()
+                        time.sleep(2)
+                    else:
+                        raise
 
             self._wait_for_xae_idle(timeout_s)
             self._ensure_correct_solution(expected_sln, timeout_s)
@@ -1239,11 +1248,18 @@ class TcAutomationInterface:
             except Exception:
                 pass
 
+    _RETRYABLE_HRESULTS = {RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE}
+
     @staticmethod
     def _is_call_rejected(exc: Exception) -> bool:
-        if hasattr(exc, "hresult") and exc.hresult == RPC_E_CALL_REJECTED:
+        return TcAutomationInterface._is_retryable_com_error(exc)
+
+    @staticmethod
+    def _is_retryable_com_error(exc: Exception) -> bool:
+        retryable = TcAutomationInterface._RETRYABLE_HRESULTS
+        if hasattr(exc, "hresult") and exc.hresult in retryable:
             return True
         for arg in getattr(exc, "args", ()):
-            if isinstance(arg, int) and arg == RPC_E_CALL_REJECTED:
+            if isinstance(arg, int) and arg in retryable:
                 return True
         return False
