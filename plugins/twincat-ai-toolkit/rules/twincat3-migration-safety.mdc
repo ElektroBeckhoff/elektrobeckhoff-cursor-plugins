@@ -51,8 +51,8 @@ Do not attempt to force migration of skipped files. Report them as skipped.
 ## Rule 7: Verify after migration
 
 After any non-dry-run migration, recommend:
-1. Open the TwinCAT project in XAE (`twincat_open`)
-2. Run `twincat_check_all_objects` (errors included in response)
+1. `twincat_open(path="<.plcproj, .sln, or folder>")`
+2. `twincat_check_all_objects` (errors included in response)
 3. Search for TODO markers
 4. For CFC migrations: verify execution order matches original CFC behavior
 

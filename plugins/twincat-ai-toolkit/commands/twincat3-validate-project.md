@@ -13,6 +13,6 @@ Compile all objects in the TwinCAT PLC project and report any errors.
 
 ## Instructions
 
-Find the `.plcproj` in the workspace, open the solution with `twincat_open` (explicit path), run `twincat_check_all_objects`, and report all errors with file paths and line numbers.
+Find the `.plcproj` or `.sln` in the workspace, open with `twincat_open(path="...")`, run `twincat_check_all_objects`, and report all errors with file paths and line numbers.
 
 If errors are found, offer to fix them.

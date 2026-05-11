@@ -13,11 +13,14 @@ COM:       All TcXaeShell interaction runs on a dedicated STA thread
 
 import io
 import os
+import re
 import sys
+import glob
 import json
 import logging
 import contextlib
-from typing import Optional
+import xml.etree.ElementTree as ET
+from typing import Optional, List, Dict, Union
 from dataclasses import asdict
 
 _server_dir = os.path.dirname(os.path.abspath(__file__))
@@ -110,21 +113,37 @@ def twincat_status() -> str:
 
 @mcp.tool()
 def twincat_open(
-    sln_path: str = "",
+    path: str = "",
     plcproj_path: str = "",
+    sln_path: str = "",
     proj_name: str = "",
     timeout_seconds: int = 180,
 ) -> str:
     """Open a TwinCAT solution in XAE and locate the PLC project.
+
+    Accepts a single 'path' parameter that can be:
+      - A .plcproj file  (opens directly)
+      - A .sln file      (resolves via .tsproj/.xti XML to .plcproj)
+      - A folder          (scans for .sln or .plcproj automatically)
+
+    If the solution contains multiple PLC projects, returns an error
+    with the full list of available projects and their .plcproj paths.
+
+    Legacy parameters (plcproj_path, sln_path, proj_name) are still
+    supported for backward compatibility but 'path' is preferred.
 
     Behaviour:
       - If XAE is running with the correct solution: reuse it.
       - If XAE is running with a different solution: start a
         separate XAE instance (the user's solution stays open).
       - If XAE is running with no solution: open the requested one.
-      - If XAE is not running: start a new instance.
+      - If XAE is not running: start a new instance."""
 
-    Leave paths empty for auto-detection."""
+    if path:
+        resolved = _resolve_path(path)
+        if isinstance(resolved, dict):
+            return _json(resolved)
+        plcproj_path = resolved
 
     if not plcproj_path:
         plcproj_path = _auto_detect_plcproj()
@@ -772,6 +791,198 @@ def twincat_plcproj_sync(
         "exit_code": exit_code,
         "output": buf.getvalue(),
     })
+
+
+# ================================================================
+#  Path resolver  (.sln / .tsproj / .xti / .plcproj / folder)
+# ================================================================
+
+_SLN_PROJECT_RE = re.compile(
+    r'^Project\("[^"]*"\)\s*=\s*"[^"]*"\s*,\s*"([^"]+\.tsproj)"',
+    re.MULTILINE,
+)
+
+_EXCLUDES_LOWER = {"samples", "samples_", "versions", "_libraries", ".git", "node_modules"}
+
+
+def _resolve_path(path: str) -> Union[str, dict]:
+    """Resolve a user-supplied path to an absolute .plcproj path.
+
+    Accepts:
+      - A .plcproj file   → returned as-is (normalised)
+      - A .sln file       → XML chain: .sln → .tsproj → .xti → .plcproj
+      - A directory        → scan for .sln first, then .plcproj
+
+    Returns either a plcproj path (str) or an error dict.
+    """
+    path = os.path.abspath(path)
+    lower = path.lower()
+
+    if lower.endswith(".plcproj"):
+        if not os.path.isfile(path):
+            return {"success": False, "error": f"File not found: {path}"}
+        return path
+
+    if lower.endswith(".sln"):
+        if not os.path.isfile(path):
+            return {"success": False, "error": f"File not found: {path}"}
+        return _resolve_sln(path)
+
+    if os.path.isdir(path):
+        return _resolve_directory(path)
+
+    return {"success": False, "error": f"Path is not a .plcproj, .sln, or directory: {path}"}
+
+
+def _resolve_sln(sln_path: str) -> Union[str, dict]:
+    """Resolve .sln → .tsproj → .xti files → list of .plcproj entries."""
+    sln_dir = os.path.dirname(sln_path)
+
+    try:
+        with open(sln_path, "r", encoding="utf-8-sig") as f:
+            sln_text = f.read()
+    except Exception as exc:
+        return {"success": False, "error": f"Cannot read .sln: {exc}"}
+
+    tsproj_matches = _SLN_PROJECT_RE.findall(sln_text)
+    if not tsproj_matches:
+        return {"success": False, "error": f"No .tsproj reference found in {sln_path}"}
+
+    tsproj_path = os.path.normpath(os.path.join(sln_dir, tsproj_matches[0]))
+    if not os.path.isfile(tsproj_path):
+        return {"success": False, "error": f".tsproj not found: {tsproj_path}"}
+
+    return _resolve_tsproj(tsproj_path, sln_path)
+
+
+def _resolve_tsproj(tsproj_path: str, sln_path: str) -> Union[str, dict]:
+    """Parse .tsproj XML → read <Plc><Project File="*.xti"/> → resolve each .xti."""
+    tsproj_dir = os.path.dirname(tsproj_path)
+    config_plc_dir = os.path.join(tsproj_dir, "_Config", "PLC")
+
+    try:
+        tree = ET.parse(tsproj_path)
+        root = tree.getroot()
+    except Exception as exc:
+        return {"success": False, "error": f"Cannot parse .tsproj: {exc}"}
+
+    ns = root.tag.split("}")[0] + "}" if "}" in root.tag else ""
+    plc_node = root.find(f".//{ns}Plc") if ns else root.find(".//Plc")
+    if plc_node is None:
+        plc_node = root.find(f".//{ns}Project/{ns}Plc") if ns else root.find(".//Project/Plc")
+    if plc_node is None:
+        return {"success": False, "error": f"No <Plc> section found in {tsproj_path}"}
+
+    projects: List[Dict[str, str]] = []
+    for proj_elem in plc_node.findall(f"{ns}Project" if ns else "Project"):
+        xti_file = proj_elem.get("File", "")
+        if not xti_file:
+            continue
+        xti_path = os.path.normpath(os.path.join(config_plc_dir, xti_file))
+        if not os.path.isfile(xti_path):
+            continue
+        info = _parse_xti(xti_path)
+        if info:
+            projects.append(info)
+
+    if len(projects) == 0:
+        return {"success": False, "error": f"No PLC projects found in {tsproj_path}"}
+
+    if len(projects) == 1:
+        return projects[0]["plcproj_path"]
+
+    return {
+        "success": False,
+        "error": "multiple_plc_projects",
+        "message": (
+            f"Found {len(projects)} PLC projects in solution. "
+            f"Pass the exact path to the desired .plcproj file."
+        ),
+        "solution": sln_path,
+        "available_projects": projects,
+    }
+
+
+def _parse_xti(xti_path: str) -> Optional[Dict[str, str]]:
+    """Parse a .xti file → extract Name and resolve PrjFilePath to absolute."""
+    try:
+        tree = ET.parse(xti_path)
+        root = tree.getroot()
+    except Exception:
+        return None
+
+    ns = root.tag.split("}")[0] + "}" if "}" in root.tag else ""
+    proj = root.find(f"{ns}Project") if ns else root.find("Project")
+    if proj is None:
+        return None
+
+    name = proj.get("Name", "")
+    prj_file_path = proj.get("PrjFilePath", "")
+    if not prj_file_path:
+        return None
+
+    xti_dir = os.path.dirname(xti_path)
+    abs_plcproj = os.path.normpath(os.path.join(xti_dir, prj_file_path))
+
+    if not os.path.isfile(abs_plcproj):
+        return None
+
+    return {"name": name, "plcproj_path": abs_plcproj}
+
+
+def _resolve_directory(dir_path: str) -> Union[str, dict]:
+    """Resolve a directory by scanning for .sln, then falling back to .plcproj."""
+    sln_files = glob.glob(os.path.join(dir_path, "*.sln"))
+    if len(sln_files) == 1:
+        return _resolve_sln(sln_files[0])
+    if len(sln_files) > 1:
+        return {
+            "success": False,
+            "error": "multiple_solutions",
+            "message": (
+                f"Found {len(sln_files)} .sln files in {dir_path}. "
+                f"Pass the exact .sln or .plcproj path."
+            ),
+            "available_solutions": [os.path.normpath(s) for s in sorted(sln_files)],
+        }
+
+    plcproj_files = _scan_plcproj_in_dir(dir_path)
+    if len(plcproj_files) == 1:
+        return plcproj_files[0]
+    if len(plcproj_files) > 1:
+        projects = []
+        for p in plcproj_files:
+            name = _read_proj_name(p) or os.path.splitext(os.path.basename(p))[0]
+            projects.append({"name": name, "plcproj_path": p})
+        return {
+            "success": False,
+            "error": "multiple_plc_projects",
+            "message": (
+                f"Found {len(plcproj_files)} .plcproj files in {dir_path}. "
+                f"Pass the exact .plcproj path."
+            ),
+            "available_projects": projects,
+        }
+
+    return {"success": False, "error": f"No .sln or .plcproj found in {dir_path}"}
+
+
+def _scan_plcproj_in_dir(dir_path: str, max_depth: int = 5) -> List[str]:
+    """Walk a directory tree and collect .plcproj files (excluding known noise)."""
+    results = []
+    for dirpath, dirnames, filenames in os.walk(dir_path):
+        parts_lower = {p.lower() for p in dirpath.split(os.sep)}
+        if parts_lower & _EXCLUDES_LOWER:
+            dirnames.clear()
+            continue
+        depth = dirpath.replace(dir_path, "").count(os.sep)
+        if depth > max_depth:
+            dirnames.clear()
+            continue
+        for f in filenames:
+            if f.lower().endswith(".plcproj"):
+                results.append(os.path.normpath(os.path.join(dirpath, f)))
+    return results
 
 
 # ================================================================

@@ -35,17 +35,18 @@ alwaysApply: false
 
 After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:
 
-1. `twincat_open` (with explicit `plcproj_path`)
+1. `twincat_open(path="<.plcproj, .sln, or folder>")` — resolves everything automatically
 2. `twincat_check_all_objects` — errors, warnings, and infos are included in the response
 3. Fix errors → repeat from step 2
 
-`twincat_get_output_log` is only needed after `twincat_build`. Do NOT call it after `twincat_check_all_objects` — the response already contains all diagnostics.
+`twincat_get_output_log` is only needed after `twincat_build`. Do NOT call it after `twincat_check_all_objects`.
 
 For the detailed workflow, use the `twincat3-validate` skill.
 
 ## Critical Rules
 
-- **Always pass explicit `plcproj_path`** to `twincat_open`. Auto-detect is unreliable in multi-project workspaces.
+- **Use `path` parameter** for `twincat_open`. Accepts `.plcproj`, `.sln`, or a folder. The tool resolves the PLC project via XML parsing (.sln → .tsproj → .xti → .plcproj).
+- **Multi-project solutions**: If multiple PLC projects exist, the tool returns an error with the full list. Pick the correct `.plcproj` and pass it directly.
 - **No `twincat_reload` needed** after editing `.TcPOU` / `.TcDUT` / `.TcGVL` content — `twincat_check_all_objects` reads directly from disk.
 - **`twincat_reload` IS required** after structural changes to `.plcproj`, `.tsproj`, or `.sln` (added/removed files, version bumps, library references).
 - **Use `twincat_check_all_objects`** for library projects — it compiles every object. A normal `twincat_build` only compiles objects reachable from MAIN.

@@ -79,9 +79,9 @@ Requires explicit user confirmation. Never use `backup=false` with this.
 ## Step 4: Post-Migration Verification
 
 After any non-dry-run migration, recommend:
-1. Open the TwinCAT project in XAE (`twincat_open`)
-2. Run `twincat_check_all_objects`
-3. Review compiler errors (included in `twincat_check_all_objects` response)
+1. `twincat_open(path="<.plcproj, .sln, or folder>")`
+2. `twincat_check_all_objects`
+3. Review compiler errors (included in response)
 4. Search for `TODO [CFC Migration]` markers in generated code
 5. Verify execution order matches the original CFC behavior
 6. Test runtime behavior against original CFC version

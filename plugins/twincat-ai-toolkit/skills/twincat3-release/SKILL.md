@@ -75,7 +75,7 @@ Both must match exactly.
 The `.plcproj` version change is a structural change — XAE needs a reload:
 
 ```
-twincat_open(plcproj_path="<path>")
+twincat_open(path="<path to .plcproj, .sln, or project folder>")
 twincat_reload()
 ```
 

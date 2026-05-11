@@ -80,9 +80,9 @@ Requires explicit user confirmation. Creates a shared backup folder for all file
 ## Step 4: Post-Migration Verification
 
 After any non-dry-run migration, recommend:
-1. Open the TwinCAT project in XAE (`twincat_open`)
-2. Run `twincat_check_all_objects`
-3. Review compiler errors (included in `twincat_check_all_objects` response)
+1. `twincat_open(path="<.plcproj, .sln, or folder>")`
+2. `twincat_check_all_objects`
+3. Review compiler errors (included in response)
 4. Search for `TODO [FBD Migration]` and `TODO [CFC Migration]` markers
 5. Verify I/O mapping, execution order, and task assignment
 6. Test runtime behavior against original implementations

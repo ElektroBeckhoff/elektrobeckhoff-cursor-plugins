@@ -20,34 +20,31 @@ Task Progress:
 - [ ] Step 5: Fix errors and re-check (loop)
 ```
 
-## Step 1: Find .plcproj Path
+## Step 1: Find Project Path
 
-Search the workspace for `.plcproj` files. Exclude `Samples_/`, `Versions/`, `_Libraries/`:
+Search the workspace for `.plcproj` or `.sln` files:
 
 ```
 Glob: **/*.plcproj
+Glob: **/*.sln
 ```
 
-Pick the **library project** `.plcproj` (not samples). Example:
-```
-Tc3_MyLib/Tc3_MyLib/Tc3_MyLib/Tc3_MyLib.plcproj
-```
-
-> **CRITICAL:** Always pass the explicit `plcproj_path` to `twincat_open`. Never rely on auto-detect — it searches from the plugin cache and may find wrong projects.
+> **TIP:** You can pass a `.plcproj`, `.sln`, or a folder to `twincat_open`. The tool resolves everything automatically via XML parsing.
 
 ## Step 2: Open Solution
 
 ```
-twincat_open(plcproj_path="<full path to .plcproj>")
+twincat_open(path="<path to .plcproj, .sln, or project folder>")
 ```
 
-The tool automatically:
-- Finds the `.sln` file near the `.plcproj`
-- Reads the PLC project name from `.plcproj` XML
-- Attaches to a running XAE if the correct solution is already open
-- Starts a separate XAE instance if a different solution is open (user's work stays untouched)
+The `path` parameter accepts:
+- A `.plcproj` → opens directly
+- A `.sln` → resolves via .tsproj/.xti XML to the PLC project
+- A folder → scans for .sln or .plcproj automatically
 
-**Verify response:** `success: true` and `plc_project_name` matches expected name.
+If the solution contains multiple PLC projects, the tool returns an error with the list of all available projects and their paths. Pick one and pass the exact `.plcproj` path.
+
+**Verify response:** `success: true`.
 
 ## Step 3: Run CheckAllObjects
 
