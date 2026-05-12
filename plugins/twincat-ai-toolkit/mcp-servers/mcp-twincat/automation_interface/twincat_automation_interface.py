@@ -1088,14 +1088,21 @@ class TcAutomationInterface:
         self._plc_proj_item = None
 
         log.info("Reload: reopening %s ...", sln_path)
-        try:
-            self._dte.Solution.Open(sln_path)
-            self._wait_for_solution_open(timeout_s)
-        except Exception as exc:
-            return ReloadResult(
-                success=False,
-                message=f"Failed to reopen solution: {exc}",
-            )
+        for _reopen_retry in range(5):
+            try:
+                self._dte.Solution.Open(sln_path)
+                self._wait_for_solution_open(timeout_s)
+                break
+            except Exception as exc:
+                if self._is_retryable_com_error(exc) and _reopen_retry < 4:
+                    log.info("Reload reopen retry %d/5: %s", _reopen_retry + 1, exc)
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(3)
+                else:
+                    return ReloadResult(
+                        success=False,
+                        message=f"Failed to reopen solution: {exc}",
+                    )
 
         self._sys_man = self._get_system_manager()
         if not self._sys_man:

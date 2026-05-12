@@ -145,8 +145,12 @@ def twincat_open(
             return _json(resolved)
         plcproj_path = resolved
 
-    if not plcproj_path:
-        plcproj_path = _auto_detect_plcproj()
+    if not path and not plcproj_path and not sln_path:
+        return _json({
+            "success": False,
+            "error": "No path provided. Pass path=, plcproj_path=, or sln_path=.",
+        })
+
     if not proj_name and plcproj_path:
         proj_name = _read_proj_name(plcproj_path)
 
