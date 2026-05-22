@@ -23,6 +23,15 @@ from dataclasses import dataclass, field, asdict
 log = logging.getLogger("twincat-mcp")
 
 PROG_ID = "TcXaeShell.DTE.15.0"
+
+
+def _canonical_path(p: str) -> str:
+    """Canonical, case-folded absolute path (resolves symlinks, junctions, subst)."""
+    try:
+        resolved = os.path.realpath(p)
+    except (OSError, ValueError):
+        resolved = os.path.abspath(p)
+    return os.path.normcase(resolved)
 RPC_E_CALL_REJECTED = -2147418111   # 0x80010001 signed
 RPC_S_SERVER_UNAVAILABLE = -2147023174  # 0x800706BA signed
 E_ACCESSDENIED = -2147024891  # 0x80070005 signed
@@ -288,23 +297,31 @@ class TcAutomationInterface:
             try:
                 self._dte.Solution.Close(False)
                 self._dte.Quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("Failed to quit active DTE ('%s'): %s",
+                            self._sln_path, exc)
+            self._dte = None
+            self._sys_man = None
+            self._plc_proj_item = None
         for key, state in list(self._instances.items()):
             dte = state.get("dte")
             if dte and id(dte) not in seen_ids and state.get("created_new"):
                 try:
                     dte.Solution.Close(False)
                     dte.Quit()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.warning("Failed to quit cached DTE ('%s'): %s",
+                                state.get("sln_path", key), exc)
+            state["dte"] = None
+            state["sys_man"] = None
+            state["plc_proj_item"] = None
         self._instances.clear()
 
     def _save_active_to_registry(self):
         """Persist current active session to the instance registry."""
         if not self._dte or not self._sln_path:
             return
-        key = os.path.normcase(os.path.abspath(self._sln_path))
+        key = _canonical_path(self._sln_path)
         self._instances[key] = {
             "dte": self._dte,
             "sys_man": self._sys_man,
@@ -314,12 +331,32 @@ class TcAutomationInterface:
             "sln_path": self._sln_path,
             "plcproj_file_path": self._plcproj_file_path,
         }
+        log.info("Saved instance to registry: '%s' (%d total)",
+                 self._sln_path, len(self._instances))
 
     def _remove_active_from_registry(self):
         """Remove the currently active session from the registry."""
         if self._sln_path:
-            key = os.path.normcase(os.path.abspath(self._sln_path))
-            self._instances.pop(key, None)
+            key = _canonical_path(self._sln_path)
+            if self._instances.pop(key, None) is not None:
+                log.info("Removed instance from registry: '%s' (%d remaining)",
+                         self._sln_path, len(self._instances))
+
+    def _prune_stale_instances(self):
+        """Remove registry entries whose XAE process is no longer reachable."""
+        pruned = 0
+        for key in list(self._instances):
+            state = self._instances[key]
+            try:
+                _ = state["dte"].MainWindow.Caption
+            except Exception:
+                log.info("Pruned stale instance: %s",
+                         state.get("sln_path", key))
+                del self._instances[key]
+                pruned += 1
+        if pruned:
+            log.info("Pruned %d stale instance(s), %d remaining",
+                     pruned, len(self._instances))
 
     def _restore_from_registry(self, norm_sln: str) -> bool:
         """Try to restore a cached session.  Returns True on success."""
@@ -327,11 +364,20 @@ class TcAutomationInterface:
         if not state:
             return False
         dte = state["dte"]
+        stored_sln = state.get("sln_path", norm_sln)
         try:
             _ = dte.MainWindow.Caption
+            actual_sln = _canonical_path(str(dte.Solution.FullName))
+            if actual_sln != norm_sln:
+                log.warning(
+                    "Cached DTE solution changed: expected '%s', got '%s' "
+                    "-- removing stale entry", norm_sln, actual_sln,
+                )
+                del self._instances[norm_sln]
+                return False
         except Exception:
             log.warning("Cached DTE for '%s' is stale -- removing",
-                        state.get("sln_path", norm_sln))
+                        stored_sln)
             del self._instances[norm_sln]
             return False
         self._dte = dte
@@ -395,6 +441,7 @@ class TcAutomationInterface:
     # ==================== STA implementations ====================
 
     def _impl_get_status(self) -> StatusResult:
+        self._prune_stale_instances()
         cached_slns = list(self._instances.keys())
 
         # Try attaching to a running instance
@@ -438,6 +485,8 @@ class TcAutomationInterface:
     def _impl_open_solution(
         self, sln_path, plcproj_path, proj_name, timeout_s,
     ) -> OpenResult:
+        self._prune_stale_instances()
+
         if plcproj_path:
             self._plcproj_file_path = plcproj_path
 
@@ -446,8 +495,7 @@ class TcAutomationInterface:
             expected_sln = self._find_sln_near(plcproj_path)
 
         norm_expected = (
-            os.path.normcase(os.path.abspath(expected_sln))
-            if expected_sln else ""
+            _canonical_path(expected_sln) if expected_sln else ""
         )
 
         # 1. Try attaching to a running instance
@@ -468,8 +516,8 @@ class TcAutomationInterface:
             try:
                 sln_is_open = bool(self._dte.Solution.IsOpen)
                 if sln_is_open:
-                    current_sln = os.path.normcase(
-                        os.path.abspath(str(self._dte.Solution.FullName))
+                    current_sln = _canonical_path(
+                        str(self._dte.Solution.FullName)
                     )
             except Exception:
                 dte_is_alive = False
@@ -539,8 +587,8 @@ class TcAutomationInterface:
         if norm_expected:
             actual = ""
             try:
-                actual = os.path.normcase(
-                    os.path.abspath(str(self._dte.Solution.FullName))
+                actual = _canonical_path(
+                    str(self._dte.Solution.FullName)
                 )
             except Exception:
                 pass
@@ -642,7 +690,7 @@ class TcAutomationInterface:
         If so, close it and open the requested one.
         Safe here because we own this XAE instance (_created_new).
         """
-        norm_expected = os.path.normcase(os.path.abspath(expected_sln))
+        norm_expected = _canonical_path(expected_sln)
 
         try:
             is_open = bool(self._dte.Solution.IsOpen)
@@ -650,9 +698,7 @@ class TcAutomationInterface:
             is_open = False
 
         if is_open:
-            current = os.path.normcase(
-                os.path.abspath(str(self._dte.Solution.FullName))
-            )
+            current = _canonical_path(str(self._dte.Solution.FullName))
             if current == norm_expected:
                 log.info("Correct solution already loaded by XAE")
                 self._wait_for_solution_open(timeout_s)
@@ -1263,6 +1309,7 @@ class TcAutomationInterface:
         """
         if force_quit:
             count = len(self._instances)
+            log.info("force_quit: closing %d tracked instance(s)", count)
             self._quit_all_instances()
             self._reset_state()
             return CloseResult(
