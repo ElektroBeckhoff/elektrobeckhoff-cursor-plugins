@@ -40,6 +40,9 @@ RPC_E_CALL_REJECTED = -2147418111   # 0x80010001 signed
 RPC_S_SERVER_UNAVAILABLE = -2147023174  # 0x800706BA signed
 E_ACCESSDENIED = -2147024891  # 0x80070005 signed
 
+_QUIT_WAIT_S = 3
+_QUIT_POLL_S = 0.3
+
 HAS_WIN32 = False
 HAS_WIN32GUI = False
 try:
@@ -289,6 +292,80 @@ class TcAutomationInterface:
             delay = self._POLL_BURST_S if dismissed_any else self._POLL_IDLE_S
             stop_event.wait(delay)
 
+    @staticmethod
+    def _get_dte_pid(dte) -> Optional[int]:
+        """Get the OS process ID of a DTE instance via its main window handle."""
+        try:
+            import ctypes
+            hwnd = int(dte.MainWindow.HWnd)
+            if not hwnd:
+                return None
+            pid = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return pid.value if pid.value else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        """Check if a process with the given PID is still running."""
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+            )
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                ctypes.windll.kernel32.GetExitCodeProcess(
+                    handle, ctypes.byref(exit_code),
+                )
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _force_kill_pid(pid: int):
+        """Terminate a process by PID."""
+        try:
+            import ctypes
+            PROCESS_TERMINATE = 0x0001
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_TERMINATE, False, pid,
+            )
+            if handle:
+                ctypes.windll.kernel32.TerminateProcess(handle, 1)
+                ctypes.windll.kernel32.CloseHandle(handle)
+                log.info("Force-killed process PID %d", pid)
+        except Exception as exc:
+            log.warning("Failed to force-kill PID %d: %s", pid, exc)
+
+    def _quit_dte(self, dte, sln_label: str, pid: Optional[int] = None):
+        """Quit a DTE and ensure the process is actually dead."""
+        if not pid:
+            pid = self._get_dte_pid(dte)
+        try:
+            dte.Solution.Close(False)
+            dte.Quit()
+        except Exception as exc:
+            log.warning("Quit() failed for '%s': %s", sln_label, exc)
+
+        if not pid:
+            return
+        deadline = time.time() + _QUIT_WAIT_S
+        while time.time() < deadline:
+            if not self._is_pid_alive(pid):
+                log.info("Process PID %d exited after Quit()", pid)
+                return
+            time.sleep(_QUIT_POLL_S)
+        log.warning("Process PID %d survived Quit() -- force-killing", pid)
+        self._force_kill_pid(pid)
+
     def _cleanup_com(self):
         self._quit_all_instances()
         self._reset_state()
@@ -298,24 +375,15 @@ class TcAutomationInterface:
         seen_ids = set()
         if self._dte and self._created_new:
             seen_ids.add(id(self._dte))
-            try:
-                self._dte.Solution.Close(False)
-                self._dte.Quit()
-            except Exception as exc:
-                log.warning("Failed to quit active DTE ('%s'): %s",
-                            self._sln_path, exc)
+            self._quit_dte(self._dte, self._sln_path or "active")
             self._dte = None
             self._sys_man = None
             self._plc_proj_item = None
         for key, state in list(self._instances.items()):
             dte = state.get("dte")
             if dte and id(dte) not in seen_ids and state.get("created_new"):
-                try:
-                    dte.Solution.Close(False)
-                    dte.Quit()
-                except Exception as exc:
-                    log.warning("Failed to quit cached DTE ('%s'): %s",
-                                state.get("sln_path", key), exc)
+                self._quit_dte(dte, state.get("sln_path", key),
+                               pid=state.get("pid"))
             state["dte"] = None
             state["sys_man"] = None
             state["plc_proj_item"] = None
@@ -326,6 +394,14 @@ class TcAutomationInterface:
         if not self._dte or not self._sln_path:
             return
         key = _canonical_path(self._sln_path)
+        existing = self._instances.get(key)
+        if existing and existing.get("created_new") and not self._created_new:
+            self._created_new = True
+            log.info("Restored ownership flag from registry for '%s'",
+                     self._sln_path)
+        pid = self._get_dte_pid(self._dte)
+        if existing and existing.get("pid") and not pid:
+            pid = existing["pid"]
         self._instances[key] = {
             "dte": self._dte,
             "sys_man": self._sys_man,
@@ -334,9 +410,10 @@ class TcAutomationInterface:
             "we_opened_solution": self._we_opened_solution,
             "sln_path": self._sln_path,
             "plcproj_file_path": self._plcproj_file_path,
+            "pid": pid,
         }
-        log.info("Saved instance to registry: '%s' (%d total)",
-                 self._sln_path, len(self._instances))
+        log.info("Saved instance to registry: '%s' (pid=%s, created_new=%s, %d total)",
+                 self._sln_path, pid, self._created_new, len(self._instances))
 
     def _remove_active_from_registry(self):
         """Remove the currently active session from the registry."""
@@ -347,17 +424,25 @@ class TcAutomationInterface:
                          self._sln_path, len(self._instances))
 
     def _prune_stale_instances(self):
-        """Remove registry entries whose XAE process is no longer reachable."""
+        """Remove registry entries whose XAE process is no longer running."""
         pruned = 0
         for key in list(self._instances):
             state = self._instances[key]
-            try:
-                _ = state["dte"].MainWindow.Caption
-            except Exception:
-                log.info("Pruned stale instance: %s",
-                         state.get("sln_path", key))
+            pid = state.get("pid")
+            if pid and not self._is_pid_alive(pid):
+                log.info("Pruned dead instance (PID %d gone): %s",
+                         pid, state.get("sln_path", key))
                 del self._instances[key]
                 pruned += 1
+                continue
+            if not pid:
+                try:
+                    _ = state["dte"].MainWindow.Caption
+                except Exception:
+                    log.info("Pruned stale instance (COM unreachable): %s",
+                             state.get("sln_path", key))
+                    del self._instances[key]
+                    pruned += 1
         if pruned:
             log.info("Pruned %d stale instance(s), %d remaining",
                      pruned, len(self._instances))
@@ -1334,8 +1419,7 @@ class TcAutomationInterface:
 
             if self._dte:
                 if self._created_new:
-                    self._dte.Solution.Close(False)
-                    self._dte.Quit()
+                    self._quit_dte(self._dte, self._sln_path or "active")
                     msg = "XAE quit"
                 elif self._we_opened_solution:
                     try:
