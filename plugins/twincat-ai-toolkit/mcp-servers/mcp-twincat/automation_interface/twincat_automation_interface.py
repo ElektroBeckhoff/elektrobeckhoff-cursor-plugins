@@ -146,6 +146,7 @@ class TcAutomationInterface:
         self._we_opened_solution = False
         self._sln_path: Optional[str] = None
         self._plcproj_file_path: Optional[str] = None
+        self._instances: dict = {}  # norm_sln_path → instance state dict
         if HAS_WIN32:
             self._thread.start()
 
@@ -276,13 +277,73 @@ class TcAutomationInterface:
             stop_event.wait(delay)
 
     def _cleanup_com(self):
-        if self._created_new and self._dte:
+        self._quit_all_instances()
+        self._reset_state()
+
+    def _quit_all_instances(self):
+        """Quit every XAE instance we created (registry + active)."""
+        seen_ids = set()
+        if self._dte and self._created_new:
+            seen_ids.add(id(self._dte))
             try:
                 self._dte.Solution.Close(False)
                 self._dte.Quit()
             except Exception:
                 pass
-        self._reset_state()
+        for key, state in list(self._instances.items()):
+            dte = state.get("dte")
+            if dte and id(dte) not in seen_ids and state.get("created_new"):
+                try:
+                    dte.Solution.Close(False)
+                    dte.Quit()
+                except Exception:
+                    pass
+        self._instances.clear()
+
+    def _save_active_to_registry(self):
+        """Persist current active session to the instance registry."""
+        if not self._dte or not self._sln_path:
+            return
+        key = os.path.normcase(os.path.abspath(self._sln_path))
+        self._instances[key] = {
+            "dte": self._dte,
+            "sys_man": self._sys_man,
+            "plc_proj_item": self._plc_proj_item,
+            "created_new": self._created_new,
+            "we_opened_solution": self._we_opened_solution,
+            "sln_path": self._sln_path,
+            "plcproj_file_path": self._plcproj_file_path,
+        }
+
+    def _remove_active_from_registry(self):
+        """Remove the currently active session from the registry."""
+        if self._sln_path:
+            key = os.path.normcase(os.path.abspath(self._sln_path))
+            self._instances.pop(key, None)
+
+    def _restore_from_registry(self, norm_sln: str) -> bool:
+        """Try to restore a cached session.  Returns True on success."""
+        state = self._instances.get(norm_sln)
+        if not state:
+            return False
+        dte = state["dte"]
+        try:
+            _ = dte.MainWindow.Caption
+        except Exception:
+            log.warning("Cached DTE for '%s' is stale -- removing",
+                        state.get("sln_path", norm_sln))
+            del self._instances[norm_sln]
+            return False
+        self._dte = dte
+        self._sys_man = state["sys_man"]
+        self._plc_proj_item = state["plc_proj_item"]
+        self._created_new = state["created_new"]
+        self._we_opened_solution = state["we_opened_solution"]
+        self._sln_path = state["sln_path"]
+        self._plcproj_file_path = state.get("plcproj_file_path")
+        log.info("Re-attached to cached XAE instance for '%s'",
+                 self._sln_path)
+        return True
 
     def shutdown(self):
         if HAS_WIN32 and self._thread.is_alive():
@@ -334,17 +395,22 @@ class TcAutomationInterface:
     # ==================== STA implementations ====================
 
     def _impl_get_status(self) -> StatusResult:
+        cached_slns = list(self._instances.keys())
+
         # Try attaching to a running instance
         try:
             dte = win32com.client.GetActiveObject(PROG_ID)
             sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
             plc = str(self._plc_proj_item.Name) if self._plc_proj_item else ""
+            msg = "TcXaeShell is running"
+            if cached_slns:
+                msg += f" | {len(cached_slns)} cached instance(s)"
             return StatusResult(
                 xae_available=True,
                 running_instance=True,
                 solution_path=sln,
                 plc_project_name=plc,
-                message="TcXaeShell is running",
+                message=msg,
             )
         except Exception:
             pass
@@ -422,15 +488,28 @@ class TcAutomationInterface:
             elif current_sln == norm_expected:
                 log.info("Correct solution already open")
             else:
-                # Wrong solution open -- leave it alone, start a
-                # separate XAE instance for our solution.
+                # Wrong solution open -- save current state, then switch.
                 raw_current = str(self._dte.Solution.FullName)
                 log.info(
-                    "XAE has '%s' open -- starting separate instance "
-                    "for '%s'",
+                    "XAE has '%s' open -- switching to '%s'",
                     raw_current, expected_sln,
                 )
-                self._dte = None  # release the attached instance
+                self._save_active_to_registry()
+                self._dte = None
+
+        # 2b. Check instance registry for a cached session
+        if not self._dte and norm_expected:
+            if self._restore_from_registry(norm_expected):
+                return OpenResult(
+                    success=True,
+                    solution_path=self._sln_path,
+                    plc_project_name=(
+                        str(self._plc_proj_item.Name)
+                        if self._plc_proj_item else ""
+                    ),
+                    created_new_instance=False,
+                    message="Re-attached to existing XAE instance",
+                )
 
         # 3. No XAE available -> start a new instance
         if not self._dte:
@@ -503,6 +582,7 @@ class TcAutomationInterface:
             )
 
         self._sln_path = str(self._dte.Solution.FullName)
+        self._save_active_to_registry()
         return OpenResult(
             success=True,
             solution_path=self._sln_path,
@@ -1172,19 +1252,29 @@ class TcAutomationInterface:
     # -------- close --------
 
     def _impl_close(self, force_quit: bool = False) -> CloseResult:
-        """Close only what WE opened.
+        """Close the active session (or all sessions with force_quit).
 
-        - ``_created_new``: We started XAE → close solution + quit.
-        - ``_we_opened_solution``: We opened a solution into an
-          existing empty XAE → close the solution, leave XAE running.
-        - Otherwise: We just attached to the user's session →
-          detach, touch nothing.
-        - ``force_quit=True``: Always quit XAE (use with caution).
+        Without force_quit:
+          - Closes/detaches only the *active* XAE session.
+          - Other cached instances in the registry stay alive.
+
+        With force_quit=True:
+          - Quits ALL tracked XAE instances (active + registry).
         """
+        if force_quit:
+            count = len(self._instances)
+            self._quit_all_instances()
+            self._reset_state()
+            return CloseResult(
+                success=True,
+                message=f"All XAE instances quit ({count} tracked)",
+            )
+
         msg = ""
         try:
             if self._dte and not self._is_dte_alive():
                 log.warning("DTE is stale -- releasing without Quit")
+                self._remove_active_from_registry()
                 self._reset_state()
                 return CloseResult(
                     success=True,
@@ -1192,7 +1282,7 @@ class TcAutomationInterface:
                 )
 
             if self._dte:
-                if self._created_new or force_quit:
+                if self._created_new:
                     self._dte.Solution.Close(False)
                     self._dte.Quit()
                     msg = "XAE quit"
@@ -1206,9 +1296,14 @@ class TcAutomationInterface:
                 else:
                     msg = "Detached (solution untouched)"
 
+            self._remove_active_from_registry()
             self._reset_state()
+            remaining = len(self._instances)
+            if remaining:
+                msg += f" ({remaining} other instance(s) still cached)"
             return CloseResult(success=True, message=msg or "Session released")
         except Exception as exc:
+            self._remove_active_from_registry()
             self._reset_state()
             return CloseResult(success=False, message=f"Close error: {exc}")
 
@@ -1218,6 +1313,8 @@ class TcAutomationInterface:
         self._plc_proj_item = None
         self._created_new = False
         self._we_opened_solution = False
+        self._sln_path = None
+        self._plcproj_file_path = None
 
     # ==================== Helpers (STA thread only) ====================
 
