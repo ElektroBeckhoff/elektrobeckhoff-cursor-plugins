@@ -25,6 +25,7 @@ log = logging.getLogger("twincat-mcp")
 PROG_ID = "TcXaeShell.DTE.15.0"
 RPC_E_CALL_REJECTED = -2147418111   # 0x80010001 signed
 RPC_S_SERVER_UNAVAILABLE = -2147023174  # 0x800706BA signed
+E_ACCESSDENIED = -2147024891  # 0x80070005 signed
 
 HAS_WIN32 = False
 HAS_WIN32GUI = False
@@ -438,28 +439,22 @@ class TcAutomationInterface:
                     success=False,
                     message="No .sln path and no running XAE instance",
                 )
-            log.info("Starting new TcXaeShell with %s", expected_sln)
-            self._dte = win32com.client.Dispatch(PROG_ID)
-            self._created_new = True
-            self._we_opened_solution = True
-
-            for _init_retry in range(10):
-                try:
-                    self._dte.SuppressUI = False
-                    self._dte.MainWindow.Visible = True
-                    self._dte.UserControl = False
-                    break
-                except Exception as _init_exc:
-                    if self._is_retryable_com_error(_init_exc) and _init_retry < 9:
-                        log.info("XAE not ready yet (retry %d/10): %s",
-                                 _init_retry + 1, _init_exc)
-                        pythoncom.PumpWaitingMessages()
-                        time.sleep(2)
-                    else:
-                        raise
-
-            self._wait_for_xae_idle(timeout_s)
-            self._ensure_correct_solution(expected_sln, timeout_s)
+            try:
+                self._dte = self._create_new_dte(expected_sln, timeout_s)
+            except Exception as exc:
+                self._reset_state()
+                if self._is_access_denied(exc):
+                    log.warning("E_ACCESSDENIED creating new XAE: %s", exc)
+                    return OpenResult(
+                        success=False,
+                        message=(
+                            "Cannot start a new XAE instance -- another "
+                            "instance is blocking COM access (E_ACCESSDENIED). "
+                            "Close the other TcXaeShell manually, or call "
+                            "twincat_close(force_quit=true) first."
+                        ),
+                    )
+                raise
 
         # 4. Verify the correct solution is actually loaded
         if norm_expected:
@@ -515,6 +510,50 @@ class TcAutomationInterface:
             created_new_instance=self._created_new,
             message="Solution open, PLC project found",
         )
+
+    def _create_new_dte(self, expected_sln: str, timeout_s: int):
+        """Start a truly new TcXaeShell process via CLSCTX_LOCAL_SERVER.
+
+        Dispatch(PROG_ID) uses CLSCTX_SERVER which includes INPROC_SERVER
+        and may reconnect to an existing process instead of spawning a new
+        one.  Using CoCreateInstance with LOCAL_SERVER only ensures a fresh
+        out-of-process DTE.
+        """
+        log.info("Creating new TcXaeShell via CoCreateInstance(LOCAL_SERVER) "
+                 "for %s", expected_sln)
+
+        import winreg as _wreg
+        _key = _wreg.OpenKey(_wreg.HKEY_CLASSES_ROOT, f"{PROG_ID}\\CLSID")
+        _clsid_str = _wreg.QueryValueEx(_key, None)[0]
+        _key.Close()
+        clsid = pywintypes.IID(_clsid_str)
+        dispatch = pythoncom.CoCreateInstance(
+            clsid, None, pythoncom.CLSCTX_LOCAL_SERVER,
+            pythoncom.IID_IDispatch,
+        )
+        self._dte = win32com.client.Dispatch(dispatch)
+        self._created_new = True
+        self._we_opened_solution = True
+        log.info("New TcXaeShell DTE created successfully")
+
+        for _init_retry in range(10):
+            try:
+                self._dte.SuppressUI = False
+                self._dte.MainWindow.Visible = True
+                self._dte.UserControl = False
+                break
+            except Exception as _init_exc:
+                if self._is_retryable_com_error(_init_exc) and _init_retry < 9:
+                    log.info("XAE not ready yet (retry %d/10): %s",
+                             _init_retry + 1, _init_exc)
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(2)
+                else:
+                    raise
+
+        self._wait_for_xae_idle(timeout_s)
+        self._ensure_correct_solution(expected_sln, timeout_s)
+        return self._dte
 
     def _ensure_correct_solution(self, expected_sln: str, timeout_s: int):
         """After Dispatch, ensure the correct solution is loaded.
@@ -1055,6 +1094,17 @@ class TcAutomationInterface:
                 message="No XAE instance. Call twincat_open first.",
             )
 
+        if not self._is_dte_alive():
+            log.warning("DTE is stale (not reachable) -- resetting session")
+            self._reset_state()
+            return ReloadResult(
+                success=False,
+                message=(
+                    "XAE instance is no longer reachable (stale COM reference). "
+                    "Call twincat_open to start a new session."
+                ),
+            )
+
         sln_path = ""
         try:
             sln_path = str(self._dte.Solution.FullName)
@@ -1088,21 +1138,14 @@ class TcAutomationInterface:
         self._plc_proj_item = None
 
         log.info("Reload: reopening %s ...", sln_path)
-        for _reopen_retry in range(5):
-            try:
-                self._dte.Solution.Open(sln_path)
-                self._wait_for_solution_open(timeout_s)
-                break
-            except Exception as exc:
-                if self._is_retryable_com_error(exc) and _reopen_retry < 4:
-                    log.info("Reload reopen retry %d/5: %s", _reopen_retry + 1, exc)
-                    pythoncom.PumpWaitingMessages()
-                    time.sleep(3)
-                else:
-                    return ReloadResult(
-                        success=False,
-                        message=f"Failed to reopen solution: {exc}",
-                    )
+        try:
+            self._dte.Solution.Open(sln_path)
+            self._wait_for_solution_open(timeout_s)
+        except Exception as exc:
+            return ReloadResult(
+                success=False,
+                message=f"Failed to reopen solution: {exc}",
+            )
 
         self._sys_man = self._get_system_manager()
         if not self._sys_man:
@@ -1140,6 +1183,14 @@ class TcAutomationInterface:
         """
         msg = ""
         try:
+            if self._dte and not self._is_dte_alive():
+                log.warning("DTE is stale -- releasing without Quit")
+                self._reset_state()
+                return CloseResult(
+                    success=True,
+                    message="Session released (XAE was already gone)",
+                )
+
             if self._dte:
                 if self._created_new or force_quit:
                     self._dte.Solution.Close(False)
@@ -1270,3 +1321,32 @@ class TcAutomationInterface:
             if isinstance(arg, int) and arg in retryable:
                 return True
         return False
+
+    @staticmethod
+    def _is_access_denied(exc: Exception) -> bool:
+        """Check if a COM exception contains E_ACCESSDENIED (0x80070005).
+
+        pywintypes.com_error wraps DISP_E_EXCEPTION with the real scode
+        in excepinfo[5], e.g.:
+        (-2147352567, 'Ausnahmefehler...', (0, None, None, None, 0, -2147024891), None)
+        """
+        if hasattr(exc, "hresult") and exc.hresult == E_ACCESSDENIED:
+            return True
+        args = getattr(exc, "args", ())
+        for arg in args:
+            if isinstance(arg, int) and arg == E_ACCESSDENIED:
+                return True
+            if isinstance(arg, tuple) and len(arg) >= 6:
+                if isinstance(arg[5], int) and arg[5] == E_ACCESSDENIED:
+                    return True
+        return False
+
+    def _is_dte_alive(self) -> bool:
+        """Quick health check -- can we still talk to the DTE?"""
+        if not self._dte:
+            return False
+        try:
+            _ = self._dte.MainWindow.Caption
+            return True
+        except Exception:
+            return False
