@@ -441,11 +441,21 @@ class TcAutomationInterface:
                 except Exception:
                     log.info("Pruned stale instance (COM unreachable): %s",
                              state.get("sln_path", key))
-                    del self._instances[key]
+                    self._kill_orphaned_entry(state, key)
                     pruned += 1
         if pruned:
             log.info("Pruned %d stale instance(s), %d remaining",
                      pruned, len(self._instances))
+
+    def _kill_orphaned_entry(self, state: dict, key: str):
+        """Remove a registry entry and kill its process if we own it."""
+        pid = state.get("pid")
+        created_new = state.get("created_new", False)
+        self._instances.pop(key, None)
+        if created_new and pid and self._is_pid_alive(pid):
+            log.warning("Killing orphaned process PID %d ('%s')",
+                        pid, state.get("sln_path", key))
+            self._force_kill_pid(pid)
 
     def _restore_from_registry(self, norm_sln: str) -> bool:
         """Try to restore a cached session.  Returns True on success."""
@@ -462,12 +472,12 @@ class TcAutomationInterface:
                     "Cached DTE solution changed: expected '%s', got '%s' "
                     "-- removing stale entry", norm_sln, actual_sln,
                 )
-                del self._instances[norm_sln]
+                self._kill_orphaned_entry(state, norm_sln)
                 return False
         except Exception:
             log.warning("Cached DTE for '%s' is stale -- removing",
                         stored_sln)
-            del self._instances[norm_sln]
+            self._kill_orphaned_entry(state, norm_sln)
             return False
         self._dte = dte
         self._sys_man = state["sys_man"]
