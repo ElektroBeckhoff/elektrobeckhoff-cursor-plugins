@@ -22,6 +22,10 @@ from dataclasses import dataclass, field, asdict
 
 log = logging.getLogger("twincat-mcp")
 
+# TODO(4026): Hard-coded to VS2017 shell (TwinCAT 4024). For TwinCAT 4026
+#   support, auto-detect the ProgID (e.g. "TcXaeShell.DTE.17.0" for VS2022 /
+#   TcXaeShell64) and store the DTE version per registry entry so that parallel
+#   4024+4026 instances with different COM bitness are handled correctly.
 PROG_ID = "TcXaeShell.DTE.15.0"
 
 
