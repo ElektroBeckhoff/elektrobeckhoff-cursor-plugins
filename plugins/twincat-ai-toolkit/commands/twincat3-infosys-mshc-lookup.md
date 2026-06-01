@@ -5,12 +5,13 @@ description: Look up a Beckhoff TwinCAT type, attribute, or topic from the local
 
 # InfoSys MSHC Lookup
 
-Search and read the local Beckhoff TwinCAT offline documentation for any type, attribute pragma, or topic.
-
-## Required Context
-
 **Skills:** `twincat3-infosys-mshc` (follow completely)
 
 ## Instructions
 
-Ask the user what they want to look up (FB, STRUCT, ENUM, attribute, or topic). Then call `twincat_infosys_mshc_search` with `auto_read=true`. Present the structured result: syntax block, inputs/outputs, methods, requirements, and description. Use `language="de"` if the user asks in German or explicitly requests German documentation.
+1. Ask the user what to look up (type name, attribute, or topic)
+2. Search with `twincat_infosys_mshc_search` (`auto_read=true` is default)
+3. If the name is unknown, use `mode="fulltext"` with descriptive keywords
+4. If 0 results, fall back to `twincat3-infosys-lookup` skill (online)
+5. Present: syntax block, inputs/outputs, methods, requirements
+6. Use `language="de"` if the user requests German documentation

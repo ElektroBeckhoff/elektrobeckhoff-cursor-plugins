@@ -1078,16 +1078,19 @@ def twincat_infosys_mshc_search(
     """Search the local Beckhoff InfoSys offline documentation (.mshc).
 
     Searches the locally installed TwinCAT 3 documentation archive
-    (Microsoft Help Viewer .mshc file) for FB_, ST_, E_, I_, F_ symbols,
-    articles, and other documentation pages.
+    (~55k pages) for FB_, ST_, E_, I_, F_ symbols, articles, attributes,
+    and any documentation content.
 
     language: "en" (default) for English docs, "de" for German docs.
 
     Modes:
-      - auto (default): exact title match > prefix > substring > fulltext
+      - auto (default): exact title > prefix > substring > BM25 fulltext
       - title: title-only matching
       - symbol: title-only, filtered to FB_/ST_/E_/I_/F_ types
-      - fulltext: searches inside HTML page content (slower)
+      - fulltext: BM25-ranked keyword search (SQLite FTS5), fast (~1-3ms)
+
+    Fulltext supports multi-word queries ("read Modbus input registers"),
+    prefix search ("FB_Json*"), and exact phrases ('"input registers"').
 
     auto_read (default True): When the top result scores 100,
     automatically reads the full page and includes structured content

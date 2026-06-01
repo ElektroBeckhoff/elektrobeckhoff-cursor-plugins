@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 import zipfile
 from typing import Dict, List, Optional
@@ -90,13 +91,43 @@ def _detect_type(title: str) -> str:
     return "article"
 
 
-def _cache_path_for(mshc_path: str) -> str:
-    """Derive a cache file path in temp dir, keyed by mshc basename."""
+def _cache_dir() -> str:
     import tempfile
+    d = os.path.join(tempfile.gettempdir(), "twincat-mcp-infosys-mshc")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _cache_path_for(mshc_path: str) -> str:
+    """Derive a JSON cache file path in temp dir, keyed by mshc basename."""
     base = os.path.splitext(os.path.basename(mshc_path))[0]
-    cache_dir = os.path.join(tempfile.gettempdir(), "twincat-mcp-infosys-mshc")
-    os.makedirs(cache_dir, exist_ok=True)
-    return os.path.join(cache_dir, f"_index_cache_{base}.json")
+    return os.path.join(_cache_dir(), f"_index_cache_{base}.json")
+
+
+def _fts5_db_path_for(mshc_path: str) -> str:
+    """Derive a SQLite FTS5 database path in temp dir, keyed by mshc basename."""
+    base = os.path.splitext(os.path.basename(mshc_path))[0]
+    return os.path.join(_cache_dir(), f"_fts5_{base}.db")
+
+
+_RE_FTS5_SPECIAL = re.compile(r'[^\w\s*"_]', re.UNICODE)
+
+
+def _fts5_sanitize(query: str) -> str:
+    """Sanitize a user query for FTS5 MATCH syntax.
+
+    Passes through phrases ("..."), prefix wildcards (term*), and plain
+    words. Strips characters that are FTS5 operators or invalid syntax.
+    """
+    q = query.strip()
+    if not q:
+        return ""
+    if q.startswith('"') and q.endswith('"'):
+        return q
+    if "*" in q and " " not in q:
+        return _RE_FTS5_SPECIAL.sub("", q)
+    tokens = _RE_FTS5_SPECIAL.sub(" ", q).split()
+    return " ".join(t for t in tokens if t)
 
 
 class InfoSysMshcIndex:
@@ -106,20 +137,22 @@ class InfoSysMshcIndex:
         self._mshc_path = mshc_path
         self._entries: List[Dict] = []
         self._title_map: Dict[str, Dict] = {}
+        self._fts5_conn: Optional[sqlite3.Connection] = None
         self._loaded = False
 
     def _ensure_index(self):
         if self._loaded:
             return
         cache = _cache_path_for(self._mshc_path)
-        if self._try_load_cache(cache):
+        fts5_db = _fts5_db_path_for(self._mshc_path)
+        if self._try_load_cache(cache, fts5_db):
             self._loaded = True
             return
         self._build_index()
         self._save_cache(cache)
         self._loaded = True
 
-    def _try_load_cache(self, cache_path: str) -> bool:
+    def _try_load_cache(self, cache_path: str, fts5_db: str) -> bool:
         if not os.path.isfile(cache_path):
             return False
         try:
@@ -133,11 +166,49 @@ class InfoSysMshcIndex:
                 return False
             self._entries = data["entries"]
             self._title_map = {e["title"].lower(): e for e in self._entries}
-            log.info("Loaded MSHC index from cache (%d entries)", len(self._entries))
+
+            if not self._try_open_fts5(fts5_db):
+                return False
+
+            log.info(
+                "Loaded MSHC index from cache (%d entries, FTS5 ready)",
+                len(self._entries),
+            )
             return True
         except Exception as exc:
             log.debug("Cache load failed: %s", exc)
             return False
+
+    def _try_open_fts5(self, fts5_db: str) -> bool:
+        """Open and validate an existing FTS5 database."""
+        if not os.path.isfile(fts5_db):
+            return False
+        try:
+            conn = sqlite3.connect(fts5_db)
+            stat = os.stat(self._mshc_path)
+            meta = dict(
+                conn.execute("SELECT key, value FROM meta").fetchall()
+            )
+            if meta.get("mshc_path") != self._mshc_path:
+                conn.close()
+                return False
+            if float(meta.get("mshc_mtime", -1)) != stat.st_mtime:
+                conn.close()
+                return False
+            if int(meta.get("mshc_size", -1)) != stat.st_size:
+                conn.close()
+                return False
+            cnt = conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+            if cnt != len(self._entries):
+                conn.close()
+                return False
+            self._fts5_conn = conn
+            return True
+        except Exception as exc:
+            log.debug("FTS5 DB validation failed: %s", exc)
+            return False
+
+    _FTS5_BODY_LIMIT = 16384
 
     def _build_index(self):
         if not os.path.isfile(self._mshc_path):
@@ -148,15 +219,45 @@ class InfoSysMshcIndex:
             )
         log.info("Building MSHC index from %s ...", self._mshc_path)
         t0 = time.time()
-        entries = []
+        entries: List[Dict] = []
+
+        fts5_db = _fts5_db_path_for(self._mshc_path)
+        if os.path.exists(fts5_db):
+            os.remove(fts5_db)
+        conn = sqlite3.connect(fts5_db)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        stat = os.stat(self._mshc_path)
+        conn.execute(
+            "INSERT INTO meta VALUES ('mshc_path', ?)", (self._mshc_path,)
+        )
+        conn.execute(
+            "INSERT INTO meta VALUES ('mshc_mtime', ?)", (str(stat.st_mtime),)
+        )
+        conn.execute(
+            "INSERT INTO meta VALUES ('mshc_size', ?)", (str(stat.st_size),)
+        )
+        conn.execute("""
+            CREATE VIRTUAL TABLE pages USING fts5(
+                title, type, component, path, body,
+                tokenize='unicode61'
+            )
+        """)
+
         with zipfile.ZipFile(self._mshc_path, "r") as zf:
             for info in zf.infolist():
                 if not info.filename.endswith(".html"):
                     continue
                 try:
-                    raw = zf.read(info.filename)
-                    text = raw[:4096].decode("utf-8", errors="ignore")
-                    m = _RE_TITLE.search(text)
+                    raw_bytes = zf.read(info.filename)
+                    header = raw_bytes[:4096].decode("utf-8", errors="ignore")
+                    m = _RE_TITLE.search(header)
                     if not m:
                         continue
                     title = html.unescape(m.group(1)).strip()
@@ -164,19 +265,37 @@ class InfoSysMshcIndex:
                         continue
                     parts = info.filename.split("/")
                     component = parts[0] if len(parts) > 1 else ""
+                    sym_type = _detect_type(title)
                     entries.append({
                         "title": title,
-                        "type": _detect_type(title),
+                        "type": sym_type,
                         "component": component,
                         "path": info.filename,
                         "size": info.file_size,
                     })
+                    body = _strip_tags(
+                        raw_bytes[: self._FTS5_BODY_LIMIT].decode(
+                            "utf-8", errors="ignore"
+                        )
+                    )
+                    conn.execute(
+                        "INSERT INTO pages(title, type, component, path, body)"
+                        " VALUES(?,?,?,?,?)",
+                        (title, sym_type, component, info.filename, body),
+                    )
                 except Exception:
                     continue
+
+        conn.commit()
+        conn.execute("PRAGMA synchronous=NORMAL")
+        self._fts5_conn = conn
         self._entries = entries
         self._title_map = {e["title"].lower(): e for e in entries}
         elapsed = time.time() - t0
-        log.info("MSHC index built: %d entries in %.1fs", len(entries), elapsed)
+        log.info(
+            "MSHC index built: %d entries in %.1fs (FTS5 DB: %s)",
+            len(entries), elapsed, fts5_db,
+        )
 
     def _save_cache(self, cache_path: str):
         try:
@@ -295,6 +414,52 @@ class InfoSysMshcIndex:
     def _search_fulltext(
         self, query: str, limit: int, exclude: Optional[set] = None,
     ) -> List[Dict]:
+        if self._fts5_conn is None:
+            return self._search_fulltext_legacy(query, limit, exclude)
+
+        exclude = exclude or set()
+        fts_query = _fts5_sanitize(query)
+        if not fts_query:
+            return []
+
+        try:
+            rows = self._fts5_conn.execute(
+                """
+                SELECT title, type, component, path,
+                       bm25(pages) AS score,
+                       snippet(pages, 4, '>>>', '<<<', '...', 32) AS snippet
+                FROM pages
+                WHERE pages MATCH ?
+                ORDER BY bm25(pages)
+                LIMIT ?
+                """,
+                (fts_query, limit + len(exclude)),
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            log.debug("FTS5 query failed (%s), falling back", exc)
+            return self._search_fulltext_legacy(query, limit, exclude)
+
+        results: List[Dict] = []
+        for title, typ, comp, path, bm25_score, snippet in rows:
+            if path in exclude:
+                continue
+            if len(results) >= limit:
+                break
+            r = {
+                "title": title,
+                "type": typ,
+                "component": comp,
+                "path": path,
+                "score": 30,
+                "snippet": (snippet or "").replace("\n", " ").strip(),
+            }
+            results.append(r)
+        return results
+
+    def _search_fulltext_legacy(
+        self, query: str, limit: int, exclude: Optional[set] = None,
+    ) -> List[Dict]:
+        """Fallback substring search when FTS5 DB is unavailable."""
         if not os.path.isfile(self._mshc_path):
             return []
         exclude = exclude or set()

@@ -86,6 +86,61 @@ class TestInfoSysMshcRead:
         assert page["requirements"].get("library")
 
 
+@skip_no_mshc
+class TestFts5FulltextSearch:
+    """BM25 fulltext search via SQLite FTS5."""
+
+    @pytest.fixture(scope="class")
+    def idx(self):
+        return InfoSysMshcIndex()
+
+    def test_multiword_query(self, idx):
+        r = idx.search("read Modbus input registers", mode="fulltext")
+        assert r["count"] >= 1
+        titles = [h["title"].lower() for h in r["results"]]
+        assert any("modbus" in t or "input" in t for t in titles)
+
+    def test_pid_controller(self, idx):
+        r = idx.search("PID controller", mode="fulltext")
+        assert r["count"] >= 1
+        titles = [h["title"].lower() for h in r["results"]]
+        assert any("pid" in t or "controller" in t for t in titles)
+
+    def test_send_email_smtp(self, idx):
+        r = idx.search("send email SMTP", mode="fulltext")
+        assert r["count"] >= 1
+        titles = [h["title"].lower() for h in r["results"]]
+        assert any("smtp" in t or "email" in t or "mail" in t for t in titles)
+
+    def test_prefix_search(self, idx):
+        r = idx.search("FB_Json*", mode="fulltext")
+        assert r["count"] >= 1
+
+    def test_phrase_search(self, idx):
+        r = idx.search('"input registers"', mode="fulltext")
+        assert r["count"] >= 1
+        assert any(
+            "input" in h["title"].lower() for h in r["results"]
+        )
+
+    def test_auto_mode_uses_fts5_fallback(self, idx):
+        r = idx.search("DALI arc power", mode="auto")
+        assert r["count"] >= 1
+
+    def test_convert_real_to_string(self, idx):
+        r = idx.search("convert REAL to STRING", mode="fulltext")
+        assert r["count"] >= 1
+
+    def test_fulltext_has_snippet(self, idx):
+        r = idx.search("exponential backoff MQTT", mode="fulltext")
+        assert r["count"] >= 1
+        assert r["results"][0].get("snippet")
+
+    def test_fts5_connection_exists(self, idx):
+        idx._ensure_index()
+        assert idx._fts5_conn is not None
+
+
 class TestInfoSysMshcMissing:
     def test_missing_mshc_file(self):
         idx = InfoSysMshcIndex(r"C:\nonexistent\path.mshc")
