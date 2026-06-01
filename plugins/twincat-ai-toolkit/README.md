@@ -28,6 +28,7 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-fup-safety` | FBD-specific migration notes (extends migration-safety) | — | — |
 | `twincat3-cfc-safety` | CFC-specific migration notes (extends migration-safety) | — | — |
 | `twincat3-plcproj-safety` | Safety rules for PlcProject sync (verify-first, backup, reload-after-sync) | — | — |
+| `twincat3-mcp-infosys-mshc` | Offline InfoSys MSHC lookup — when and how to use the search/read tools | — | — |
 
 ## Skills
 
@@ -49,6 +50,7 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 | `twincat3-cfc-migrate` | CFC-to-ST migration workflow (analyze, preview, migrate) |
 | `twincat3-migrate` | Unified FBD/CFC migration with auto-detection (analyze, preview, migrate) |
 | `twincat3-plcproj-sync` | PlcProject verify/sync workflow (verify, dry-run, sync, GUID repair) |
+| `twincat3-infosys-mshc` | Offline InfoSys MSHC lookup — search/read local .mshc docs (EN/DE) |
 
 ## Commands
 
@@ -76,6 +78,7 @@ Agent-executable commands for common tasks (`commands/`).
 | `twincat3-cfc-migrate` | Migrate TwinCAT CFC implementations to Structured Text |
 | `twincat3-migrate` | Auto-detect FBD/CFC and migrate to Structured Text in one pass |
 | `twincat3-plcproj-sync` | Verify and sync TwinCAT .plcproj against disk |
+| `twincat3-infosys-mshc-lookup` | Look up a Beckhoff type or attribute from local offline InfoSys |
 
 ## MCP Server
 
@@ -99,6 +102,8 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 | `twincat_migrate` | Auto-detect FBD/CFC and convert to ST in one pass — no XAE needed |
 | `twincat_plcproj_verify` | Verify .plcproj matches disk (read-only) — no XAE needed |
 | `twincat_plcproj_sync` | Sync .plcproj from disk with backup/force/dry-run — no XAE needed |
+| `twincat_infosys_mshc_search` | Search local offline InfoSys .mshc for types, attributes, articles (EN/DE) — no XAE needed |
+| `twincat_infosys_mshc_read` | Read a page with structured extraction (syntax, I/O, methods) — no XAE needed |
 
 ### Requirements
 
