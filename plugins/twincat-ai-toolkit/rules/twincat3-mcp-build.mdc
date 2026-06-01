@@ -31,6 +31,13 @@ alwaysApply: false
 | `twincat_fup_migrate` | Convert FBD/FUP to ST |
 | `twincat_cfc_migrate` | Convert CFC to ST |
 
+### Offline documentation lookup (no XAE, no internet)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_infosys_mshc_search` | Search local InfoSys offline docs (.mshc) for FBs, structs, enums, attributes, articles |
+| `twincat_infosys_mshc_read` | Read a specific page with structured extraction (syntax, I/O, methods, requirements) |
+
 ## When to Validate
 
 After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:

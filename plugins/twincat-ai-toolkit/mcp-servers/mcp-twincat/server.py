@@ -24,7 +24,7 @@ from typing import Optional, List, Dict, Union
 from dataclasses import asdict
 
 _server_dir = os.path.dirname(os.path.abspath(__file__))
-for _subdir in ("migrator", "automation_interface", "plcproj"):
+for _subdir in ("migrator", "automation_interface", "plcproj", "infosys_mshc"):
     _p = os.path.join(_server_dir, _subdir)
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -43,6 +43,7 @@ from twincat_fbd_to_st_migrator import main as fup_main
 from twincat_cfc_to_st_migrator import main as cfc_main
 from twincat_plcproj_ops import main as plcproj_main, read_project_info
 from twincat_unified_migrator import main as unified_main
+from twincat_infosys_mshc import InfoSysMshcIndex, resolve_mshc_path
 
 mcp = FastMCP("TwinCAT")
 
@@ -1049,6 +1050,94 @@ def _find_repo_root() -> str:
             return d
         d = os.path.dirname(d)
     return ""
+
+
+# ================================================================
+#  twincat_infosys_mshc_search / twincat_infosys_mshc_read
+# ================================================================
+
+_infosys_mshc_cache: Dict[str, InfoSysMshcIndex] = {}
+
+
+def _get_infosys_mshc(language: str = "en", file_path: str = "") -> InfoSysMshcIndex:
+    mshc = resolve_mshc_path(language, file_path)
+    if mshc not in _infosys_mshc_cache:
+        _infosys_mshc_cache[mshc] = InfoSysMshcIndex(mshc)
+    return _infosys_mshc_cache[mshc]
+
+
+@mcp.tool()
+def twincat_infosys_mshc_search(
+    query: str,
+    language: str = "en",
+    file_path: str = "",
+    limit: int = 10,
+    mode: str = "auto",
+    auto_read: bool = True,
+) -> str:
+    """Search the local Beckhoff InfoSys offline documentation (.mshc).
+
+    Searches the locally installed TwinCAT 3 documentation archive
+    (Microsoft Help Viewer .mshc file) for FB_, ST_, E_, I_, F_ symbols,
+    articles, and other documentation pages.
+
+    language: "en" (default) for English docs, "de" for German docs.
+
+    Modes:
+      - auto (default): exact title match > prefix > substring > fulltext
+      - title: title-only matching
+      - symbol: title-only, filtered to FB_/ST_/E_/I_/F_ types
+      - fulltext: searches inside HTML page content (slower)
+
+    auto_read (default True): When the top result scores 100,
+    automatically reads the full page and includes structured content
+    (syntax, inputs, outputs, methods, requirements) in the response.
+
+    Requires TwinCAT 3 offline documentation installed via
+    Help > Add and Remove Help Content in TcXaeShell."""
+
+    try:
+        idx = _get_infosys_mshc(language, file_path)
+        result = idx.search(query, limit=limit, mode=mode)
+        if (auto_read
+                and result.get("count") >= 1
+                and result["results"][0].get("score") == 100):
+            top = result["results"][0]
+            try:
+                page = idx.read_page(top["path"])
+                result["auto_read"] = page
+            except Exception:
+                pass
+        return _json(result)
+    except FileNotFoundError as exc:
+        return _json({"success": False, "error": str(exc)})
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_infosys_mshc_read(
+    path: str,
+    language: str = "en",
+    file_path: str = "",
+) -> str:
+    """Read a specific page from the local Beckhoff InfoSys offline documentation (.mshc).
+
+    Returns structured content including title, description, syntax block,
+    VAR_INPUT/VAR_OUTPUT tables, methods list, and requirements.
+
+    language: "en" (default) for English docs, "de" for German docs.
+
+    Use twincat_infosys_mshc_search first to find the internal path,
+    then pass it here to read the full page content."""
+
+    try:
+        idx = _get_infosys_mshc(language, file_path)
+        return _json(idx.read_page(path))
+    except FileNotFoundError as exc:
+        return _json({"success": False, "error": str(exc)})
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
 
 
 # ================================================================

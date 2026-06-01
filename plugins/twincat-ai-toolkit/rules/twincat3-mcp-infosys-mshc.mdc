@@ -1,0 +1,65 @@
+---
+description: MCP offline InfoSys documentation lookup. Tells the agent when and how to use twincat_infosys_mshc_search and twincat_infosys_mshc_read for looking up Beckhoff library types, attribute pragmas, and documentation.
+alwaysApply: false
+---
+
+# TwinCAT Offline InfoSys MSHC Lookup
+
+## Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_infosys_mshc_search` | Search local offline InfoSys documentation for types, attributes, articles |
+| `twincat_infosys_mshc_read` | Read a specific page with structured content extraction |
+
+## When to Use
+
+- Looking up the exact signature (VAR_INPUT/VAR_OUTPUT) of a Beckhoff FB, STRUCT, ENUM, or FUNCTION
+- Checking attribute pragma syntax (`pack_mode`, `strict`, `TcRpcEnable`, `hide`, etc.)
+- Finding which library a type belongs to (Tc3_IotBase, Tc2_System, etc.)
+- Verifying method names and descriptions for a FUNCTION_BLOCK
+- Any InfoSys documentation lookup — **prefer offline over web search**
+
+## Quick Lookup Pattern
+
+For most lookups, a single search call with `auto_read=true` (default) is sufficient:
+
+```
+twincat_infosys_mshc_search(query="FB_IotMqttClient")
+twincat_infosys_mshc_search(query="FB_IotMqttClient", language="de")
+```
+
+When the top result scores 100, the full page content is automatically included as `auto_read` in the response. No separate `twincat_infosys_mshc_read` call needed.
+
+## Language Support
+
+| `language` | Documentation | Section headers | Description language |
+|------------|---------------|-----------------|---------------------|
+| `"en"` (default) | English (EN-US) | Inputs, Outputs, Methods | English |
+| `"de"` | German (DE-DE) | Eingänge, Ausgänge, Methoden | German |
+
+Both languages share the same page IDs — only the language subfolder differs (`/1033/` vs `/1031/`).
+
+## Search Tips
+
+- Type names (FB_, ST_, E_) are identical in both languages
+- For **attribute pragmas**: search by attribute name: `pack_mode`, `strict`, `noinit` — in DE docs use German titles: `Attribut 'pack_mode'`
+- For **methods of an FB**: read the parent FB page — methods are listed in the `methods` field
+- For **content search**: use `mode="fulltext"` explicitly — slower but searches inside page HTML
+- For **typed symbols only**: use `mode="symbol"` to filter to FB_/ST_/E_/I_/F_ prefixes
+
+## Response Structure
+
+The `auto_read` or `twincat_infosys_mshc_read` response contains:
+
+- `syntax`: Full ST declaration block (FB/STRUCT/ENUM) or usage example (attributes)
+- `inputs[]`: `{name, type, description}` — for FBs, STRUCTs
+- `outputs[]`: `{name, type, description}` — for FBs
+- `methods[]`: `{name, description}` — for FBs
+- `requirements`: `{twincat_version, library}`
+- `description`: Short summary from HTML meta tag
+- `full_text`: **Complete page text** (HTML stripped) — always present, also for articles, attribute pages, guides, and any non-FB content
+
+## Prefer Offline Over Web
+
+Always use `twincat_infosys_mshc_search` before falling back to `WebSearch` + `WebFetch` for InfoSys lookups. The offline tool is faster, returns structured data, and works without internet.

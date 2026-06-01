@@ -30,7 +30,8 @@
     "rules/twincat3-migration-safety.mdc",
     "rules/twincat3-fup-safety.mdc",
     "rules/twincat3-cfc-safety.mdc",
-    "rules/twincat3-plcproj-safety.mdc"
+    "rules/twincat3-plcproj-safety.mdc",
+    "rules/twincat3-mcp-infosys-mshc.mdc"
   ],
   "skills": [
     "skills/twincat3-attributes",
@@ -48,7 +49,8 @@
     "skills/twincat3-fup-migrate",
     "skills/twincat3-cfc-migrate",
     "skills/twincat3-migrate",
-    "skills/twincat3-plcproj-sync"
+    "skills/twincat3-plcproj-sync",
+    "skills/twincat3-infosys-mshc"
   ],
   "commands": [
     "commands/twincat3-new-function-block.md",
@@ -72,7 +74,8 @@
     "commands/twincat3-fup-migrate.md",
     "commands/twincat3-cfc-migrate.md",
     "commands/twincat3-migrate.md",
-    "commands/twincat3-plcproj-sync.md"
+    "commands/twincat3-plcproj-sync.md",
+    "commands/twincat3-infosys-mshc-lookup.md"
   ],
   "mcpServers": ".mcp.json"
 }
