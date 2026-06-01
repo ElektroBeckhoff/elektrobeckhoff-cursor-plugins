@@ -10,7 +10,6 @@ No external dependencies beyond the Python standard library.
 """
 
 import html
-import json
 import logging
 import os
 import re
@@ -98,12 +97,6 @@ def _cache_dir() -> str:
     return d
 
 
-def _cache_path_for(mshc_path: str) -> str:
-    """Derive a JSON cache file path in temp dir, keyed by mshc basename."""
-    base = os.path.splitext(os.path.basename(mshc_path))[0]
-    return os.path.join(_cache_dir(), f"_index_cache_{base}.json")
-
-
 def _fts5_db_path_for(mshc_path: str) -> str:
     """Derive a SQLite FTS5 database path in temp dir, keyed by mshc basename."""
     base = os.path.splitext(os.path.basename(mshc_path))[0]
@@ -140,49 +133,33 @@ class InfoSysMshcIndex:
         self._fts5_conn: Optional[sqlite3.Connection] = None
         self._loaded = False
 
+    def close(self):
+        """Close the FTS5 database connection."""
+        if self._fts5_conn is not None:
+            try:
+                self._fts5_conn.close()
+            except Exception:
+                pass
+            self._fts5_conn = None
+
+    def __del__(self):
+        self.close()
+
     def _ensure_index(self):
         if self._loaded:
             return
-        cache = _cache_path_for(self._mshc_path)
         fts5_db = _fts5_db_path_for(self._mshc_path)
-        if self._try_load_cache(cache, fts5_db):
+        if self._try_load_db(fts5_db):
             self._loaded = True
             return
         self._build_index()
-        self._save_cache(cache)
         self._loaded = True
 
-    def _try_load_cache(self, cache_path: str, fts5_db: str) -> bool:
-        if not os.path.isfile(cache_path):
-            return False
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("mshc_path") != self._mshc_path:
-                return False
-            stat = os.stat(self._mshc_path)
-            if (data.get("mshc_mtime") != stat.st_mtime
-                    or data.get("mshc_size") != stat.st_size):
-                return False
-            self._entries = data["entries"]
-            self._title_map = {e["title"].lower(): e for e in self._entries}
-
-            if not self._try_open_fts5(fts5_db):
-                return False
-
-            log.info(
-                "Loaded MSHC index from cache (%d entries, FTS5 ready)",
-                len(self._entries),
-            )
-            return True
-        except Exception as exc:
-            log.debug("Cache load failed: %s", exc)
-            return False
-
-    def _try_open_fts5(self, fts5_db: str) -> bool:
-        """Open and validate an existing FTS5 database."""
+    def _try_load_db(self, fts5_db: str) -> bool:
+        """Open and validate an existing FTS5 database, load entries."""
         if not os.path.isfile(fts5_db):
             return False
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(fts5_db)
             stat = os.stat(self._mshc_path)
@@ -198,14 +175,32 @@ class InfoSysMshcIndex:
             if int(meta.get("mshc_size", -1)) != stat.st_size:
                 conn.close()
                 return False
-            cnt = conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
-            if cnt != len(self._entries):
+
+            rows = conn.execute(
+                "SELECT title, type, component, path, description"
+                " FROM entries"
+            ).fetchall()
+            if not rows:
                 conn.close()
                 return False
+
+            self._entries = [
+                {
+                    "title": r[0], "type": r[1], "component": r[2],
+                    "path": r[3], "description": r[4],
+                }
+                for r in rows
+            ]
+            self._title_map = {e["title"].lower(): e for e in self._entries}
             self._fts5_conn = conn
+            log.info(
+                "Loaded MSHC index from DB (%d entries)", len(self._entries)
+            )
             return True
         except Exception as exc:
-            log.debug("FTS5 DB validation failed: %s", exc)
+            if conn is not None:
+                conn.close()
+            log.debug("FTS5 DB load failed: %s", exc)
             return False
 
     _FTS5_BODY_LIMIT = 16384
@@ -222,9 +217,19 @@ class InfoSysMshcIndex:
         entries: List[Dict] = []
 
         fts5_db = _fts5_db_path_for(self._mshc_path)
-        if os.path.exists(fts5_db):
-            os.remove(fts5_db)
-        conn = sqlite3.connect(fts5_db)
+        use_memory = False
+        for suffix in ("", "-shm", "-wal"):
+            p = fts5_db + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    use_memory = True
+        if use_memory:
+            log.warning("FTS5 DB locked, using in-memory index (non-persistent)")
+            conn = sqlite3.connect(":memory:")
+        else:
+            conn = sqlite3.connect(fts5_db)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=OFF")
         conn.execute("""
@@ -243,6 +248,15 @@ class InfoSysMshcIndex:
         conn.execute(
             "INSERT INTO meta VALUES ('mshc_size', ?)", (str(stat.st_size),)
         )
+        conn.execute("""
+            CREATE TABLE entries (
+                title TEXT NOT NULL,
+                type TEXT NOT NULL,
+                component TEXT NOT NULL,
+                path TEXT NOT NULL PRIMARY KEY,
+                description TEXT NOT NULL DEFAULT ''
+            )
+        """)
         conn.execute("""
             CREATE VIRTUAL TABLE pages USING fts5(
                 title, type, component, path, body,
@@ -266,17 +280,23 @@ class InfoSysMshcIndex:
                     parts = info.filename.split("/")
                     component = parts[0] if len(parts) > 1 else ""
                     sym_type = _detect_type(title)
+                    desc_m = _RE_DESCRIPTION_META.search(header)
+                    desc = html.unescape(desc_m.group(1)).strip() if desc_m else ""
                     entries.append({
                         "title": title,
                         "type": sym_type,
                         "component": component,
                         "path": info.filename,
-                        "size": info.file_size,
+                        "description": desc,
                     })
                     body = _strip_tags(
                         raw_bytes[: self._FTS5_BODY_LIMIT].decode(
                             "utf-8", errors="ignore"
                         )
+                    )
+                    conn.execute(
+                        "INSERT INTO entries VALUES(?,?,?,?,?)",
+                        (title, sym_type, component, info.filename, desc),
                     )
                     conn.execute(
                         "INSERT INTO pages(title, type, component, path, body)"
@@ -288,29 +308,15 @@ class InfoSysMshcIndex:
 
         conn.commit()
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self._fts5_conn = conn
         self._entries = entries
         self._title_map = {e["title"].lower(): e for e in entries}
         elapsed = time.time() - t0
         log.info(
-            "MSHC index built: %d entries in %.1fs (FTS5 DB: %s)",
+            "MSHC index built: %d entries in %.1fs (DB: %s)",
             len(entries), elapsed, fts5_db,
         )
-
-    def _save_cache(self, cache_path: str):
-        try:
-            stat = os.stat(self._mshc_path)
-            data = {
-                "mshc_path": self._mshc_path,
-                "mshc_mtime": stat.st_mtime,
-                "mshc_size": stat.st_size,
-                "entries": self._entries,
-            }
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-            log.info("MSHC index cache written to %s", cache_path)
-        except Exception as exc:
-            log.warning("Could not write index cache: %s", exc)
 
     # ------------------------------------------------------------------
     # Search
@@ -491,13 +497,17 @@ class InfoSysMshcIndex:
 
     @staticmethod
     def _scored(entry: Dict, score: int) -> Dict:
-        return {
+        r = {
             "title": entry["title"],
             "type": entry["type"],
             "component": entry["component"],
             "path": entry["path"],
             "score": score,
         }
+        desc = entry.get("description", "")
+        if desc:
+            r["description"] = desc
+        return r
 
     # ------------------------------------------------------------------
     # Read page

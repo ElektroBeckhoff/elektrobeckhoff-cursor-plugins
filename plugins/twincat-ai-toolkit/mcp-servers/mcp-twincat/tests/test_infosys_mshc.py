@@ -27,6 +27,8 @@ class TestInfoSysMshcSearch:
         assert top["type"] == "FUNCTION_BLOCK"
         assert top["score"] == 100
         assert "tf6701" in top["component"]
+        assert "description" in top
+        assert len(top["description"]) > 10
 
     def test_search_enum(self, idx):
         r = idx.search("E_ALY_BandMode", mode="symbol")
