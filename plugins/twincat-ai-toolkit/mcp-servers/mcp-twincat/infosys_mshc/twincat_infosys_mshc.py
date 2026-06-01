@@ -20,18 +20,58 @@ from typing import Dict, List, Optional
 
 log = logging.getLogger("twincat-mcp.infosys-mshc")
 
-_MSHC_BASE_DIR = (
-    r"C:\ProgramData\Microsoft\HelpLibrary2\Catalogs\VisualStudio15\ContentStore"
-)
+import glob as _glob
 
-_LANG_MAP = {
-    "en": ("EN-US", "BKINFOSYS3_VS_100_EN-US.9.mshc"),
-    "de": ("DE-DE", "BKINFOSYS3_VS_100_DE-DE.9.mshc"),
+_HELPLIB_ROOTS = [
+    r"C:\ProgramData\Microsoft\HelpLibrary2\Catalogs",
+]
+
+_LANG_FOLDER = {
+    "en": "EN-US",
+    "de": "DE-DE",
 }
 
-DEFAULT_MSHC_PATH = os.path.join(
-    _MSHC_BASE_DIR, "EN-US", "BKINFOSYS3_VS_100_EN-US.9.mshc"
-)
+_MSHC_PATTERN = "BKINFOSYS3_VS_100_{lang_folder}.*.mshc"
+
+
+def _discover_mshc(lang_folder: str) -> Optional[str]:
+    """Auto-discover the newest BKINFOSYS3 .mshc for a language.
+
+    Searches all VisualStudio* catalogs, picks the file with the highest
+    version number so it works across VS shells (12/15/16/17) and InfoSys
+    update versions (.9, .10, .11, ...).
+    """
+    candidates: list[tuple[int, str]] = []
+    pattern = _MSHC_PATTERN.format(lang_folder=lang_folder)
+    for root in _HELPLIB_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        search = os.path.join(root, "VisualStudio*", "ContentStore", lang_folder, pattern)
+        for path in _glob.glob(search):
+            try:
+                base = os.path.splitext(os.path.basename(path))[0]
+                ver = int(base.rsplit(".", 1)[-1])
+            except (ValueError, IndexError):
+                ver = 0
+            candidates.append((ver, path))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _default_mshc_path() -> str:
+    """Return the best available EN-US MSHC path, with fallback to legacy."""
+    found = _discover_mshc("EN-US")
+    if found:
+        return found
+    return os.path.join(
+        _HELPLIB_ROOTS[0], "VisualStudio15", "ContentStore",
+        "EN-US", "BKINFOSYS3_VS_100_EN-US.9.mshc",
+    )
+
+
+DEFAULT_MSHC_PATH = _default_mshc_path()
 
 
 def resolve_mshc_path(language: str = "en", file_path: str = "") -> str:
@@ -39,9 +79,10 @@ def resolve_mshc_path(language: str = "en", file_path: str = "") -> str:
     if file_path:
         return file_path
     lang = language.lower().strip()
-    if lang in _LANG_MAP:
-        folder, filename = _LANG_MAP[lang]
-        return os.path.join(_MSHC_BASE_DIR, folder, filename)
+    lang_folder = _LANG_FOLDER.get(lang, "EN-US")
+    found = _discover_mshc(lang_folder)
+    if found:
+        return found
     return DEFAULT_MSHC_PATH
 
 _TYPE_PREFIXES = {
