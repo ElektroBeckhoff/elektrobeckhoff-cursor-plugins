@@ -335,9 +335,13 @@ def twincat_close(force_quit: bool = False) -> str:
     global _bridge
     try:
         result = _get_bridge().close(force_quit=force_quit)
+        if _bridge is not None:
+            _bridge.shutdown()
         _bridge = None
         return _json(result)
     except Exception as exc:
+        if _bridge is not None:
+            _bridge.shutdown()
         _bridge = None
         return _json({"success": False, "error": str(exc)})
 

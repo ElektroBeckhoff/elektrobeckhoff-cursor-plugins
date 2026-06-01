@@ -40,8 +40,13 @@ RPC_E_CALL_REJECTED = -2147418111   # 0x80010001 signed
 RPC_S_SERVER_UNAVAILABLE = -2147023174  # 0x800706BA signed
 E_ACCESSDENIED = -2147024891  # 0x80070005 signed
 
-_QUIT_WAIT_S = 3
+_QUIT_WAIT_S = 8
 _QUIT_POLL_S = 0.3
+
+_VS_BUILD_STATE_IN_PROGRESS = 2
+_VS_BUILD_STATE_DONE = 3
+_STABLE_OPEN_POLLS = 6     # ~3s at 0.5s interval
+_STABLE_CLOSED_POLLS = 10  # ~5s at 0.5s interval
 
 HAS_WIN32 = False
 HAS_WIN32GUI = False
@@ -216,13 +221,12 @@ class TcAutomationInterface:
     # --------------- Modal dialog auto-dismiss ---------------
 
     _SAFE_DIALOG_PATTERNS = [
-        "modified outside",   # EN: "has been modified outside of TwinCAT XAE"
-        "außerhalb",          # DE: "außerhalb von TwinCAT XAE geändert"
-        "has changed",        # EN: alternate wording for file-change prompts
-        "reload",             # EN: generic reload prompt
-        "neu laden",          # DE: "Datei neu laden?"
-        "erneut laden",       # DE: alternate reload wording
-        "geändert",           # DE: broad "changed" pattern
+        "modified outside the environment",  # EN: XAE file-change dialog
+        "file has been modified outside",    # EN: alternate wording
+        "modified outside of twincat",       # EN: TwinCAT-specific variant
+        "außerhalb der umgebung geändert",   # DE: XAE file-change dialog
+        "außerhalb von twincat xae",         # DE: TwinCAT-specific variant
+        "datei neu laden",                   # DE: "Datei neu laden?" prompt
     ]
 
     _POLL_IDLE_S = 0.5
@@ -286,8 +290,8 @@ class TcAutomationInterface:
                         "Auto-dismissed TcXaeShell dialog (hwnd=%s)", hwnd,
                     )
                 dismissed_any = bool(dismissed)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Dialog watcher error: %s", exc)
 
             delay = self._POLL_BURST_S if dismissed_any else self._POLL_IDLE_S
             stop_event.wait(delay)
@@ -547,7 +551,12 @@ class TcAutomationInterface:
         try:
             dte = win32com.client.GetActiveObject(PROG_ID)
             sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
-            plc = str(self._plc_proj_item.Name) if self._plc_proj_item else ""
+            plc = ""
+            if self._plc_proj_item and self._dte:
+                try:
+                    plc = str(self._plc_proj_item.Name)
+                except Exception:
+                    plc = ""
             msg = "TcXaeShell is running"
             if cached_slns:
                 msg += f" | {len(cached_slns)} cached instance(s)"
@@ -558,8 +567,8 @@ class TcAutomationInterface:
                 plc_project_name=plc,
                 message=msg,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("GetActiveObject probe failed: %s", exc)
 
         # Check whether the COM class is registered (lightweight)
         try:
@@ -593,6 +602,12 @@ class TcAutomationInterface:
         if not expected_sln and plcproj_path:
             expected_sln = self._find_sln_near(plcproj_path)
 
+        if expected_sln and not os.path.isfile(expected_sln):
+            return OpenResult(
+                success=False,
+                message=f"Solution file not found: {expected_sln}",
+            )
+
         norm_expected = (
             _canonical_path(expected_sln) if expected_sln else ""
         )
@@ -604,7 +619,8 @@ class TcAutomationInterface:
                 self._created_new = False
                 _ = self._dte.MainWindow.Caption  # health check
                 log.info("Attached to running TcXaeShell")
-            except Exception:
+            except Exception as exc:
+                log.debug("GetActiveObject failed: %s", exc)
                 self._dte = None
 
         # 2. If attached, check whether the loaded solution matches
@@ -689,8 +705,8 @@ class TcAutomationInterface:
                 actual = _canonical_path(
                     str(self._dte.Solution.FullName)
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not read Solution.FullName: %s", exc)
             if actual and actual != norm_expected:
                 return OpenResult(
                     success=False,
@@ -718,8 +734,8 @@ class TcAutomationInterface:
             current = ""
             try:
                 current = str(self._dte.Solution.FullName)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not read Solution.FullName: %s", exc)
             return OpenResult(
                 success=False,
                 message=(
@@ -777,6 +793,13 @@ class TcAutomationInterface:
                     time.sleep(2)
                 else:
                     raise
+
+        try:
+            settings = self._dte.GetObject("TcAutomationSettings")
+            settings.SilentMode = True
+            log.info("TcAutomationSettings.SilentMode enabled")
+        except Exception:
+            log.debug("SilentMode not available (requires Build >= 4020)")
 
         self._wait_for_xae_idle(timeout_s)
         self._ensure_correct_solution(expected_sln, timeout_s)
@@ -841,7 +864,7 @@ class TcAutomationInterface:
                 stable_count = 0
             last_open = is_open
 
-            if is_open and stable_count >= 6:
+            if is_open and stable_count >= _STABLE_OPEN_POLLS:
                 log.info("XAE startup settled (solution open) after %.1fs",
                          time.time() - start)
                 # Extra pump to let SystemManager register
@@ -849,7 +872,7 @@ class TcAutomationInterface:
                     pythoncom.PumpWaitingMessages()
                     time.sleep(0.5)
                 return
-            if not is_open and stable_count >= 10:
+            if not is_open and stable_count >= _STABLE_CLOSED_POLLS:
                 log.info("XAE startup settled (no solution) after %.1fs",
                          time.time() - start)
                 return
@@ -870,7 +893,8 @@ class TcAutomationInterface:
                     time.sleep(1)
                     pythoncom.PumpWaitingMessages()
                     return
-            except Exception:
+            except Exception as exc:
+                log.debug("Solution.IsOpen check failed (treating as closed): %s", exc)
                 return
             time.sleep(0.5)
         log.warning("Timeout (%ds) waiting for solution to close", timeout_s)
@@ -885,13 +909,18 @@ class TcAutomationInterface:
 
     def _wait_for_solution_open(self, timeout_s: int):
         start = time.time()
-        while not self._dte.Solution.IsOpen:
-            if time.time() - start > timeout_s:
-                raise TimeoutError(
-                    f"Timeout ({timeout_s}s) waiting for Solution.IsOpen"
-                )
+        while time.time() - start < timeout_s:
             pythoncom.PumpWaitingMessages()
+            try:
+                if self._dte.Solution.IsOpen:
+                    break
+            except Exception as exc:
+                log.debug("Solution.IsOpen probe failed: %s", exc)
             time.sleep(1)
+        else:
+            raise TimeoutError(
+                f"Timeout ({timeout_s}s) waiting for Solution.IsOpen"
+            )
 
         while time.time() - start < timeout_s:
             pythoncom.PumpWaitingMessages()
@@ -902,8 +931,7 @@ class TcAutomationInterface:
                 log.info("Solution ready (SystemManager reachable) after %ss", elapsed)
                 return
             except Exception as exc:
-                if not self._is_call_rejected(exc):
-                    pass
+                log.debug("SystemManager not yet reachable: %s", exc)
             time.sleep(1)
 
         raise TimeoutError(
@@ -911,17 +939,10 @@ class TcAutomationInterface:
         )
 
     def _get_system_manager(self):
-        for retry in range(15):
-            try:
-                return self._dte.Solution.Projects.Item(1).Object
-            except Exception as exc:
-                if self._is_call_rejected(exc):
-                    log.info("RPC_E_CALL_REJECTED, retry %d/15", retry + 1)
-                    pythoncom.PumpWaitingMessages()
-                    time.sleep(3)
-                else:
-                    raise
-        return None
+        return self._retry_com(
+            lambda: self._dte.Solution.Projects.Item(1).Object,
+            max_retries=15, delay_s=3,
+        )
 
     def _find_plc_project(self, proj_name):
         lookup_paths = [
@@ -935,14 +956,16 @@ class TcAutomationInterface:
                 if item:
                     log.info("PLC project found at: %s", path)
                     return item
-            except Exception:
+            except Exception as exc:
+                log.debug("LookupTreeItem('%s') failed: %s", path, exc)
                 continue
 
         # Fallback: walk the tree
         try:
             tipc = self._sys_man.LookupTreeItem("TIPC")
             return self._walk_tree(tipc, 0)
-        except Exception:
+        except Exception as exc:
+            log.debug("TIPC node lookup failed: %s", exc)
             return None
 
     def _walk_tree(self, node, depth):
@@ -987,7 +1010,7 @@ class TcAutomationInterface:
 
         # Primary: ITcPlcIECProject.CheckAllObjects()
         try:
-            self._plc_proj_item.CheckAllObjects()
+            self._retry_com(lambda: self._plc_proj_item.CheckAllObjects())
             self._wait_for_compile_complete(max_seconds=60)
             result = CheckResult(
                 success=True,
@@ -1002,7 +1025,7 @@ class TcAutomationInterface:
 
         # Fallback: DTE menu command
         try:
-            self._dte.ExecuteCommand("Build.Checkallobjects")
+            self._retry_com(self._dte.ExecuteCommand, "Build.Checkallobjects")
             self._wait_for_compile_complete(max_seconds=60)
             result = CheckResult(
                 success=True,
@@ -1048,16 +1071,16 @@ class TcAutomationInterface:
 
         self._clear_build_pane()
         start = time.time()
-        self._dte.ExecuteCommand("Build.RebuildSolution")
+        self._retry_com(self._dte.ExecuteCommand, "Build.RebuildSolution")
 
         time.sleep(2)
         build_started = False
         while True:
             pythoncom.PumpWaitingMessages()
             state = int(self._dte.Solution.SolutionBuild.BuildState)
-            if state == 2:
+            if state == _VS_BUILD_STATE_IN_PROGRESS:
                 build_started = True
-            if build_started and state != 2:
+            if build_started and state != _VS_BUILD_STATE_IN_PROGRESS:
                 break
             elapsed = time.time() - start
             if not build_started and elapsed > 15:
@@ -1079,7 +1102,7 @@ class TcAutomationInterface:
         if ci_dir and os.path.isdir(ci_dir):
             ci_updated = self._newest_compile_info_mtime(ci_dir) > ci_before
 
-        ok = ci_updated and last_info == 0
+        ok = last_info == 0 and (ci_updated or ci_dir is None)
 
         err = self._impl_get_output_log()
 
@@ -1114,49 +1137,18 @@ class TcAutomationInterface:
         errors: list[dict] = []
         warnings: list[dict] = []
         summary_line = ""
-        build_text = ""
 
-        try:
-            output_win = None
-            for i in range(1, self._dte.Windows.Count + 1):
-                w = self._dte.Windows.Item(i)
-                if str(getattr(w, "Caption", "")).lower() == "output":
-                    output_win = w.Object
-                    break
-            if not output_win:
-                return ErrorsResult(message="Output window not found")
+        build_text = self._read_pane_text(self._get_output_pane("build"))
+        twincat_text = self._read_pane_text(self._get_output_pane("twincat"))
 
-            panes = output_win.OutputWindowPanes
-            twincat_text = ""
-            for i in range(1, panes.Count + 1):
-                try:
-                    pane = panes.Item(i)
-                    name = str(pane.Name).lower()
-                    if "build" in name or "erstellen" in name:
-                        doc = pane.TextDocument
-                        sel = doc.Selection
-                        sel.SelectAll()
-                        build_text = str(sel.Text)
-                    elif name == "twincat":
-                        doc = pane.TextDocument
-                        sel = doc.Selection
-                        sel.SelectAll()
-                        twincat_text = str(sel.Text)
-                except Exception:
-                    continue
+        if build_text and twincat_text:
+            build_text = build_text + "\n" + twincat_text
+        elif twincat_text:
+            build_text = twincat_text
 
-            if build_text and twincat_text:
-                build_text = build_text + "\n" + twincat_text
-            elif twincat_text:
-                build_text = twincat_text
-
-            if not build_text:
-                return ErrorsResult(
-                    message="Build output pane empty or not found"
-                )
-        except Exception as exc:
+        if not build_text:
             return ErrorsResult(
-                message=f"Could not read Build output: {exc}"
+                message="Build output pane empty or not found"
             )
 
         # Only parse from the LAST build header ("------ Build started"
@@ -1273,6 +1265,14 @@ class TcAutomationInterface:
                 message="No PLC project. Call twincat_open first.",
             )
 
+        _INVALID_PATH_CHARS = set('<>:"/\\|?*')
+        filename_part = f"{title}-{version}"
+        if any(c in _INVALID_PATH_CHARS for c in filename_part):
+            return ExportResult(
+                success=False,
+                message=f"Invalid characters in title/version: {filename_part}",
+            )
+
         os.makedirs(output_dir, exist_ok=True)
         lib = os.path.join(output_dir, f"{title}-{version}.library")
         comp = os.path.join(output_dir, f"{title}-{version}.compiled-library")
@@ -1333,8 +1333,8 @@ class TcAutomationInterface:
         sln_path = ""
         try:
             sln_path = str(self._dte.Solution.FullName)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not read Solution.FullName for reload: %s", exc)
         if not sln_path:
             return ReloadResult(
                 success=False,
@@ -1345,8 +1345,8 @@ class TcAutomationInterface:
         if self._plc_proj_item:
             try:
                 proj_name = str(self._plc_proj_item.Name).replace(" Project", "")
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not read PLC project name: %s", exc)
 
         start = time.time()
         log.info("Reload: closing solution (no save) ...")
@@ -1435,8 +1435,8 @@ class TcAutomationInterface:
                     try:
                         if self._dte.Solution.IsOpen:
                             self._dte.Solution.Close(False)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log.debug("Solution.Close failed during detach: %s", exc)
                     msg = "Solution closed"
                 else:
                     msg = "Detached (solution untouched)"
@@ -1489,8 +1489,11 @@ class TcAutomationInterface:
             pythoncom.PumpWaitingMessages()
             time.sleep(0.5)
 
-    def _clear_build_pane(self):
-        """Clear the Build output pane so polling only sees fresh output."""
+    def _get_output_pane(self, name_filter: str = "build") -> Optional[object]:
+        """Find an OutputWindowPane by name substring (case-insensitive).
+
+        For "build", also matches "erstellen" (German locale).
+        """
         try:
             for i in range(1, self._dte.Windows.Count + 1):
                 w = self._dte.Windows.Item(i)
@@ -1499,9 +1502,35 @@ class TcAutomationInterface:
                     for j in range(1, panes.Count + 1):
                         pane = panes.Item(j)
                         name = str(pane.Name).lower()
-                        if "build" in name or "erstellen" in name:
-                            pane.Clear()
-                            return
+                        if name_filter in name:
+                            return pane
+                        if name_filter == "build" and "erstellen" in name:
+                            return pane
+        except Exception as exc:
+            log.debug("Failed to find output pane '%s': %s", name_filter, exc)
+        return None
+
+    @staticmethod
+    def _read_pane_text(pane) -> str:
+        """Read all text from an OutputWindowPane."""
+        if not pane:
+            return ""
+        try:
+            doc = pane.TextDocument
+            sel = doc.Selection
+            sel.SelectAll()
+            return str(sel.Text)
+        except Exception as exc:
+            log.debug("Failed to read pane text: %s", exc)
+            return ""
+
+    def _clear_build_pane(self):
+        """Clear the Build output pane so polling only sees fresh output."""
+        pane = self._get_output_pane("build")
+        if not pane:
+            return
+        try:
+            pane.Clear()
         except Exception as exc:
             log.warning("Could not clear Build pane: %s", exc)
 
@@ -1520,33 +1549,26 @@ class TcAutomationInterface:
 
     def _read_build_pane_text(self) -> str:
         """Read current text from the Build output pane."""
-        try:
-            for i in range(1, self._dte.Windows.Count + 1):
-                w = self._dte.Windows.Item(i)
-                if str(getattr(w, "Caption", "")).lower() == "output":
-                    panes = w.Object.OutputWindowPanes
-                    for j in range(1, panes.Count + 1):
-                        pane = panes.Item(j)
-                        name = str(pane.Name).lower()
-                        if "build" in name or "erstellen" in name:
-                            doc = pane.TextDocument
-                            sel = doc.Selection
-                            sel.SelectAll()
-                            return str(sel.Text)
-        except Exception:
-            pass
-        return ""
+        return self._read_pane_text(self._get_output_pane("build"))
 
-    def _wait_for_idle(self, max_seconds: int = 30):
-        for _ in range(max_seconds * 2):
-            pythoncom.PumpWaitingMessages()
-            time.sleep(0.5)
+
+    def _retry_com(self, func, *args, max_retries=5, delay_s=2):
+        """Call *func* with retry on transient COM errors (RPC_E_CALL_REJECTED).
+
+        Same pattern already used in _get_system_manager and _create_new_dte,
+        extracted here for reuse at other unprotected COM call sites.
+        """
+        for attempt in range(max_retries):
             try:
-                state = int(self._dte.Solution.SolutionBuild.BuildState)
-                if state != 2:
-                    return
-            except Exception:
-                pass
+                return func(*args)
+            except Exception as exc:
+                if self._is_retryable_com_error(exc) and attempt < max_retries - 1:
+                    log.info("Retryable COM error (attempt %d/%d): %s",
+                             attempt + 1, max_retries, exc)
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(delay_s)
+                else:
+                    raise
 
     _RETRYABLE_HRESULTS = {RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE}
 
