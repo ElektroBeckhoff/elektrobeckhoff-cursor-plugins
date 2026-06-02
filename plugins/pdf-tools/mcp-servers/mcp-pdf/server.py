@@ -6,12 +6,17 @@ directly: status check, PDF-to-Markdown/JSON/HTML conversion, and hybrid
 mode for complex documents (scans, borderless tables, formulas, charts).
 
 Transport: stdio  (Cursor starts this process as a child)
+
+IMPORTANT: opendataloader-pdf spawns a Java subprocess whose logging
+(java.util.logging) writes to stdout. Since MCP uses stdout as the
+JSON-RPC wire, we must redirect fd 1 → fd 2 during conversion calls
+to prevent Java log lines from corrupting the protocol stream.
 """
 
+import contextlib
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from typing import Optional
@@ -26,6 +31,26 @@ log = logging.getLogger("pdf-mcp")
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("PDF Tools")
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr():
+    """Redirect fd 1 (stdout) to fd 2 (stderr) at the OS level.
+
+    This ensures child processes (Java JVM) cannot write log output
+    into the MCP JSON-RPC channel. Python-level sys.stdout is also
+    swapped so any print() calls go to stderr.
+    """
+    stdout_fd = os.dup(1)
+    os.dup2(2, 1)
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+        os.dup2(stdout_fd, 1)
+        os.close(stdout_fd)
 
 
 def _check_java() -> tuple[bool, str]:
@@ -142,7 +167,8 @@ def pdf_convert(
         kwargs["use_struct_tree"] = True
 
     try:
-        opendataloader_pdf.convert(**kwargs)
+        with _stdout_to_stderr():
+            opendataloader_pdf.convert(**kwargs)
     except Exception as e:
         log.error("pdf_convert failed: %s", e)
         return json.dumps({
@@ -235,7 +261,8 @@ def pdf_convert_hybrid(
         kwargs["use_struct_tree"] = True
 
     try:
-        opendataloader_pdf.convert(**kwargs)
+        with _stdout_to_stderr():
+            opendataloader_pdf.convert(**kwargs)
     except Exception as e:
         log.error("pdf_convert_hybrid failed: %s", e)
         hint = "Ensure the hybrid backend is running: opendataloader-pdf-hybrid --port 5002"
