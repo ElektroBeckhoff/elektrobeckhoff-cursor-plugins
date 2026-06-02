@@ -1,0 +1,53 @@
+---
+description: MCP PDF tools awareness. Tells the agent when and how to use the PDF conversion MCP tools for parsing PDFs to Markdown, JSON, HTML, or text.
+alwaysApply: false
+---
+
+# PDF Tools MCP
+
+## Available MCP Tools
+
+| Tool | Purpose | Prerequisites |
+|------|---------|---------------|
+| `pdf_status` | Check if opendataloader-pdf and Java 11+ are installed | None |
+| `pdf_convert` | Convert PDF(s) to Markdown/JSON/HTML/text (local mode) | Java 11+, opendataloader-pdf |
+| `pdf_convert_hybrid` | Convert complex PDFs with AI backend (hybrid mode) | Java 11+, opendataloader-pdf[hybrid], running backend |
+
+## When to Use Which Tool
+
+### pdf_convert (local mode)
+- Standard digital PDFs
+- Fast extraction (~60 pages/sec)
+- No cloud, no GPU, no backend needed
+- Good for clean PDFs with simple tables
+
+### pdf_convert_hybrid (hybrid mode)
+- Scanned / image-based PDFs (OCR)
+- Complex or borderless tables
+- Mathematical formulas (LaTeX extraction)
+- Charts needing AI description
+- Higher accuracy (0.907 overall vs 0.831 local)
+
+## Format Selection
+
+| Goal | Format |
+|------|--------|
+| LLM context, RAG chunks | `markdown` |
+| Element coordinates, source citations | `json` |
+| Web rendering | `html` |
+| Plain text | `text` |
+| Accessibility remediation | `tagged-pdf` |
+
+## Workflow
+
+1. Always call `pdf_status()` first to verify prerequisites
+2. Use `pdf_convert` for standard PDFs
+3. Switch to `pdf_convert_hybrid` only when local mode quality is insufficient
+4. Batch multiple files in one call (JVM startup overhead)
+
+## Critical Rules
+
+- **Always check prerequisites** with `pdf_status()` before conversion.
+- **Batch files** in a single call when possible -- each `convert()` spawns a JVM process.
+- **Hybrid backend must be running** before calling `pdf_convert_hybrid`. Tell the user to start it.
+- **Default format is Markdown** -- use JSON only when bounding boxes are needed.

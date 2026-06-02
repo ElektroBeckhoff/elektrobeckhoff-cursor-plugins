@@ -1,0 +1,4 @@
+# Python 3.10+ required
+# System dependency: Java 11+ (https://adoptium.net) -- not installable via pip
+mcp>=1.27.0
+opendataloader-pdf>=2.4.0

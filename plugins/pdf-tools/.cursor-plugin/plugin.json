@@ -1,0 +1,25 @@
+{
+  "name": "pdf-tools",
+  "displayName": "PDF Tools",
+  "version": "0.1.0",
+  "description": "PDF parsing and conversion tools using opendataloader-pdf. Convert PDFs to Markdown, JSON, HTML with AI-ready structure extraction.",
+  "author": {
+    "name": "Elektro Beckhoff",
+    "email": "info@elektrobeckhoff.de"
+  },
+  "license": "MIT",
+  "keywords": ["cursor", "plugin", "pdf", "markdown", "opendataloader", "rag", "document-parsing"],
+  "logo": "assets/logo.svg",
+  "rules": [
+    "rules/pdf-tools-mcp.mdc"
+  ],
+  "skills": [
+    "skills/pdf-convert",
+    "skills/pdf-hybrid"
+  ],
+  "commands": [
+    "commands/pdf-to-markdown.md",
+    "commands/pdf-to-json.md"
+  ],
+  "mcpServers": ".mcp.json"
+}
