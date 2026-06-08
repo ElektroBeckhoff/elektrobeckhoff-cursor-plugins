@@ -70,7 +70,8 @@ END_TYPE
 ## Rules
 
 - DUTs have **only** `<Declaration>`, no `<Implementation>` section
-- Each DUT file needs ONE unique GUID
-- `Name` attribute must match the TYPE name
+- Each DUT needs ONE unique GUID in `<DUT Id="{...}">` — see `twincat3-xml-tcpou.mdc` GUID Rules for format and generation
+- `Name` attribute must match the TYPE name inside CDATA
 - `STRUCT` keyword goes on its own line (after `TYPE ST_Name :`)
 - Prefix: `ST_` for structs, `E_` for enums, `U_` for unions
+- Never reuse a GUID from another file — always generate fresh

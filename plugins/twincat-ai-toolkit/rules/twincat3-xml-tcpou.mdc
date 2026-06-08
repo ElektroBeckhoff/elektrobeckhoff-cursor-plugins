@@ -27,13 +27,57 @@ END_VAR
 </TcPlcObject>
 ```
 
+## GUID Rules
+
+Every XML element with an `Id` attribute requires a GUID. GUIDs are the primary identity mechanism for TwinCAT objects — they link POUs, methods, properties, and actions across the solution.
+
+### Format
+
+Standard UUID v4, lowercase hex with hyphens, wrapped in curly braces:
+
+```
+Id="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
+```
+
+- 8-4-4-4-12 hex digits: `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`
+- Lowercase letters: `{a1b2...}` not `{A1B2...}`
+- Always include curly braces in the XML attribute value
+
+### Generation
+
+Generate a fresh random GUID for each new element. Methods:
+- PowerShell: `[guid]::NewGuid().ToString('D')` then wrap in `{}`
+- Python: `import uuid; f'{{{uuid.uuid4()}}}'`
+
+### Uniqueness scope
+
+Every GUID must be **unique across the entire PLC project** (all `.TcPOU`, `.TcDUT`, `.TcGVL` files combined). Two different elements must never share the same GUID, even across different files.
+
+### GUID count per element
+
+| Element | GUIDs needed | Id locations |
+|---------|:------------:|--------------|
+| POU (FB / Function / Program) | 1 | `<POU Id="...">` |
+| Method | 1 | `<Method Id="...">` |
+| Action | 1 | `<Action Id="...">` |
+| Property | 3 | `<Property Id="...">` + `<Get Id="...">` + `<Set Id="...">` |
+| Property (read-only, no Set) | 2 | `<Property Id="...">` + `<Get Id="...">` |
+| DUT (Struct / Enum / Union) | 1 | `<DUT Id="...">` |
+| GVL | 1 | `<GVL Id="...">` |
+
+### Rules
+
+- **Never reuse** a GUID from another element — always generate fresh
+- **Never change** an existing GUID when editing code — GUIDs are stable identifiers
+- **Never omit** the `Id` attribute — TwinCAT requires it on every POU/Method/Property/Action/DUT/GVL element
+- **Never copy-paste** a file without replacing ALL GUIDs with fresh ones
+
 ## Critical Rules
 
-1. **Edit ONLY inside `<![CDATA[...]]>` sections** - never touch XML tags
-2. **Every POU needs a unique GUID** in `Id="{...}"` - generate via PowerShell: `[guid]::NewGuid()`
-3. **Name attribute MUST match** the FUNCTION_BLOCK/FUNCTION/PROGRAM name inside CDATA
-4. **SpecialFunc** is usually `"None"`. Only `"FB_init"`, `"FB_reinit"`, `"FB_exit"` for special cases.
-5. **Preserve existing GUIDs** when editing - never change them
+1. **Edit ONLY inside `<![CDATA[...]]>` sections** — never touch XML tags
+2. **Name attribute MUST match** the FUNCTION_BLOCK/FUNCTION/PROGRAM name inside CDATA
+3. **SpecialFunc** is usually `"None"`. Only `"FB_init"`, `"FB_reinit"`, `"FB_exit"` for special cases.
+4. **Preserve existing GUIDs** when editing — never change them
 
 ## Methods (inside POU, after `</Implementation>`)
 

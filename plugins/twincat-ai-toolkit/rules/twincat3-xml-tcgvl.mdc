@@ -41,6 +41,8 @@ END_VAR
 ## Rules
 
 - GVLs have **only** `<Declaration>`, no `<Implementation>` section
-- Each GVL needs ONE unique GUID
+- Each GVL needs ONE unique GUID in `<GVL Id="{...}">` — see `twincat3-xml-tcpou.mdc` GUID Rules for format and generation
+- `Name` attribute must match the GVL name inside CDATA
 - Naming: `GVL_[Domain]` for runtime globals, `Param_[Library]` for constants
 - `Global_Version` GVL for library version info (uses `ST_LibVersion` from `Tc2_System`)
+- Never reuse a GUID from another file — always generate fresh
