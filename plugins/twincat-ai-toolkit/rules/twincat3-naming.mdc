@@ -65,6 +65,7 @@ alwaysApply: true
 ## Files
 
 - FBs/Functions: `[TypeName].TcPOU` — `FB_EMS_ECabinet.TcPOU`
+- Interfaces: `[TypeName].TcIO` — `I_EB_BA_Widget.TcIO`
 - DUTs: `[TypeName].TcDUT` — `ST_EMS_ECabinet_Param.TcDUT`, `E_EMS_Mode.TcDUT`
 - GVLs: `[GVLName].TcGVL` — `Param_EMS.TcGVL`
 - XML `Name` attribute **must** match the type name in the CDATA declaration

@@ -51,7 +51,7 @@ Generate a fresh random GUID for each new element. Methods:
 
 ### Uniqueness scope
 
-Every GUID must be **unique across the entire PLC project** (all `.TcPOU`, `.TcDUT`, `.TcGVL` files combined). Two different elements must never share the same GUID, even across different files.
+Every GUID must be **unique across the entire PLC project** (all `.TcPOU`, `.TcIO`, `.TcDUT`, `.TcGVL` files combined). Two different elements must never share the same GUID, even across different files.
 
 ### GUID count per element
 

@@ -1,0 +1,97 @@
+---
+description: TwinCAT3 .TcIO file format rules for Interfaces (ITF). XML structure, CDATA sections, GUID requirements for Interfaces, Methods, and Properties.
+globs: "**/*.TcIO"
+alwaysApply: false
+---
+
+# TcIO Interface File Format
+
+Interfaces are stored in `.TcIO` files using the `<Itf>` element. They define method and property contracts without implementation.
+
+## XML Structure
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Example" Id="{GUID}">
+    <Declaration><![CDATA[INTERFACE I_Example
+]]></Declaration>
+  </Itf>
+</TcPlcObject>
+```
+
+## Methods (inside Itf)
+
+Interface methods have Declaration only — no Implementation section:
+
+```xml
+    <Method Name="Start" Id="{GUID}">
+      <Declaration><![CDATA[METHOD Start : BOOL
+VAR_INPUT
+    nMode : INT;
+END_VAR
+]]></Declaration>
+    </Method>
+```
+
+## Properties (inside Itf)
+
+### Read-write property (Get + Set) — 3 GUIDs
+
+```xml
+    <Property Name="DisplayName" Id="{GUID}">
+      <Declaration><![CDATA[PROPERTY DisplayName : STRING
+]]></Declaration>
+      <Get Name="Get" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+```
+
+### Read-only property (Get only) — 2 GUIDs
+
+```xml
+    <Property Name="IsEnabled" Id="{GUID}">
+      <Declaration><![CDATA[PROPERTY IsEnabled : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+```
+
+## Key Differences from POU
+
+| Aspect | POU (`<POU>`) | Interface (`<Itf>`) |
+|--------|---------------|---------------------|
+| Root element | `<POU Name="..." Id="..." SpecialFunc="None">` | `<Itf Name="..." Id="...">` |
+| ST declaration | `FUNCTION_BLOCK FB_Name` | `INTERFACE I_Name` |
+| Implementation | Has `<Implementation><ST>` | No implementation section |
+| Methods | Have Declaration + Implementation | Declaration only (no Implementation) |
+| Properties | Get/Set have Declaration + Implementation | Get/Set have Declaration only (empty CDATA) |
+| Actions | Supported | Not supported |
+| SpecialFunc | Required (`"None"` default) | Not present |
+
+## GUID Count
+
+| Element | GUIDs needed |
+|---------|:------------:|
+| Interface itself | 1 |
+| Method | 1 |
+| Property (read-write) | 3 (Property + Get + Set) |
+| Property (read-only) | 2 (Property + Get) |
+
+See `twincat3-xml-tcpou.mdc` GUID Rules for format, generation, and uniqueness requirements.
+
+## Rules
+
+- Interface names use `I_` prefix: `I_Controller`, `I_EB_BA_Widget`
+- `Name` attribute must match the INTERFACE name inside CDATA
+- Methods in interfaces have **no** `<Implementation>` section — only `<Declaration>`
+- Property Get/Set in interfaces have empty `<Declaration><![CDATA[]]></Declaration>` — no Implementation
+- Exception: A Set accessor may have a VAR block in its Declaration if local variables are needed for validation in the implementing FB
+- Never add `SpecialFunc` to `<Itf>` — that attribute only exists on `<POU>`
+- File naming: `I_[Lib]_[Purpose].TcIO` — e.g. `I_EB_BA_Widget.TcIO`
