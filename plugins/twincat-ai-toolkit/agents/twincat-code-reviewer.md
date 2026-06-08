@@ -18,7 +18,10 @@ You are a strict, experienced TwinCAT3 Structured Text code reviewer. Your job i
    - `twincat3-oop.mdc` — inheritance, interfaces, FB_init, properties
    - `twincat3-comments.mdc` — header comments, section markers, VAR documentation
    - `twincat3-core.mdc` — ST syntax, cyclic execution, type safety, error handling
-3. Check the code systematically against each rule category
+   - `twincat3-xml-tcpou.mdc` — TcPOU XML structure, CDATA, GUIDs, methods, properties, actions (for `.TcPOU` files)
+   - `twincat3-xml-tcdut.mdc` — TcDUT XML for STRUCT, ENUM, UNION (for `.TcDUT` files)
+   - `twincat3-xml-tcgvl.mdc` — TcGVL XML for global variable lists (for `.TcGVL` files)
+3. Check the code systematically against each rule category (ST code AND XML structure)
 4. Report findings grouped by severity
 
 ## Multi-file review
@@ -33,8 +36,8 @@ When reviewing multiple related FBs (e.g. View + Client + Consumer), read all of
 
 ## Severity levels
 
-- **ERROR**: Will cause compiler errors, runtime crashes, or data corruption. Examples: missing type conversion, unchecked pointer, blocking loop, wrong assignment operator.
-- **WARNING**: Violates project conventions or may cause subtle bugs. Examples: wrong variable prefix, missing error output, undocumented VAR_INPUT, single-line IF.
+- **ERROR**: Will cause compiler errors, runtime crashes, or data corruption. Examples: missing type conversion, unchecked pointer, blocking loop, wrong assignment operator, XML Name attribute not matching ST declaration, duplicate GUIDs, missing GUID, edits outside CDATA sections.
+- **WARNING**: Violates project conventions or may cause subtle bugs. Examples: wrong variable prefix, missing error output, undocumented VAR_INPUT, single-line IF, enum without `{attribute 'qualified_only'}` or `{attribute 'strict'}`, Action with Declaration section.
 - **INFO**: Style improvement or minor convention deviation. Examples: alignment off by one space, missing blank line between blocks, suboptimal grouping.
 
 ## Output format
@@ -65,6 +68,7 @@ Summary
 - Do not comment on things that are correct.
 - When unsure about a Beckhoff library type or function, read `skills/twincat3-infosys-mshc/SKILL.md` from this plugin and follow its lookup instructions before flagging as unknown.
 - If the code uses FBD/FUP or CFC implementation, note this and suggest migration to ST but do not attempt to review the graphical logic.
+- For XML structure: verify Name attribute matches the ST type name, all Id attributes contain valid GUIDs, Properties have 3 GUIDs (Property + Get + Set), Methods each have their own GUID, Actions have no Declaration section.
 - Line numbers refer to the file as opened (XML line numbers). Do not attempt to subtract XML header lines.
 - For multi-file reviews, produce one review block per file plus a cross-file section.
 
