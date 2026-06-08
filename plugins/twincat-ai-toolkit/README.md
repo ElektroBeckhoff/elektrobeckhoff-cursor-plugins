@@ -80,6 +80,18 @@ Agent-executable commands for common tasks (`commands/`).
 | `twincat3-plcproj-sync` | Verify and sync TwinCAT .plcproj against disk |
 | `twincat3-infosys-mshc-lookup` | Look up a Beckhoff type or attribute from local offline InfoSys |
 
+## Agents
+
+Specialized readonly subagents that can be delegated to or invoked via `/agent-name` (`agents/`).
+
+| Agent | Description |
+|-------|-------------|
+| `twincat-code-reviewer` | ST code review against naming, formatting, OOP, comments, and core rules. Reports findings by severity (ERROR / WARNING / INFO). |
+| `twincat-debugger` | Systematic diagnosis of compiler errors, runtime bugs, and missing dependencies using MCP build tools. |
+| `twincat-migration-planner` | FBD/FUP and CFC migration assessment — analyze scope, dry-run preview, risk classification, recommended migration order. |
+| `twincat-architecture` | Library architecture analysis — project structure, FB hierarchies, interface design, dependency management, versioning. |
+| `twincat-infosys-researcher` | Beckhoff InfoSys documentation lookup — type signatures, methods, library requirements, attributes (offline-first, web fallback). |
+
 ## MCP Server
 
 Build automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`).
