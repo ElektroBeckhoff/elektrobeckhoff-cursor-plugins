@@ -10,16 +10,8 @@
   "license": "MIT",
   "keywords": ["cursor", "plugin", "pdf", "markdown", "opendataloader", "rag", "document-parsing"],
   "logo": "assets/logo.svg",
-  "rules": [
-    "rules/pdf-tools-mcp.mdc"
-  ],
-  "skills": [
-    "skills/pdf-convert",
-    "skills/pdf-hybrid"
-  ],
-  "commands": [
-    "commands/pdf-to-markdown.md",
-    "commands/pdf-to-json.md"
-  ],
+  "rules": "./rules/",
+  "skills": "./skills/",
+  "commands": "./commands/",
   "mcpServers": ".mcp.json"
 }
