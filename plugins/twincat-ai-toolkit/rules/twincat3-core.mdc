@@ -17,7 +17,7 @@ alwaysApply: true
 | Boolean NOT | `NOT` | `!` |
 | End block | `END_IF`, `END_CASE`, `END_FOR` | `}` |
 | String concat | `CONCAT(s1, s2)` | `s1 + s2` |
-| Comments | `// text` or `(* text *)` | `/* text */` |
+| Comments | `(* text *)` | `/* text */` or `//` |
 
 ## Cyclic Execution
 
@@ -43,9 +43,9 @@ alwaysApply: true
 Every FB that can fail exposes:
 ```iecst
 VAR_OUTPUT
-    bError      : BOOL;       // Error flag
-    hrErrorCode : HRESULT;    // Detailed error code
-    eError      : E_*_Error;  // Domain-specific enum (optional)
+    bError      : BOOL;       (* Error flag *)
+    hrErrorCode : HRESULT;    (* Detailed error code *)
+    eError      : E_*_Error;  (* Domain-specific enum, optional *)
 END_VAR
 ```
 

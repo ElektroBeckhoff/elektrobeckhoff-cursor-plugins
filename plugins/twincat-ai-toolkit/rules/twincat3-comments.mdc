@@ -1,48 +1,67 @@
 ---
-description: TwinCAT3 commenting standards. Mandatory I/O comments, block section separators, FB headers. Enforces consistent documentation style.
-globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL"
+description: TwinCAT3 commenting standards. Mandatory I/O comments, block section separators, FB headers. Enforces consistent documentation style using (* *) comment syntax exclusively.
+globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL,**/*.TcIO"
 alwaysApply: false
 ---
 
 # Comment Standards
 
+## Comment Syntax
+
+Use **only** `(* *)` comment syntax. Never use `//` single-line comments.
+
+| Type | Syntax | Example |
+|------|--------|---------|
+| Single-line | `(* text *)` | `(* Enable the controller *)` |
+| Multi-line | `(* text ... text *)` | `(* Signal must stay TRUE for tActivate before Q goes TRUE. Signal must stay FALSE for tDeactivate before Q goes FALSE. *)` |
+| Nested | `(* outer (* inner *) *)` | `(* a := fbTest.out; (* disabled *) b := b + 1; *)` |
+
+TwinCAT supports nested `(* *)` comments — inner `(* *)` pairs are allowed inside outer ones. This is useful for commenting out code blocks that already contain comments.
+
 ## FB / FUNCTION Header
 
-One-line `//` purpose comment before `FUNCTION_BLOCK` / `FUNCTION`. Multi-line for complex FBs (max 3 lines).
+One-line `(* *)` purpose comment before `FUNCTION_BLOCK` / `FUNCTION`. Multi-line for complex FBs (max 3 lines). This comment appears as tooltip in TwinCAT XAE.
 
 ```iecst
-// On/off hysteresis timer.
-// Signal must stay TRUE for tActivate before Q goes TRUE.
-// Signal must stay FALSE for tDeactivate before Q goes FALSE.
+(* On/off hysteresis timer.
+   Signal must stay TRUE for tActivate before Q goes TRUE.
+   Signal must stay FALSE for tDeactivate before Q goes FALSE. *)
 FUNCTION_BLOCK FB_EMS_HysteresisTimer
+```
+
+For simple FBs, a single line is enough:
+
+```iecst
+(* Floating average over 1 minute sample window. *)
+FUNCTION_BLOCK FB_EMS_FloatingAvg_1m
 ```
 
 ## VAR_INPUT / VAR_OUTPUT — Always Commented
 
-Every input and output **must** have an inline `//` comment. Format: `// [unit] Purpose`
+Every input and output **must** have an inline `(* *)` comment. Format: `(* [unit] Purpose *)`
 
 ```iecst
 VAR_INPUT
-    bEnable       : BOOL; // Enable the controller
-    rW            : REAL; // Setpoint value
-    rX            : REAL; // Actual value (process variable)
-    rDeadRange    : REAL; // [%] Dead band relative to output range
-    rKp           : REAL; // Proportional gain
-    tTi           : TIME; // Integration time
-    rYMin         : REAL; // [A] Minimum output value
-    rYMax         : REAL; // [A] Maximum output value
+    bEnable       : BOOL;  (* Enable the controller *)
+    rW            : REAL;  (* Setpoint value *)
+    rX            : REAL;  (* Actual value (process variable) *)
+    rDeadRange    : REAL;  (* [%] Dead band relative to output range *)
+    rKp           : REAL;  (* Proportional gain *)
+    tTi           : TIME;  (* Integration time *)
+    rYMin         : REAL;  (* [A] Minimum output value *)
+    rYMax         : REAL;  (* [A] Maximum output value *)
 END_VAR
 VAR_OUTPUT
-    rY        : REAL; // Controller output
-    bMaxLimit : BOOL; // TRUE when output hit upper limit
-    bMinLimit : BOOL; // TRUE when output hit lower limit
-    bError    : BOOL; // Error flag
+    rY        : REAL;  (* Controller output *)
+    bMaxLimit : BOOL;  (* TRUE when output hit upper limit *)
+    bMinLimit : BOOL;  (* TRUE when output hit lower limit *)
+    bError    : BOOL;  (* Error flag *)
 END_VAR
 ```
 
 Rules:
-- Physical units in brackets at the start: `// [A]`, `// [W]`, `// [kWh]`, `// [%]`, `// [ms]`
-- BOOL: describe TRUE condition: `// TRUE when charging is active`
+- Physical units in brackets at the start: `(* [A] *)`, `(* [W] *)`, `(* [kWh] *)`, `(* [%] *)`, `(* [ms] *)`
+- BOOL: describe TRUE condition: `(* TRUE when charging is active *)`
 - Keep it short — one line, no period at end
 - English comments
 
@@ -107,10 +126,11 @@ Only use this for FBs with 5+ actions/methods. Small FBs don't need it.
 
 ## What NOT to Comment
 
-- Do not narrate obvious code: `// Set bDone to TRUE` on `bDone := TRUE;`
+- Do not narrate obvious code: `(* Set bDone to TRUE *)` on `bDone := TRUE;`
 - Do not comment END_IF / END_CASE / END_FOR
-- Do not duplicate the variable name: `bEnable : BOOL; // Enable flag for bEnable`
+- Do not duplicate the variable name: `bEnable : BOOL; (* Enable flag for bEnable *)`
 - Do not write TODO/FIXME without a name and date
+- Do not use `//` comments — always use `(* *)` syntax
 - Internal VAR members: comments optional (only if purpose is non-obvious)
 
 ## STRUCT Members
@@ -120,9 +140,9 @@ Same rules as VAR_INPUT — each member gets an inline comment:
 ```iecst
 TYPE ST_EMS_ECabinet_Param :
     STRUCT
-        fMaxCurrent         : REAL := 120;  // [A] Max current per phase
-        fMaxFailsafeCurrent : REAL := 72;   // [A] Failsafe current limit
-        bCalculateCircuits  : BOOL := TRUE; // TRUE: dynamic distribution
+        fMaxCurrent         : REAL := 120;  (* [A] Max current per phase *)
+        fMaxFailsafeCurrent : REAL := 72;   (* [A] Failsafe current limit *)
+        bCalculateCircuits  : BOOL := TRUE; (* TRUE: dynamic distribution *)
     END_STRUCT
 END_TYPE
 ```
