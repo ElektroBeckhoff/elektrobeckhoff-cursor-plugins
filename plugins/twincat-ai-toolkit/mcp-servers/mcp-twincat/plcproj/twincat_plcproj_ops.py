@@ -440,6 +440,14 @@ def replace_xml_blocks(
 _ROOT_TAG_RE = re.compile(r"<(POU|GVL|Itf|DUT)\s+([^>]+)>", re.IGNORECASE)
 _ID_ATTR_RE = re.compile(r'\s+Id="([^"]*)"', re.IGNORECASE)
 _NAME_ATTR_RE = re.compile(r'(Name="[^"]*")', re.IGNORECASE)
+_ANY_ID_ATTR_RE = re.compile(r'(Id="\{)([0-9a-fA-F\-]+)(\}")')
+
+_KNOWN_FAKE_PREFIXES: Set[str] = {
+    "a1b2c3d4", "b2c3d4e5", "c3d4e5f6", "d4e5f6a7", "e4f5a6b7", "f5a6b7c8",
+    "12345678", "abcdef01", "abcdef12", "01234567", "89abcdef",
+}
+
+_HEX_SEQ = "0123456789abcdef"
 
 
 def _is_valid_guid(value: str) -> bool:
@@ -452,10 +460,124 @@ def _is_valid_guid(value: str) -> bool:
         return False
 
 
+def _is_fake_guid(value: str) -> bool:
+    """Detect AI-generated fake GUIDs that parse as valid UUIDs but have
+    obvious non-random patterns.
+
+    Checks both the full hyphenated string and the pure 32 hex-digit form.
+    Returns True if any heuristic triggers.
+    """
+    t = value.strip().strip("{}").lower()
+    try:
+        uuid.UUID(t)
+    except ValueError:
+        return False
+
+    hex_only = t.replace("-", "")
+    if len(hex_only) != 32:
+        return False
+
+    # --- Hex-based checks (32 hex digits, no hyphens) ---
+
+    # Repeated digits: 5+ consecutive identical hex digits
+    if re.search(r"(.)\1{4,}", hex_only):
+        return True
+
+    # Sequential ascending: 5+ consecutive ascending hex digits
+    asc_run = 1
+    for i in range(1, len(hex_only)):
+        prev_idx = _HEX_SEQ.index(hex_only[i - 1])
+        curr_idx = _HEX_SEQ.index(hex_only[i])
+        if curr_idx == prev_idx + 1:
+            asc_run += 1
+            if asc_run >= 5:
+                return True
+        else:
+            asc_run = 1
+
+    # Sequential descending: 5+ consecutive descending hex digits
+    desc_run = 1
+    for i in range(1, len(hex_only)):
+        prev_idx = _HEX_SEQ.index(hex_only[i - 1])
+        curr_idx = _HEX_SEQ.index(hex_only[i])
+        if curr_idx == prev_idx - 1:
+            desc_run += 1
+            if desc_run >= 5:
+                return True
+        else:
+            desc_run = 1
+
+    # Low entropy: fewer than 6 distinct hex digits in the entire GUID
+    if len(set(hex_only)) < 6:
+        return True
+
+    # --- Full-string checks (with hyphens) ---
+
+    segments = t.split("-")
+    if len(segments) != 5:
+        return False
+
+    # Known fake prefixes (first segment, 8 hex digits)
+    if segments[0] in _KNOWN_FAKE_PREFIXES:
+        return True
+
+    # Counter suffix: last segment (12 hex) is 75%+ one digit with small counter
+    last = segments[4]
+    if len(last) == 12:
+        from collections import Counter
+        counts = Counter(last)
+        most_common_char, most_common_count = counts.most_common(1)[0]
+        if most_common_count >= 9:
+            return True
+
+    # Segment-sequence: 2+ segments are ascending hex sequences
+    seq_count = 0
+    for seg in segments:
+        if len(seg) >= 4 and seg in _HEX_SEQ:
+            seq_count += 1
+    if seq_count >= 2:
+        return True
+
+    # Mirrored adjacent segments
+    for i in range(len(segments) - 1):
+        if len(segments[i]) >= 4 and segments[i] == segments[i + 1][::-1]:
+            return True
+
+    return False
+
+
 def _normalize_guid(value: str) -> str:
     """Normalize a GUID string to lowercase without braces."""
     t = value.strip().strip("{}")
     return str(uuid.UUID(t)).lower()
+
+
+def _repair_fake_guids_in_file(content: str) -> tuple:
+    """Replace all fake AI-generated GUIDs in a file with real uuid4 values.
+
+    Scans every ``Id="{...}"`` attribute (root, Method, Property, Get, Set,
+    Action) and replaces those detected as fake.
+
+    Returns ``(new_content, replacement_count)``.
+    """
+    used: Set[str] = set()
+    count = 0
+
+    def _replacer(m: re.Match) -> str:
+        nonlocal count
+        old_guid = m.group(2)
+        if not _is_fake_guid(old_guid):
+            used.add(old_guid.lower().replace("-", ""))
+            return m.group(0)
+        new_guid = str(uuid.uuid4())
+        while new_guid.replace("-", "").lower() in used:
+            new_guid = str(uuid.uuid4())
+        used.add(new_guid.replace("-", "").lower())
+        count += 1
+        return f'{m.group(1)}{new_guid}{m.group(3)}'
+
+    new_content = _ANY_ID_ATTR_RE.sub(_replacer, content)
+    return new_content, count
 
 
 def _build_root_open_tag(tag: str, attrs_no_id: str, guid_d: str) -> str:
@@ -538,15 +660,54 @@ def _set_root_tag_id(content: str, new_guid_d: str) -> str:
     return content[:m.start()] + new_open + content[m.end():]
 
 
+def _collect_all_guids(content: str) -> List[str]:
+    """Extract all GUID values from Id="{...}" attributes in a file."""
+    return [m.group(2).lower().replace("-", "")
+            for m in _ANY_ID_ATTR_RE.finditer(content)
+            if _is_valid_guid(m.group(2))]
+
+
+def _dedup_guids_in_content(
+    content: str,
+    global_seen: Set[str],
+) -> tuple:
+    """Replace duplicate GUIDs in *content* that already exist in *global_seen*.
+
+    Returns ``(new_content, dedup_count)``.  Updates *global_seen* in place.
+    """
+    count = 0
+
+    def _replacer(m: re.Match) -> str:
+        nonlocal count
+        raw = m.group(2)
+        if not _is_valid_guid(raw):
+            return m.group(0)
+        key = raw.lower().replace("-", "")
+        norm = _normalize_guid(raw)
+        if key not in global_seen:
+            global_seen.add(key)
+            return m.group(0)
+        new_g = str(uuid.uuid4())
+        while new_g.replace("-", "").lower() in global_seen:
+            new_g = str(uuid.uuid4())
+        global_seen.add(new_g.replace("-", "").lower())
+        count += 1
+        return f'{m.group(1)}{new_g}{m.group(3)}'
+
+    new_content = _ANY_ID_ATTR_RE.sub(_replacer, content)
+    return new_content, count
+
+
 def repair_object_guids(
     base_dir: str,
     extensions: Set[str] | None = None,
     dry_run: bool = False,
 ) -> List[GuidRepairEntry]:
-    """Fix missing, invalid, or duplicate object GUIDs in Tc* source files.
+    """Fix missing, invalid, fake, or duplicate object GUIDs in Tc* source files.
 
-    Phase 1: Per-file normalization (missing, invalid, multi-attribute).
-    Phase 2: Cross-file deduplication.
+    Phase 0: Replace AI-generated fake GUIDs (all Id attributes per file).
+    Phase 1: Per-file root element normalization (missing, invalid, multi-attribute).
+    Phase 2: Cross-file deduplication of ALL Id attributes (root + nested).
     """
     if extensions is None:
         extensions = DEFAULT_COMPILE_EXTENSIONS
@@ -572,29 +733,44 @@ def repair_object_guids(
     path_to_guid: Dict[str, Optional[str]] = {}
     path_to_reason: Dict[str, str] = {}
 
+    # Phase 0: replace fake AI-generated GUIDs in all Id attributes
     for fp in targets:
         orig = _read_text_raw(fp)
-        r = _repair_object_id_phase1(orig)
-        path_to_text[str(fp)] = r.content
-        path_to_guid[str(fp)] = r.guid_key
-        path_to_reason[str(fp)] = r.reason
+        new_content, fake_count = _repair_fake_guids_in_file(orig)
+        path_to_text[str(fp)] = new_content
+        if fake_count > 0:
+            path_to_reason[str(fp)] = f"fake_ai_generated ({fake_count})"
+            log.info("Phase 0 - %d fake GUID(s) detected: %s", fake_count, fp.name)
 
-    # Phase 2: deduplicate across files
-    by_key: Dict[str, List[str]] = {}
-    for p, gk in path_to_guid.items():
-        if gk is None:
-            continue
-        by_key.setdefault(gk, []).append(p)
+    # Phase 1: root element normalization (missing, invalid, multi-attribute)
+    for fp in targets:
+        p = str(fp)
+        r = _repair_object_id_phase1(path_to_text[p])
+        path_to_text[p] = r.content
+        path_to_guid[p] = r.guid_key
+        if p not in path_to_reason:
+            path_to_reason[p] = r.reason
+        elif r.reason not in ("ok", "no_root"):
+            path_to_reason[p] += f", {r.reason}"
 
-    for key, paths in by_key.items():
-        if len(paths) <= 1:
-            continue
-        sorted_paths = sorted(paths)
-        for dup_path in sorted_paths[1:]:
-            new_g = str(uuid.uuid4())
-            path_to_text[dup_path] = _set_root_tag_id(path_to_text[dup_path], new_g)
-            path_to_reason[dup_path] = "duplicate_across_files"
+    # Phase 2: deduplicate ALL Id attributes across all files
+    global_seen: Set[str] = set()
+    sorted_targets = sorted(targets, key=lambda fp: str(fp).lower())
 
+    for fp in sorted_targets:
+        p = str(fp)
+        content = path_to_text[p]
+        new_content, dedup_count = _dedup_guids_in_content(content, global_seen)
+        if dedup_count > 0:
+            path_to_text[p] = new_content
+            reason_part = f"duplicate ({dedup_count})"
+            if p in path_to_reason and path_to_reason[p] not in ("ok", "no_root"):
+                path_to_reason[p] += f", {reason_part}"
+            else:
+                path_to_reason[p] = reason_part
+            log.info("Phase 2 - %d duplicate GUID(s) fixed: %s", dedup_count, fp.name)
+
+    # Write results
     for fp in targets:
         p = str(fp)
         final = path_to_text[p]
@@ -602,7 +778,7 @@ def repair_object_guids(
         if final == orig:
             continue
 
-        reason = path_to_reason[p]
+        reason = path_to_reason.get(p, "unknown")
         entry = GuidRepairEntry(file_name=fp.name, reason=reason)
         repairs.append(entry)
 

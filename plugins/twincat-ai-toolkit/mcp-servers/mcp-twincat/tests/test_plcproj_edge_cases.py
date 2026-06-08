@@ -296,7 +296,7 @@ class TestGuidRepairEdgeCases:
             content = f'<TcPlcObject><POU Name="{name}" Id="{{{g}}}"></POU></TcPlcObject>'
             _write(tmp_path / name, content)
         repairs = P.repair_object_guids(str(tmp_path))
-        dup_repairs = [r for r in repairs if r.reason == "duplicate_across_files"]
+        dup_repairs = [r for r in repairs if "duplicate" in r.reason]
         assert len(dup_repairs) == 2
 
         ids = set()
@@ -945,3 +945,178 @@ class TestExcludeFromBuild:
         P.sync_plcproj(cfg)
         content = P._read_text_raw(proj)
         assert '<ExcludeFromBuild>false</ExcludeFromBuild>' in content
+
+
+# ===================================================================
+#  Fake GUID detection
+# ===================================================================
+
+class TestIsFakeGuid:
+    """Tests for _is_fake_guid heuristics."""
+
+    def test_repeated_digits(self):
+        assert P._is_fake_guid("d4e5f6a7-89ab-cdef-0123-b00000000002") is True
+        assert P._is_fake_guid("aaaaaaaa-1234-5678-9abc-def012345678") is True
+        assert P._is_fake_guid("12345678-0000-0000-0000-000000000001") is True
+
+    def test_sequential_ascending(self):
+        assert P._is_fake_guid("d4e5f6a7-89ab-cdef-0123-b99999999002") is True
+        assert P._is_fake_guid("01234567-89ab-cdef-0123-aabbccddeeff") is True
+
+    def test_sequential_descending(self):
+        assert P._is_fake_guid("fedcba98-7654-3210-fedc-ba9876543210") is True
+
+    def test_counter_suffix(self):
+        assert P._is_fake_guid("e4f5a6b7-7890-1bcd-ef12-555555555001") is True
+        assert P._is_fake_guid("e4f5a6b7-7890-1bcd-ef12-555555555002") is True
+        assert P._is_fake_guid("b2c3d4e5-6789-abcd-ef01-900000000020") is True
+
+    def test_known_fake_prefix(self):
+        assert P._is_fake_guid("a1b2c3d4-9f8e-7d6c-5b4a-3c2d1e0f9a8b") is True
+        assert P._is_fake_guid("d4e5f6a7-1111-2222-3333-444444444444") is True
+
+    def test_low_entropy(self):
+        assert P._is_fake_guid("aabbccdd-aabb-ccdd-aabb-ccddaabbccdd") is True
+
+    def test_mirrored_segments(self):
+        assert P._is_fake_guid("1a2b3c4d-d4c3-b2a1-9876-543210fedcba") is True
+
+    def test_real_guid_passes(self):
+        for _ in range(50):
+            g = str(uuid.uuid4())
+            assert P._is_fake_guid(g) is False, f"Real GUID falsely flagged as fake: {g}"
+
+    def test_invalid_string_returns_false(self):
+        assert P._is_fake_guid("not-a-guid") is False
+        assert P._is_fake_guid("") is False
+
+
+# ===================================================================
+#  Fake GUID repair in file
+# ===================================================================
+
+def _tcpou_with_fake_guids():
+    return textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8"?>
+        <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+          <POU Name="FB_Test" Id="{e4f5a6b7-7890-1bcd-ef12-555555555001}" SpecialFunc="None">
+            <Declaration><![CDATA[FUNCTION_BLOCK FB_Test]]></Declaration>
+            <Implementation><ST><![CDATA[]]></ST></Implementation>
+            <Method Name="DoWork" Id="{e4f5a6b7-7890-1bcd-ef12-555555555002}">
+              <Declaration><![CDATA[METHOD DoWork]]></Declaration>
+              <Implementation><ST><![CDATA[]]></ST></Implementation>
+            </Method>
+            <Property Name="Value" Id="{e4f5a6b7-7890-1bcd-ef12-555555555003}">
+              <Declaration><![CDATA[PROPERTY Value : INT]]></Declaration>
+              <Get Name="Get" Id="{e4f5a6b7-7890-1bcd-ef12-555555555004}">
+                <Declaration><![CDATA[]]></Declaration>
+                <Implementation><ST><![CDATA[]]></ST></Implementation>
+              </Get>
+            </Property>
+          </POU>
+        </TcPlcObject>''')
+
+
+class TestRepairFakeGuidsInFile:
+    """Tests for _repair_fake_guids_in_file."""
+
+    def test_replaces_all_fake_guids(self):
+        content = _tcpou_with_fake_guids()
+        new_content, count = P._repair_fake_guids_in_file(content)
+        assert count == 4
+        assert "555555555" not in new_content
+        remaining = P._ANY_ID_ATTR_RE.findall(new_content)
+        guids = [m[1].lower() for m in remaining]
+        assert len(guids) == 4
+        assert len(set(guids)) == 4, "All replaced GUIDs must be unique"
+        for g in guids:
+            assert P._is_valid_guid(g)
+            assert P._is_fake_guid(g) is False
+
+    def test_preserves_real_guids(self):
+        real = str(uuid.uuid4())
+        content = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">\n'
+            f'  <POU Name="FB_Real" Id="{{{real}}}" SpecialFunc="None">\n'
+            '    <Declaration><![CDATA[FUNCTION_BLOCK FB_Real]]></Declaration>\n'
+            '    <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            '  </POU>\n'
+            '</TcPlcObject>'
+        )
+        new_content, count = P._repair_fake_guids_in_file(content)
+        assert count == 0
+        assert real in new_content
+
+
+class TestRepairDuplicateNestedGuids:
+    """Tests for cross-file deduplication of ALL Id attributes."""
+
+    def test_duplicate_nested_across_files(self, tmp_path):
+        shared_guid = str(uuid.uuid4())
+        file_a = tmp_path / "A.TcPOU"
+        file_b = tmp_path / "B.TcPOU"
+        _write(file_a, (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<TcPlcObject Version="1.1.0.1">\n'
+            f'  <POU Name="A" Id="{{{str(uuid.uuid4())}}}" SpecialFunc="None">\n'
+            '    <Declaration><![CDATA[FUNCTION_BLOCK A]]></Declaration>\n'
+            '    <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            f'    <Method Name="M1" Id="{{{shared_guid}}}">\n'
+            '      <Declaration><![CDATA[METHOD M1]]></Declaration>\n'
+            '      <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            '    </Method>\n'
+            '  </POU>\n'
+            '</TcPlcObject>'
+        ))
+        _write(file_b, (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<TcPlcObject Version="1.1.0.1">\n'
+            f'  <POU Name="B" Id="{{{str(uuid.uuid4())}}}" SpecialFunc="None">\n'
+            '    <Declaration><![CDATA[FUNCTION_BLOCK B]]></Declaration>\n'
+            '    <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            f'    <Method Name="M2" Id="{{{shared_guid}}}">\n'
+            '      <Declaration><![CDATA[METHOD M2]]></Declaration>\n'
+            '      <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            '    </Method>\n'
+            '  </POU>\n'
+            '</TcPlcObject>'
+        ))
+
+        repairs = P.repair_object_guids(str(tmp_path))
+        assert len(repairs) >= 1
+
+        content_a = P._read_text_raw(file_a)
+        content_b = P._read_text_raw(file_b)
+        guids_a = [m[1].lower() for m in P._ANY_ID_ATTR_RE.findall(content_a)]
+        guids_b = [m[1].lower() for m in P._ANY_ID_ATTR_RE.findall(content_b)]
+        all_guids = guids_a + guids_b
+        assert len(all_guids) == len(set(all_guids)), "No duplicates should remain"
+
+    def test_duplicate_within_file(self, tmp_path):
+        dup_guid = str(uuid.uuid4())
+        file_a = tmp_path / "Dup.TcPOU"
+        _write(file_a, (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<TcPlcObject Version="1.1.0.1">\n'
+            f'  <POU Name="Dup" Id="{{{str(uuid.uuid4())}}}" SpecialFunc="None">\n'
+            '    <Declaration><![CDATA[FUNCTION_BLOCK Dup]]></Declaration>\n'
+            '    <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            f'    <Method Name="M1" Id="{{{dup_guid}}}">\n'
+            '      <Declaration><![CDATA[METHOD M1]]></Declaration>\n'
+            '      <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            '    </Method>\n'
+            f'    <Method Name="M2" Id="{{{dup_guid}}}">\n'
+            '      <Declaration><![CDATA[METHOD M2]]></Declaration>\n'
+            '      <Implementation><ST><![CDATA[]]></ST></Implementation>\n'
+            '    </Method>\n'
+            '  </POU>\n'
+            '</TcPlcObject>'
+        ))
+
+        repairs = P.repair_object_guids(str(tmp_path))
+        assert len(repairs) >= 1
+
+        content = P._read_text_raw(file_a)
+        guids = [m[1].lower() for m in P._ANY_ID_ATTR_RE.findall(content)]
+        assert len(guids) == len(set(guids)), "Intra-file duplicates should be resolved"

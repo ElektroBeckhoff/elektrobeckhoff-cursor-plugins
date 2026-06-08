@@ -71,6 +71,21 @@ Every GUID must be **unique across the entire PLC project** (all `.TcPOU`, `.TcI
 - **Never change** an existing GUID when editing code — GUIDs are stable identifiers
 - **Never omit** the `Id` attribute — TwinCAT requires it on every POU/Method/Property/Action/DUT/GVL element
 - **Never copy-paste** a file without replacing ALL GUIDs with fresh ones
+- **Never invent** GUIDs by typing hex digits — always use `uuid.uuid4()` or equivalent
+
+### Fake GUID detection
+
+The `--ensure-object-guids` repair detects AI-generated fake GUIDs that parse as valid UUIDs but contain obvious non-random patterns. These are replaced automatically with real `uuid.uuid4()` values.
+
+Detected patterns (any single match triggers replacement):
+- **Repeated digits**: 5+ consecutive identical hex digits (`00000`, `55555`, `aaaaa`)
+- **Sequential ascending**: 5+ consecutive ascending hex digits (`56789`, `9abcd`, `bcdef`)
+- **Sequential descending**: 5+ consecutive descending hex digits (`fedcb`, `98765`)
+- **Low entropy**: fewer than 6 distinct hex digits in the 32-char hex string
+- **Counter suffix**: last segment (12 hex) is 75%+ one digit with small counter (`555555555001`)
+- **Known AI prefixes**: first 8 hex digits match known patterns (`d4e5f6a7`, `a1b2c3d4`, `12345678`, etc.)
+- **Segment sequences**: 2+ of the five hyphen-separated segments are ascending hex runs
+- **Mirrored segments**: adjacent segments are reversed copies (`abcd-dcba`)
 
 ## Critical Rules
 

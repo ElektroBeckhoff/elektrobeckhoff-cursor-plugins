@@ -438,7 +438,7 @@ class TestGuidRepair:
             content = f'<TcPlcObject><POU Name="{name}" Id="{{{g}}}"></POU></TcPlcObject>'
             _write(tmp_dir / name, content)
         repairs = P.repair_object_guids(str(tmp_dir))
-        assert any(r.reason == "duplicate_across_files" for r in repairs)
+        assert any("duplicate" in r.reason for r in repairs)
 
         id_a = re.search(r'Id="([^"]+)"', (tmp_dir / "A.TcPOU").read_text()).group(1)
         id_b = re.search(r'Id="([^"]+)"', (tmp_dir / "B.TcPOU").read_text()).group(1)
