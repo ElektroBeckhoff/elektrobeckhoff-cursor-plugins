@@ -112,6 +112,39 @@ Rules:
 - Use for logical groupings of 3+ related lines
 - Do NOT use for single statements
 
+## CASE Step Comments
+
+In state machines (`CASE _nStep OF`), every case label gets an inline `(* purpose *)` comment on the same line:
+
+```iecst
+CASE _nStep OF
+    0: (* idle — wait for enable *)
+        IF bEnable THEN
+            _nStep := 1;
+        END_IF
+
+    1: (* start initialization *)
+        _bBusy := TRUE;
+        _nStep := 2;
+
+    9: (* barrier — all views must have completed phase 2 *)
+        IF _stClientState.nRrViewInit2 >= _stClientState.nViewCount THEN
+            _stClientState.eViewInitStatus := E_EB_BA_ViewInitStatus.Done;
+            _nStep := 10;
+        END_IF
+
+    10: (* mark this view as fully initialized *)
+        _bDone := TRUE;
+END_CASE
+```
+
+Rules:
+- Comment format: `(* short purpose *)` — directly after the case label on the same line
+- Do not repeat the step number in the comment — the case label already shows it
+- Keep it short (3-10 words), describe the intent, not the code
+- Every case label must have a step comment — no exceptions
+- One blank line between case blocks for readability
+
 ## Action / Method Headers (optional, for large FBs only)
 
 For complex actions/methods in large FBs, use a 3-line block header:
