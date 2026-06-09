@@ -231,8 +231,12 @@ def twincat_check_all_objects() -> str:
 # ================================================================
 
 @mcp.tool()
-def twincat_build(timeout_seconds: int = 180) -> str:
-    """Rebuild the TwinCAT solution.
+def twincat_build(timeout_seconds: int = 180, full_rebuild: bool = False) -> str:
+    """Build the TwinCAT solution.
+
+    By default runs an incremental build (Build.BuildSolution).
+    Set full_rebuild=true to delete all outputs and recompile
+    everything (Build.RebuildSolution) -- slower but guaranteed clean.
 
     Detects PLC compile success via _CompileInfo timestamps
     combined with SolutionBuild.LastBuildInfo.  Returns structured
@@ -246,7 +250,9 @@ def twincat_build(timeout_seconds: int = 180) -> str:
     Requires twincat_open to have been called."""
 
     try:
-        return _json(_get_bridge().build(timeout_s=timeout_seconds))
+        return _json(_get_bridge().build(
+            timeout_s=timeout_seconds, full_rebuild=full_rebuild,
+        ))
     except Exception as exc:
         return _json({"success": False, "error": str(exc)})
 

@@ -9,6 +9,7 @@ asyncio pools).
 Reference: https://infosys.beckhoff.com/content/1031/tc3_automationinterface/
 """
 
+import atexit
 import os
 import re
 import sys
@@ -236,8 +237,10 @@ class TcAutomationInterface:
         self._plcproj_file_path: Optional[str] = None
         self._prog_id: Optional[str] = None
         self._instances: dict = {}  # norm_sln_path → instance state dict
+        self._dismissed_dialogs: list[str] = []
         if HAS_WIN32:
             self._thread.start()
+            atexit.register(self.shutdown)
 
     # ==================== STA event loop ====================
 
@@ -344,18 +347,23 @@ class TcAutomationInterface:
                         return True
 
                     full_text = " ".join(dialog_texts)
-                    if any(p in full_text for p in self._SAFE_DIALOG_PATTERNS):
+                    matched = [p for p in self._SAFE_DIALOG_PATTERNS if p in full_text]
+                    if matched:
                         win32gui.PostMessage(
                             hwnd, win32con.WM_COMMAND, IDYES, 0,
                         )
-                        dismissed.append(hwnd)
+                        dismissed.append((hwnd, matched[0], full_text[:120]))
                     return True
 
                 win32gui.EnumWindows(enum_cb, None)
 
-                for hwnd in dismissed:
-                    log.info(
-                        "Auto-dismissed TcXaeShell dialog (hwnd=%s)", hwnd,
+                for hwnd, pattern, text in dismissed:
+                    log.warning(
+                        "Auto-dismissed TcXaeShell dialog (hwnd=%s, "
+                        "pattern='%s', text='%s')", hwnd, pattern, text,
+                    )
+                    self._dismissed_dialogs.append(
+                        f"[{pattern}] {text}"
                     )
                 dismissed_any = bool(dismissed)
             except Exception as exc:
@@ -417,49 +425,74 @@ class TcAutomationInterface:
         except Exception as exc:
             log.warning("Failed to force-kill PID %d: %s", pid, exc)
 
-    def _quit_dte(self, dte, sln_label: str, pid: Optional[int] = None):
-        """Quit a DTE and ensure the process is actually dead."""
+    @staticmethod
+    def _save_if_dirty(dte, label: str = "") -> bool:
+        """Save the solution if it has unsaved changes. Returns True if saved."""
+        try:
+            if dte.Solution.IsOpen and not dte.Solution.Saved:
+                log.warning("Unsaved changes detected%s -- saving before close",
+                            f" ({label})" if label else "")
+                dte.Solution.Close(True)
+                return True
+        except Exception as exc:
+            log.debug("_save_if_dirty check failed: %s", exc)
+        return False
+
+    def _quit_dte(self, dte, sln_label: str, pid: Optional[int] = None) -> bool:
+        """Quit a DTE and ensure the process is actually dead.
+
+        Returns True if the process was force-killed (i.e. Quit() timed out).
+        """
         if not pid:
             pid = self._get_dte_pid(dte)
         try:
+            self._save_if_dirty(dte, sln_label)
             dte.Solution.Close(False)
             dte.Quit()
         except Exception as exc:
             log.warning("Quit() failed for '%s': %s", sln_label, exc)
 
         if not pid:
-            return
+            return False
         deadline = time.time() + _QUIT_WAIT_S
         while time.time() < deadline:
             if not self._is_pid_alive(pid):
                 log.info("Process PID %d exited after Quit()", pid)
-                return
+                return False
             time.sleep(_QUIT_POLL_S)
         log.warning("Process PID %d survived Quit() -- force-killing", pid)
         self._force_kill_pid(pid)
+        return True
 
     def _cleanup_com(self):
         self._quit_all_instances()
         self._reset_state()
 
-    def _quit_all_instances(self):
-        """Quit every XAE instance we created (registry + active)."""
+    def _quit_all_instances(self) -> int:
+        """Quit every XAE instance we created (registry + active).
+
+        Returns the number of instances that required a force-kill.
+        """
         seen_ids = set()
+        force_killed = 0
         if self._dte and self._created_new:
             seen_ids.add(id(self._dte))
-            self._quit_dte(self._dte, self._sln_path or "active")
+            if self._quit_dte(self._dte, self._sln_path or "active"):
+                force_killed += 1
             self._dte = None
             self._sys_man = None
             self._plc_proj_item = None
         for key, state in list(self._instances.items()):
             dte = state.get("dte")
             if dte and id(dte) not in seen_ids and state.get("created_new"):
-                self._quit_dte(dte, state.get("sln_path", key),
-                               pid=state.get("pid"))
+                if self._quit_dte(dte, state.get("sln_path", key),
+                                  pid=state.get("pid")):
+                    force_killed += 1
             state["dte"] = None
             state["sys_man"] = None
             state["plc_proj_item"] = None
         self._instances.clear()
+        return force_killed
 
     def _save_active_to_registry(self):
         """Persist current active session to the instance registry."""
@@ -628,8 +661,8 @@ class TcAutomationInterface:
     def check_all_objects(self) -> CheckResult:
         return self._call_sta(self._impl_check_all_objects, timeout=120)
 
-    def build(self, timeout_s: int = 180) -> BuildResult:
-        return self._call_sta(self._impl_build, timeout_s, timeout=timeout_s + 60)
+    def build(self, timeout_s: int = 180, full_rebuild: bool = False) -> BuildResult:
+        return self._call_sta(self._impl_build, timeout_s, full_rebuild, timeout=timeout_s + 60)
 
     def get_output_log(self) -> ErrorsResult:
         return self._call_sta(self._impl_get_output_log, timeout=30)
@@ -881,7 +914,7 @@ class TcAutomationInterface:
             try:
                 self._dte.SuppressUI = False
                 self._dte.MainWindow.Visible = True
-                self._dte.UserControl = False
+                self._dte.UserControl = True
                 break
             except Exception as _init_exc:
                 if self._is_retryable_com_error(_init_exc) and _init_retry < 9:
@@ -925,7 +958,8 @@ class TcAutomationInterface:
                 return
             log.info("XAE auto-loaded '%s' instead of '%s' -- switching",
                      current, norm_expected)
-            self._dte.Solution.Close(False)
+            if not self._save_if_dirty(self._dte, current):
+                self._dte.Solution.Close(False)
             self._wait_for_solution_closed()
 
         self._dte.Solution.Open(expected_sln)
@@ -1169,9 +1203,11 @@ class TcAutomationInterface:
         self._clear_build_pane()
 
         # Primary: ITcPlcIECProject.CheckAllObjects()
+        # The COM call returns synchronously when done. A short poll catches
+        # late output; 4026 may not write to the Build pane at all.
         try:
             self._retry_com(lambda: self._plc_proj_item.CheckAllObjects())
-            self._wait_for_compile_complete(max_seconds=60)
+            self._wait_for_compile_complete(max_seconds=8)
             result = CheckResult(
                 success=True,
                 method="ITcPlcIECProject",
@@ -1219,7 +1255,7 @@ class TcAutomationInterface:
 
     # -------- build --------
 
-    def _impl_build(self, timeout_s: int) -> BuildResult:
+    def _impl_build(self, timeout_s: int, full_rebuild: bool = False) -> BuildResult:
         if not self._dte:
             return BuildResult(
                 success=False,
@@ -1229,9 +1265,10 @@ class TcAutomationInterface:
         ci_dir = self._compile_info_dir()
         ci_before = self._newest_compile_info_mtime(ci_dir)
 
+        cmd = "Build.RebuildSolution" if full_rebuild else "Build.BuildSolution"
         self._clear_build_pane()
         start = time.time()
-        self._retry_com(self._dte.ExecuteCommand, "Build.RebuildSolution")
+        self._retry_com(self._dte.ExecuteCommand, cmd)
 
         time.sleep(2)
         build_started = False
@@ -1425,12 +1462,41 @@ class TcAutomationInterface:
                 message="No PLC project. Call twincat_open first.",
             )
 
+        if self._dte:
+            try:
+                last_info = int(self._dte.Solution.SolutionBuild.LastBuildInfo)
+                if last_info != 0:
+                    return ExportResult(
+                        success=False,
+                        message=(
+                            f"Last build had {last_info} failure(s). "
+                            f"Run twincat_build successfully before exporting."
+                        ),
+                    )
+            except Exception as exc:
+                log.debug("Could not check LastBuildInfo: %s", exc)
+
         _INVALID_PATH_CHARS = set('<>:"/\\|?*')
         filename_part = f"{title}-{version}"
         if any(c in _INVALID_PATH_CHARS for c in filename_part):
             return ExportResult(
                 success=False,
                 message=f"Invalid characters in title/version: {filename_part}",
+            )
+
+        norm_out = os.path.realpath(output_dir)
+        allowed_roots = [os.path.realpath(d) for d in [
+            os.environ.get("TEMP", ""),
+            os.environ.get("TMP", ""),
+            os.path.dirname(self._sln_path) if self._sln_path else "",
+        ] if d]
+        if not any(norm_out.startswith(r) for r in allowed_roots):
+            return ExportResult(
+                success=False,
+                message=(
+                    f"output_dir '{output_dir}' is outside allowed paths "
+                    f"(solution dir or TEMP). Refusing to write."
+                ),
             )
 
         os.makedirs(output_dir, exist_ok=True)
@@ -1511,9 +1577,10 @@ class TcAutomationInterface:
                 log.debug("Could not read PLC project name: %s", exc)
 
         start = time.time()
-        log.info("Reload: closing solution (no save) ...")
+        log.info("Reload: closing solution ...")
         try:
-            self._dte.Solution.Close(False)
+            if not self._save_if_dirty(self._dte, sln_path):
+                self._dte.Solution.Close(False)
             self._wait_for_solution_closed()
         except Exception as exc:
             return ReloadResult(
@@ -1573,12 +1640,13 @@ class TcAutomationInterface:
         if force_quit:
             count = len(self._instances)
             log.info("force_quit: closing %d tracked instance(s)", count)
-            self._quit_all_instances()
+            force_killed = self._quit_all_instances()
             self._reset_state()
-            return CloseResult(
-                success=True,
-                message=f"All XAE instances quit ({count} tracked)",
-            )
+            msg = f"All XAE instances quit ({count} tracked)"
+            if force_killed:
+                msg += (f" -- WARNING: {force_killed} instance(s) "
+                        f"required force-kill (unsaved data may be lost)")
+            return CloseResult(success=True, message=msg)
 
         msg = ""
         try:
@@ -1593,12 +1661,15 @@ class TcAutomationInterface:
 
             if self._dte:
                 if self._created_new:
-                    self._quit_dte(self._dte, self._sln_path or "active")
+                    was_killed = self._quit_dte(self._dte, self._sln_path or "active")
                     msg = "XAE quit"
+                    if was_killed:
+                        msg += " (force-killed after timeout)"
                 elif self._we_opened_solution:
                     try:
                         if self._dte.Solution.IsOpen:
-                            self._dte.Solution.Close(False)
+                            if not self._save_if_dirty(self._dte, self._sln_path or ""):
+                                self._dte.Solution.Close(False)
                     except Exception as exc:
                         log.debug("Solution.Close failed during detach: %s", exc)
                     msg = "Solution closed"
