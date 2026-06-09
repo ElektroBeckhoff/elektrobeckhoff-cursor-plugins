@@ -22,11 +22,78 @@ from dataclasses import dataclass, field, asdict
 
 log = logging.getLogger("twincat-mcp")
 
-# TODO(4026): Hard-coded to VS2017 shell (TwinCAT 4024). For TwinCAT 4026
-#   support, auto-detect the ProgID (e.g. "TcXaeShell.DTE.17.0" for VS2022 /
-#   TcXaeShell64) and store the DTE version per registry entry so that parallel
-#   4024+4026 instances with different COM bitness are handled correctly.
-PROG_ID = "TcXaeShell.DTE.15.0"
+# TwinCAT XAE shell ProgIDs follow Visual Studio versioning:
+#   TcXaeShell.DTE.15.0 -> VS2017 / TwinCAT 4024
+#   TcXaeShell.DTE.17.0 -> VS2022 / TwinCAT 4026
+_PROG_ID_PREFIX = "TcXaeShell.DTE."
+_DEFAULT_PROG_ID = f"{_PROG_ID_PREFIX}17.0"
+# Backward-compatible alias for callers/tests that import PROG_ID.
+PROG_ID = _DEFAULT_PROG_ID
+
+
+def _discover_registered_prog_ids() -> list[str]:
+    """Return registered TcXaeShell DTE ProgIDs, newest VS version first."""
+    import winreg
+
+    found: list[str] = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "") as root:
+            idx = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(root, idx)
+                    idx += 1
+                except OSError:
+                    break
+                if not name.startswith(_PROG_ID_PREFIX):
+                    continue
+                try:
+                    winreg.OpenKey(
+                        winreg.HKEY_CLASSES_ROOT, f"{name}\\CLSID"
+                    ).Close()
+                    found.append(name)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+    def _version_key(prog_id: str) -> tuple[int, ...]:
+        suffix = prog_id[len(_PROG_ID_PREFIX):]
+        parts: list[int] = []
+        for piece in suffix.split("."):
+            try:
+                parts.append(int(piece))
+            except ValueError:
+                parts.append(-1)
+        return tuple(parts)
+
+    found.sort(key=_version_key, reverse=True)
+    return found
+
+
+def _resolve_prog_id(preferred: Optional[str] = None) -> str:
+    """Pick the best TcXaeShell ProgID for COM access.
+
+    Priority:
+      1. Explicit preferred ProgID when registered
+      2. Running ROT instance (newest registered version first)
+      3. Newest registered ProgID
+      4. Default fallback (_DEFAULT_PROG_ID)
+    """
+    registered = _discover_registered_prog_ids()
+    if preferred and preferred in registered:
+        return preferred
+
+    for prog_id in registered:
+        try:
+            win32com.client.GetActiveObject(prog_id)
+            return prog_id
+        except Exception:
+            continue
+
+    if registered:
+        return registered[0]
+    return preferred or _DEFAULT_PROG_ID
 
 
 def _canonical_path(p: str) -> str:
@@ -167,6 +234,7 @@ class TcAutomationInterface:
         self._we_opened_solution = False
         self._sln_path: Optional[str] = None
         self._plcproj_file_path: Optional[str] = None
+        self._prog_id: Optional[str] = None
         self._instances: dict = {}  # norm_sln_path → instance state dict
         if HAS_WIN32:
             self._thread.start()
@@ -415,6 +483,7 @@ class TcAutomationInterface:
             "sln_path": self._sln_path,
             "plcproj_file_path": self._plcproj_file_path,
             "pid": pid,
+            "prog_id": self._prog_id,
         }
         log.info("Saved instance to registry: '%s' (pid=%s, created_new=%s, %d total)",
                  self._sln_path, pid, self._created_new, len(self._instances))
@@ -490,9 +559,48 @@ class TcAutomationInterface:
         self._we_opened_solution = state["we_opened_solution"]
         self._sln_path = state["sln_path"]
         self._plcproj_file_path = state.get("plcproj_file_path")
+        self._prog_id = state.get("prog_id") or self._prog_id
         log.info("Re-attached to cached XAE instance for '%s'",
                  self._sln_path)
         return True
+
+    def _ensure_prog_id(self, preferred: Optional[str] = None) -> str:
+        """Resolve and cache the TcXaeShell ProgID for COM calls."""
+        if preferred:
+            self._prog_id = _resolve_prog_id(preferred)
+        elif not self._prog_id:
+            self._prog_id = _resolve_prog_id()
+        return self._prog_id
+
+    def _try_get_active_dte(self, prog_id: Optional[str] = None):
+        """Attach to a running TcXaeShell ROT instance, if available."""
+        candidates = [prog_id] if prog_id else _discover_registered_prog_ids()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                dte = win32com.client.GetActiveObject(candidate)
+                _ = dte.MainWindow.Caption
+                self._prog_id = candidate
+                return dte
+            except Exception as exc:
+                log.debug("GetActiveObject(%s) failed: %s", candidate, exc)
+        return None
+
+    def _create_dte_from_prog_id(self, prog_id: str):
+        """Create a new out-of-process DTE for the given ProgID."""
+        import winreg as _wreg
+
+        _key = _wreg.OpenKey(_wreg.HKEY_CLASSES_ROOT, f"{prog_id}\\CLSID")
+        _clsid_str = _wreg.QueryValueEx(_key, None)[0]
+        _key.Close()
+        clsid = pywintypes.IID(_clsid_str)
+        dispatch = pythoncom.CoCreateInstance(
+            clsid, None, pythoncom.CLSCTX_LOCAL_SERVER,
+            pythoncom.IID_IDispatch,
+        )
+        self._prog_id = prog_id
+        return win32com.client.Dispatch(dispatch)
 
     def shutdown(self):
         if HAS_WIN32 and self._thread.is_alive():
@@ -546,47 +654,47 @@ class TcAutomationInterface:
     def _impl_get_status(self) -> StatusResult:
         self._prune_stale_instances()
         cached_slns = list(self._instances.keys())
+        registered = _discover_registered_prog_ids()
 
-        # Try attaching to a running instance
-        try:
-            dte = win32com.client.GetActiveObject(PROG_ID)
-            sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
-            plc = ""
-            if self._plc_proj_item and self._dte:
-                try:
-                    plc = str(self._plc_proj_item.Name)
-                except Exception:
-                    plc = ""
-            msg = "TcXaeShell is running"
-            if cached_slns:
-                msg += f" | {len(cached_slns)} cached instance(s)"
-            return StatusResult(
-                xae_available=True,
-                running_instance=True,
-                solution_path=sln,
-                plc_project_name=plc,
-                message=msg,
-            )
-        except Exception as exc:
-            log.debug("GetActiveObject probe failed: %s", exc)
+        # Try attaching to any running instance (newest shell first)
+        for prog_id in registered:
+            try:
+                dte = win32com.client.GetActiveObject(prog_id)
+                sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
+                plc = ""
+                if self._plc_proj_item and self._dte:
+                    try:
+                        plc = str(self._plc_proj_item.Name)
+                    except Exception:
+                        plc = ""
+                msg = f"TcXaeShell is running ({prog_id})"
+                if cached_slns:
+                    msg += f" | {len(cached_slns)} cached instance(s)"
+                return StatusResult(
+                    xae_available=True,
+                    running_instance=True,
+                    solution_path=sln,
+                    plc_project_name=plc,
+                    message=msg,
+                )
+            except Exception as exc:
+                log.debug("GetActiveObject probe failed for %s: %s", prog_id, exc)
 
-        # Check whether the COM class is registered (lightweight)
-        try:
-            import winreg
-            winreg.OpenKey(
-                winreg.HKEY_CLASSES_ROOT, f"{PROG_ID}\\CLSID"
-            ).Close()
+        # Check whether any shell COM class is registered
+        if registered:
             return StatusResult(
                 xae_available=True,
                 running_instance=False,
-                message="TcXaeShell is installed but not running",
+                message=(
+                    f"TcXaeShell is installed ({registered[0]}) but not running"
+                ),
             )
-        except Exception as exc:
-            return StatusResult(
-                xae_available=False,
-                running_instance=False,
-                message=f"TcXaeShell not available: {exc}",
-            )
+
+        return StatusResult(
+            xae_available=False,
+            running_instance=False,
+            message="TcXaeShell not available: no registered ProgID found",
+        )
 
     # -------- open --------
 
@@ -614,14 +722,10 @@ class TcAutomationInterface:
 
         # 1. Try attaching to a running instance
         if not self._dte:
-            try:
-                self._dte = win32com.client.GetActiveObject(PROG_ID)
+            self._dte = self._try_get_active_dte()
+            if self._dte:
                 self._created_new = False
-                _ = self._dte.MainWindow.Caption  # health check
-                log.info("Attached to running TcXaeShell")
-            except Exception as exc:
-                log.debug("GetActiveObject failed: %s", exc)
-                self._dte = None
+                log.info("Attached to running TcXaeShell (%s)", self._prog_id)
 
         # 2. If attached, check whether the loaded solution matches
         if self._dte and norm_expected:
@@ -729,7 +833,9 @@ class TcAutomationInterface:
         # 6. PLC project in tree
         if not proj_name:
             proj_name = self._guess_proj_name()
-        self._plc_proj_item = self._find_plc_project(proj_name)
+        self._plc_proj_item = self._find_plc_project_with_retry(
+            proj_name, timeout_s=min(timeout_s, 60),
+        )
         if not self._plc_proj_item:
             current = ""
             try:
@@ -757,27 +863,19 @@ class TcAutomationInterface:
     def _create_new_dte(self, expected_sln: str, timeout_s: int):
         """Start a truly new TcXaeShell process via CLSCTX_LOCAL_SERVER.
 
-        Dispatch(PROG_ID) uses CLSCTX_SERVER which includes INPROC_SERVER
+        Dispatch(prog_id) uses CLSCTX_SERVER which includes INPROC_SERVER
         and may reconnect to an existing process instead of spawning a new
         one.  Using CoCreateInstance with LOCAL_SERVER only ensures a fresh
         out-of-process DTE.
         """
+        prog_id = self._ensure_prog_id()
         log.info("Creating new TcXaeShell via CoCreateInstance(LOCAL_SERVER) "
-                 "for %s", expected_sln)
+                 "(%s) for %s", prog_id, expected_sln)
 
-        import winreg as _wreg
-        _key = _wreg.OpenKey(_wreg.HKEY_CLASSES_ROOT, f"{PROG_ID}\\CLSID")
-        _clsid_str = _wreg.QueryValueEx(_key, None)[0]
-        _key.Close()
-        clsid = pywintypes.IID(_clsid_str)
-        dispatch = pythoncom.CoCreateInstance(
-            clsid, None, pythoncom.CLSCTX_LOCAL_SERVER,
-            pythoncom.IID_IDispatch,
-        )
-        self._dte = win32com.client.Dispatch(dispatch)
+        self._dte = self._create_dte_from_prog_id(prog_id)
         self._created_new = True
         self._we_opened_solution = True
-        log.info("New TcXaeShell DTE created successfully")
+        log.info("New TcXaeShell DTE created successfully (%s)", prog_id)
 
         for _init_retry in range(10):
             try:
@@ -907,6 +1005,14 @@ class TcAutomationInterface:
         except Exception:
             return ""
 
+    @staticmethod
+    def _normalize_proj_name(name: str) -> str:
+        """Strip localized PLC nested-project suffixes (EN/DE)."""
+        for suffix in (" Project", " Projekt"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
     def _wait_for_solution_open(self, timeout_s: int):
         start = time.time()
         while time.time() - start < timeout_s:
@@ -944,23 +1050,58 @@ class TcAutomationInterface:
             max_retries=15, delay_s=3,
         )
 
+    def _find_plc_project_with_retry(
+        self, proj_name: str, timeout_s: int = 30,
+    ):
+        """Find PLC project node, retrying while the XAE tree lazy-loads."""
+        start = time.time()
+        while True:
+            item = self._find_plc_project(proj_name)
+            if item:
+                return item
+            elapsed = time.time() - start
+            if elapsed >= timeout_s:
+                break
+            pythoncom.PumpWaitingMessages()
+            time.sleep(1)
+        return None
+
     def _find_plc_project(self, proj_name):
+        # Primary: ITcProjectRoot.NestedProject (4026+ hides nested project from
+        # LookupTreeItem and Child enumeration; works in EN and DE shells).
+        try:
+            plc_root = self._sys_man.LookupTreeItem(f"TIPC^{proj_name}")
+            if hasattr(plc_root, "NestedProject"):
+                nested = plc_root.NestedProject
+                if nested and self._is_plc_project_item(nested):
+                    log.info(
+                        "PLC project found via NestedProject: %s",
+                        nested.Name,
+                    )
+                    return nested
+        except Exception as exc:
+            log.debug("NestedProject lookup for '%s' failed: %s", proj_name, exc)
+
         lookup_paths = [
             f"TIPC^{proj_name}^{proj_name} Project",
+            f"TIPC^{proj_name}^{proj_name} Projekt",
             f"TIPC^{proj_name}^{proj_name} Instance^{proj_name} Project",
+            f"TIPC^{proj_name}^{proj_name} Instance^{proj_name} Projekt",
+            f"TIPC^{proj_name}^{proj_name} Instance",
             f"TIPC^{proj_name} Instance^{proj_name} Project",
+            f"TIPC^{proj_name} Instance^{proj_name} Projekt",
         ]
         for path in lookup_paths:
             try:
                 item = self._sys_man.LookupTreeItem(path)
-                if item:
+                if item and self._is_plc_project_item(item):
                     log.info("PLC project found at: %s", path)
                     return item
             except Exception as exc:
                 log.debug("LookupTreeItem('%s') failed: %s", path, exc)
                 continue
 
-        # Fallback: walk the tree
+        # Fallback: walk the tree for a node exposing PLC project methods
         try:
             tipc = self._sys_man.LookupTreeItem("TIPC")
             return self._walk_tree(tipc, 0)
@@ -968,9 +1109,22 @@ class TcAutomationInterface:
             log.debug("TIPC node lookup failed: %s", exc)
             return None
 
+    @staticmethod
+    def _is_plc_project_item(item) -> bool:
+        """True when *item* exposes PLC project automation methods."""
+        return (
+            hasattr(item, "CheckAllObjects")
+            or hasattr(item, "SaveAsLibrary")
+        )
+
     def _walk_tree(self, node, depth):
-        if depth > 4:
+        if depth > 8:
             return None
+        try:
+            if self._is_plc_project_item(node):
+                return node
+        except Exception:
+            pass
         try:
             count = int(node.ChildCount)
         except Exception:
@@ -978,13 +1132,19 @@ class TcAutomationInterface:
         for i in range(1, count + 1):
             try:
                 child = node.Child(i)
-                if str(child.Name).endswith("Project"):
-                    return child
-                found = self._walk_tree(child, depth + 1)
-                if found:
-                    return found
             except Exception:
                 continue
+            name = str(child.Name)
+            if (
+                name.endswith("Project")
+                or name.endswith("Projekt")
+                or name.endswith(" Instance")
+            ):
+                if self._is_plc_project_item(child):
+                    return child
+            found = self._walk_tree(child, depth + 1)
+            if found:
+                return found
         return None
 
     @staticmethod
@@ -1341,10 +1501,12 @@ class TcAutomationInterface:
                 message="No solution path available for reload.",
             )
 
-        proj_name = ""
-        if self._plc_proj_item:
+        proj_name = self._guess_proj_name()
+        if not proj_name and self._plc_proj_item:
             try:
-                proj_name = str(self._plc_proj_item.Name).replace(" Project", "")
+                proj_name = self._normalize_proj_name(
+                    str(self._plc_proj_item.Name)
+                )
             except Exception as exc:
                 log.debug("Could not read PLC project name: %s", exc)
 
@@ -1381,7 +1543,9 @@ class TcAutomationInterface:
             )
 
         if proj_name:
-            self._plc_proj_item = self._find_plc_project(proj_name)
+            self._plc_proj_item = self._find_plc_project_with_retry(
+                proj_name, timeout_s=min(timeout_s, 60),
+            )
 
         elapsed = round(time.time() - start, 1)
         plc_ok = self._plc_proj_item is not None
@@ -1534,18 +1698,33 @@ class TcAutomationInterface:
         except Exception as exc:
             log.warning("Could not clear Build pane: %s", exc)
 
+    _COMPILE_COMPLETE_MARKERS = (
+        "compile complete",
+        "kompilierung abgeschlossen",
+        "erstellen abgeschlossen",
+        "build abgeschlossen",
+        "0 errors, 0 warnings",
+        "0 fehler, 0 warnungen",
+    )
+
     def _wait_for_compile_complete(self, max_seconds: int = 60):
-        """Poll the Build output pane until 'Compile complete' appears."""
+        """Poll output panes until a compile-complete marker appears."""
         start = time.time()
         while time.time() - start < max_seconds:
             pythoncom.PumpWaitingMessages()
-            text = self._read_build_pane_text()
-            if text and "compile complete" in text.lower():
-                log.info("Compile complete detected after %.1fs",
-                         time.time() - start)
-                return
+            build_text = self._read_build_pane_text()
+            twincat_text = self._read_pane_text(
+                self._get_output_pane("twincat")
+            )
+            combined = "\n".join(t for t in (build_text, twincat_text) if t)
+            if combined:
+                low = combined.lower()
+                if any(m in low for m in self._COMPILE_COMPLETE_MARKERS):
+                    log.info("Compile complete detected after %.1fs",
+                             time.time() - start)
+                    return
             time.sleep(0.5)
-        log.warning("Timeout (%ds) waiting for 'Compile complete'", max_seconds)
+        log.warning("Timeout (%ds) waiting for compile complete", max_seconds)
 
     def _read_build_pane_text(self) -> str:
         """Read current text from the Build output pane."""
