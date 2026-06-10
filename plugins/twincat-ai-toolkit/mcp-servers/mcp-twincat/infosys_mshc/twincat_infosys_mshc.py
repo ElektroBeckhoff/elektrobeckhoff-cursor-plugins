@@ -164,6 +164,18 @@ def _fts5_sanitize(query: str) -> str:
     return " ".join(t for t in tokens if t)
 
 
+_NOT_INSTALLED_MSG = (
+    "The TwinCAT 3 offline documentation (InfoSys) is not installed.\n"
+    "Install it using ONE of these methods:\n"
+    "  1. Download and run TC3-InfoSys.exe from:\n"
+    "     https://download.beckhoff.com/download/Software/TwinCAT/TwinCAT3/InfoSystem/\n"
+    "     (Run as Administrator, select 'Complete' or choose your language/VS version)\n"
+    "  2. In TcXaeShell: Help > Manage Help Settings > Install content from online\n"
+    "     > Add 'Beckhoff Information System' > Update\n"
+    "After installation, restart the MCP server."
+)
+
+
 class InfoSysMshcIndex:
     """In-memory index over a Beckhoff .mshc offline documentation archive."""
 
@@ -249,9 +261,7 @@ class InfoSysMshcIndex:
     def _build_index(self):
         if not os.path.isfile(self._mshc_path):
             raise FileNotFoundError(
-                f"MSHC file not found: {self._mshc_path}\n"
-                "Install TwinCAT 3 offline documentation via "
-                "Help > Add and Remove Help Content in TcXaeShell."
+                f"MSHC file not found: {self._mshc_path}\n{_NOT_INSTALLED_MSG}"
             )
         log.info("Building MSHC index from %s ...", self._mshc_path)
         t0 = time.time()
@@ -556,7 +566,9 @@ class InfoSysMshcIndex:
 
     def read_page(self, html_path: str) -> Dict:
         if not os.path.isfile(self._mshc_path):
-            raise FileNotFoundError(f"MSHC file not found: {self._mshc_path}")
+            raise FileNotFoundError(
+                f"MSHC file not found: {self._mshc_path}\n{_NOT_INSTALLED_MSG}"
+            )
         with zipfile.ZipFile(self._mshc_path, "r") as zf:
             try:
                 raw = zf.read(html_path).decode("utf-8", errors="replace")
