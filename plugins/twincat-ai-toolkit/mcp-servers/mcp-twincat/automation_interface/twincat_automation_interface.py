@@ -668,10 +668,31 @@ class TcAutomationInterface:
         return self._call_sta(self._impl_get_output_log, timeout=30)
 
     def export_library(
-        self, output_dir: str, title: str, version: str
+        self,
+        output_dir: str,
+        title: str,
+        version: str,
+        library: bool = True,
+        compiled_library: bool = True,
+        install_library: bool = True,
+        install_compiled_library: bool = False,
     ) -> ExportResult:
+        """Export PLC project as .library and/or .compiled-library.
+
+        Args:
+            output_dir: Target directory for exported files.
+            title: Library title (used in filename).
+            version: Library version (used in filename).
+            library: Export .library file.
+            compiled_library: Export .compiled-library file.
+            install_library: Install .library into local TwinCAT repo.
+            install_compiled_library: Install .compiled-library into local TwinCAT repo.
+        """
         return self._call_sta(
-            self._impl_export_library, output_dir, title, version, timeout=120
+            self._impl_export_library, output_dir, title, version,
+            library, compiled_library,
+            install_library, install_compiled_library,
+            timeout=120,
         )
 
     def reload_solution(self, timeout_s: int = 180) -> ReloadResult:
@@ -1454,7 +1475,14 @@ class TcAutomationInterface:
     # -------- export --------
 
     def _impl_export_library(
-        self, output_dir: str, title: str, version: str
+        self,
+        output_dir: str,
+        title: str,
+        version: str,
+        library: bool,
+        compiled_library: bool,
+        install_library: bool,
+        install_compiled_library: bool,
     ) -> ExportResult:
         if not self._plc_proj_item:
             return ExportResult(
@@ -1462,19 +1490,22 @@ class TcAutomationInterface:
                 message="No PLC project. Call twincat_open first.",
             )
 
-        if self._dte:
-            try:
-                last_info = int(self._dte.Solution.SolutionBuild.LastBuildInfo)
-                if last_info != 0:
-                    return ExportResult(
-                        success=False,
-                        message=(
-                            f"Last build had {last_info} failure(s). "
-                            f"Run twincat_build successfully before exporting."
-                        ),
-                    )
-            except Exception as exc:
-                log.debug("Could not check LastBuildInfo: %s", exc)
+        if not library and not compiled_library:
+            return ExportResult(
+                success=False,
+                message="Nothing to export: both library and "
+                        "compiled_library are false.",
+            )
+
+        check = self._impl_check_all_objects()
+        if not check.success:
+            return ExportResult(
+                success=False,
+                message=(
+                    f"CheckAllObjects failed with {check.error_count} error(s). "
+                    f"Fix all errors before exporting."
+                ),
+            )
 
         _INVALID_PATH_CHARS = set('<>:"/\\|?*')
         filename_part = f"{title}-{version}"
@@ -1500,35 +1531,44 @@ class TcAutomationInterface:
             )
 
         os.makedirs(output_dir, exist_ok=True)
-        lib = os.path.join(output_dir, f"{title}-{version}.library")
-        comp = os.path.join(output_dir, f"{title}-{version}.compiled-library")
-
         result = ExportResult(success=True)
+        msg_parts: list[str] = []
 
-        try:
-            self._plc_proj_item.SaveAsLibrary(lib, True)
-            result.library_path = lib
-            result.library_size_kb = round(os.path.getsize(lib) / 1024, 1)
-        except Exception as exc:
-            result.success = False
-            result.message = f".library export failed: {exc}"
-            return result
+        # --- .library ---
+        if library:
+            lib_path = os.path.join(output_dir, f"{title}-{version}.library")
+            try:
+                self._plc_proj_item.SaveAsLibrary(lib_path, install_library)
+                result.library_path = lib_path
+                result.library_size_kb = round(os.path.getsize(lib_path) / 1024, 1)
+                label = f"{result.library_size_kb} KB .library"
+                if install_library:
+                    label += " (installed)"
+                msg_parts.append(label)
+            except Exception as exc:
+                result.success = False
+                result.message = f".library export failed: {exc}"
+                return result
 
-        try:
-            self._plc_proj_item.SaveAsLibrary(comp, False)
-            result.compiled_library_path = comp
-            result.compiled_library_size_kb = round(
-                os.path.getsize(comp) / 1024, 1
-            )
-        except Exception as exc:
-            result.success = False
-            result.message = f".compiled-library export failed: {exc}"
-            return result
+        # --- .compiled-library ---
+        if compiled_library:
+            comp_path = os.path.join(output_dir, f"{title}-{version}.compiled-library")
+            try:
+                self._plc_proj_item.SaveAsLibrary(comp_path, install_compiled_library)
+                result.compiled_library_path = comp_path
+                result.compiled_library_size_kb = round(
+                    os.path.getsize(comp_path) / 1024, 1
+                )
+                label = f"{result.compiled_library_size_kb} KB .compiled-library"
+                if install_compiled_library:
+                    label += " (installed)"
+                msg_parts.append(label)
+            except Exception as exc:
+                result.success = False
+                result.message = f".compiled-library export failed: {exc}"
+                return result
 
-        result.message = (
-            f"Exported {result.library_size_kb} KB .library + "
-            f"{result.compiled_library_size_kb} KB .compiled-library"
-        )
+        result.message = "Exported " + " + ".join(msg_parts)
         return result
 
     # -------- reload --------

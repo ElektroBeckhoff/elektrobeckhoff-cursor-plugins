@@ -291,13 +291,24 @@ def twincat_get_output_log() -> str:
 def twincat_export_library(
     output_dir: str = "",
     plcproj_path: str = "",
+    library: bool = True,
+    compiled_library: bool = True,
+    install_library: bool = True,
+    install_compiled_library: bool = False,
 ) -> str:
-    """Export the PLC project as .library and .compiled-library.
+    """Export the PLC project as .library and/or .compiled-library.
 
-    The .library is also installed into the local library repository.
-    Default output: Versions/<ProjectVersion>/ in the repository root.
+    What gets EXPORTED (written to output_dir):
+      library=true             -> exports .library file
+      compiled_library=true    -> exports .compiled-library file
 
-    Requires a successful build first."""
+    What gets INSTALLED (into the local TwinCAT library repository):
+      install_library=true              -> installs .library
+      install_compiled_library=true     -> installs .compiled-library
+
+    Defaults: export both, install only .library.
+    Output: Versions/<ProjectVersion>/ in the repository root.
+    Runs CheckAllObjects automatically before export -- fails if errors exist."""
 
     if not plcproj_path:
         plcproj_path = _auto_detect_plcproj()
@@ -312,7 +323,13 @@ def twincat_export_library(
 
     try:
         return _json(
-            _get_bridge().export_library(output_dir, title, version)
+            _get_bridge().export_library(
+                output_dir, title, version,
+                library=library,
+                compiled_library=compiled_library,
+                install_library=install_library,
+                install_compiled_library=install_compiled_library,
+            )
         )
     except Exception as exc:
         return _json({"success": False, "error": str(exc)})
