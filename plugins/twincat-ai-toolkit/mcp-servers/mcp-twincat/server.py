@@ -307,23 +307,43 @@ def twincat_export_library(
       install_compiled_library=true     -> installs .compiled-library
 
     Defaults: export both, install only .library.
-    Output: Versions/<ProjectVersion>/ in the repository root.
+
+    Title and version are auto-read from the .plcproj file.
+    Default output: <git_repo_root>/Versions/<ProjectVersion>/
     Runs CheckAllObjects automatically before export -- fails if errors exist."""
 
+    bridge = _get_bridge()
+    sln_path = bridge._call_sta(lambda: bridge._sln_path, timeout=5) or ""
+    plcproj_from_bridge = bridge._call_sta(
+        lambda: bridge._plcproj_file_path, timeout=5,
+    ) or ""
+
     if not plcproj_path:
-        plcproj_path = _auto_detect_plcproj()
+        plcproj_path = plcproj_from_bridge or _auto_detect_plcproj(sln_path)
+
+    if not plcproj_path or not os.path.isfile(plcproj_path):
+        return _json({
+            "success": False,
+            "error": (
+                f"Cannot find .plcproj file. "
+                f"Searched from: {sln_path or 'cwd'}. "
+                f"Pass plcproj_path explicitly."
+            ),
+        })
 
     info = _read_plcproj_meta(plcproj_path)
-    title = info.get("title", "Unknown")
-    version = info.get("version", "0.0.0.0")
+    title = info.get("title") or info.get("name") or "Unknown"
+    version = info.get("version") or "0.0.0.0"
 
     if not output_dir:
-        repo = _find_repo_root()
-        output_dir = os.path.join(repo or os.getcwd(), "Versions", version)
+        repo = _find_repo_root(sln_path or plcproj_path)
+        if not repo:
+            repo = os.path.dirname(sln_path) if sln_path else os.getcwd()
+        output_dir = os.path.join(repo, "Versions", version)
 
     try:
         return _json(
-            _get_bridge().export_library(
+            bridge.export_library(
                 output_dir, title, version,
                 library=library,
                 compiled_library=compiled_library,
@@ -1021,13 +1041,21 @@ def _scan_plcproj_in_dir(dir_path: str, max_depth: int = 5) -> List[str]:
 #  Internal helpers
 # ================================================================
 
-def _auto_detect_plcproj() -> str:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(os.path.dirname(script_dir))
-
+def _auto_detect_plcproj(sln_path: str = "") -> str:
+    """Find the first .plcproj file near the solution or git repo root."""
     excludes = {"samples", "versions", "_libraries", ".git", "node_modules"}
 
-    for root_dir in (repo_root, os.getcwd()):
+    search_roots: list[str] = []
+    if sln_path:
+        sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
+        search_roots.append(sln_dir)
+        repo = _find_repo_root(sln_path)
+        if repo and repo != sln_dir:
+            search_roots.append(repo)
+    if not search_roots:
+        search_roots.append(os.getcwd())
+
+    for root_dir in search_roots:
         if not os.path.isdir(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
@@ -1062,16 +1090,19 @@ def _read_plcproj_meta(plcproj_path: str) -> dict:
         return {}
 
 
-def _find_repo_root() -> str:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    candidate = os.path.dirname(os.path.dirname(script_dir))
-    if os.path.isdir(os.path.join(candidate, ".git")):
-        return candidate
-    d = os.getcwd()
-    for _ in range(5):
+def _find_repo_root(start_path: str = "") -> str:
+    """Find the git repo root by walking upward from start_path."""
+    if start_path:
+        d = os.path.dirname(start_path) if os.path.isfile(start_path) else start_path
+    else:
+        d = os.getcwd()
+    for _ in range(8):
         if os.path.isdir(os.path.join(d, ".git")):
             return d
-        d = os.path.dirname(d)
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
     return ""
 
 

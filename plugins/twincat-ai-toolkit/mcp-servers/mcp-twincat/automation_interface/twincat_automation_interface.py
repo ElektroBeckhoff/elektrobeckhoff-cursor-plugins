@@ -905,6 +905,8 @@ class TcAutomationInterface:
             )
 
         self._sln_path = str(self._dte.Solution.FullName)
+        if not self._plcproj_file_path:
+            self._plcproj_file_path = self._detect_plcproj_path()
         self._save_active_to_registry()
         return OpenResult(
             success=True,
@@ -1206,6 +1208,45 @@ class TcAutomationInterface:
             found = self._walk_tree(child, depth + 1)
             if found:
                 return found
+        return None
+
+    @staticmethod
+    def _find_git_root(start: str) -> str:
+        """Walk upward from start to find a directory containing .git."""
+        d = os.path.dirname(start) if os.path.isfile(start) else start
+        for _ in range(8):
+            if os.path.isdir(os.path.join(d, ".git")):
+                return d
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+        return ""
+
+    def _detect_plcproj_path(self) -> Optional[str]:
+        """Auto-detect the .plcproj file from the solution directory tree."""
+        if not self._sln_path:
+            return None
+        sln_dir = os.path.dirname(self._sln_path)
+        proj_name = self._normalize_proj_name(
+            str(self._plc_proj_item.Name)
+        ) if self._plc_proj_item else ""
+        for dirpath, _dirs, files in os.walk(sln_dir):
+            depth = dirpath.replace(sln_dir, "").count(os.sep)
+            if depth > 4:
+                _dirs.clear()
+                continue
+            for f in files:
+                if not f.endswith(".plcproj"):
+                    continue
+                if proj_name and os.path.splitext(f)[0] == proj_name:
+                    found = os.path.join(dirpath, f)
+                    log.info("Auto-detected plcproj: %s", found)
+                    return found
+                if not proj_name:
+                    found = os.path.join(dirpath, f)
+                    log.info("Auto-detected plcproj (first match): %s", found)
+                    return found
         return None
 
     @staticmethod
@@ -1526,13 +1567,14 @@ class TcAutomationInterface:
             os.environ.get("TEMP", ""),
             os.environ.get("TMP", ""),
             os.path.dirname(self._sln_path) if self._sln_path else "",
+            self._find_git_root(self._sln_path) if self._sln_path else "",
         ] if d]
         if not any(norm_out.startswith(r) for r in allowed_roots):
             return ExportResult(
                 success=False,
                 message=(
                     f"output_dir '{output_dir}' is outside allowed paths "
-                    f"(solution dir or TEMP). Refusing to write."
+                    f"(solution dir, git repo root, or TEMP). Refusing to write."
                 ),
             )
 
