@@ -1142,9 +1142,14 @@ class TcAutomationInterface:
             f"TIPC^{proj_name}^{proj_name} Projekt",
             f"TIPC^{proj_name}^{proj_name} Instance^{proj_name} Project",
             f"TIPC^{proj_name}^{proj_name} Instance^{proj_name} Projekt",
+            f"TIPC^{proj_name}^{proj_name} Instanz^{proj_name} Project",
+            f"TIPC^{proj_name}^{proj_name} Instanz^{proj_name} Projekt",
             f"TIPC^{proj_name}^{proj_name} Instance",
+            f"TIPC^{proj_name}^{proj_name} Instanz",
             f"TIPC^{proj_name} Instance^{proj_name} Project",
             f"TIPC^{proj_name} Instance^{proj_name} Projekt",
+            f"TIPC^{proj_name} Instanz^{proj_name} Project",
+            f"TIPC^{proj_name} Instanz^{proj_name} Projekt",
         ]
         for path in lookup_paths:
             try:
@@ -1194,6 +1199,7 @@ class TcAutomationInterface:
                 name.endswith("Project")
                 or name.endswith("Projekt")
                 or name.endswith(" Instance")
+                or name.endswith(" Instanz")
             ):
                 if self._is_plc_project_item(child):
                     return child
@@ -1386,7 +1392,7 @@ class TcAutomationInterface:
                 continue
             low = stripped.lower()
 
-            if "compile complete" in low or "build complete" in low:
+            if any(m in low for m in self._COMPILE_COMPLETE_MARKERS) or "build complete" in low:
                 summary_line = stripped
                 infos.append(asdict(ErrorEntry(
                     severity="info", description=stripped,
@@ -1764,15 +1770,19 @@ class TcAutomationInterface:
             pythoncom.PumpWaitingMessages()
             time.sleep(0.5)
 
+
+    _OUTPUT_WINDOW_CAPTIONS = {"output", "ausgabe"}
+
     def _get_output_pane(self, name_filter: str = "build") -> Optional[object]:
         """Find an OutputWindowPane by name substring (case-insensitive).
 
         For "build", also matches "erstellen" (German locale).
+        The Output window caption is "Output" in English and "Ausgabe" in German.
         """
         try:
             for i in range(1, self._dte.Windows.Count + 1):
                 w = self._dte.Windows.Item(i)
-                if str(getattr(w, "Caption", "")).lower() == "output":
+                if str(getattr(w, "Caption", "")).lower() in self._OUTPUT_WINDOW_CAPTIONS:
                     panes = w.Object.OutputWindowPanes
                     for j in range(1, panes.Count + 1):
                         pane = panes.Item(j)
