@@ -685,3 +685,597 @@ class TestMainEntryPoint:
         assert rc == 0
         gen_files = list(tmp_path.glob("*_st_generated*"))
         assert len(gen_files) == 1
+
+
+# ===================================================================
+# Helper builders for new element types
+# ===================================================================
+
+def _make_source_mark(eid: int, pin_id: int, label: str) -> str:
+    return textwrap.dedent(f'''\
+                  <o t="CFCSourceConnectionMark">
+                    <o n="Input" t="CFCInputPin">
+                      <v n="Bounds">"0, 0, 0, 0"</v>
+                      <v n="Negated">false</v>
+                      <v n="Id">{pin_id}L</v>
+                    </o>
+                    <o n="Text" t="CFCText">
+                      <v n="Bounds">"0, 0, 0, 0"</v>
+                      <v n="Text">"{label}"</v>
+                      <v n="Modifiable">true</v>
+                      <v n="Id">{eid + 100}L</v>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+def _make_sink_mark(eid: int, pin_id: int, label: str,
+                    negated: bool = False) -> str:
+    neg_str = "true" if negated else "false"
+    return textwrap.dedent(f'''\
+                  <o t="CFCSinkConnectionMark">
+                    <o n="Output" t="CFCOutputPin">
+                      <v n="Bounds">"0, 0, 0, 0"</v>
+                      <v n="Negated">{neg_str}</v>
+                      <v n="Id">{pin_id}L</v>
+                    </o>
+                    <o n="Text" t="CFCText">
+                      <v n="Bounds">"0, 0, 0, 0"</v>
+                      <v n="Text">"{label}"</v>
+                      <v n="Modifiable">true</v>
+                      <v n="Id">{eid + 100}L</v>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+def _make_box_kindofcall(eid: int, box_name: str, kind: str,
+                         input_pin_ids: list = None,
+                         output_pin_id: int = None) -> str:
+    """Build a CFCBoxElement with arbitrary KindOfCall."""
+    inputs_xml = ""
+    if input_pin_ids:
+        pins = ""
+        for pid in input_pin_ids:
+            pins += f'<o><v n="Negated">false</v><v n="Id">{pid}L</v></o>\n'
+        inputs_xml = (f'<o n="Inputs" t="CFCItemList">'
+                      f'<l2 n="InnerList" cet="CFCInputPin">{pins}</l2></o>')
+    outputs_xml = ""
+    if output_pin_id is not None:
+        outputs_xml = (
+            f'<o n="Outputs" t="CFCItemList">'
+            f'<l2 n="InnerList" cet="CFCOutputPin">'
+            f'<o><v n="Negated">false</v><v n="Id">{output_pin_id}L</v></o>'
+            f'</l2></o>')
+    return textwrap.dedent(f'''\
+                  <o t="CFCBoxElement">
+                    {inputs_xml}
+                    {outputs_xml}
+                    <o n="Texts" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCText">
+                        <o><v n="Text">"{box_name}"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>
+                      </l2>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="KindOfCall" t="KindOfCall">{kind}</v>
+                    <v n="EnEno">false</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+def _make_fb_box(eid: int, fb_type: str, instance: str,
+                 input_pin_ids: list, output_pin_ids: list,
+                 input_names: list = None, output_names: list = None) -> str:
+    """Build a FunctionBlock CFCBoxElement with named pins."""
+    pins_xml = ""
+    for pid in input_pin_ids:
+        pins_xml += f'<o><v n="Negated">false</v><v n="Id">{pid}L</v></o>\n'
+    out_pins = ""
+    for pid in output_pin_ids:
+        out_pins += f'<o><v n="Negated">false</v><v n="Id">{pid}L</v></o>\n'
+    in_names = input_names or []
+    on_names = output_names or []
+    texts = []
+    for n in in_names:
+        texts.append(f'<o><v n="Text">"{n}"</v><v n="Id">0L</v></o>')
+    for n in on_names:
+        texts.append(f'<o><v n="Text">"{n}"</v><v n="Id">0L</v></o>')
+    texts.append(f'<o><v n="Text">"{fb_type}"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>')
+    texts.append(f'<o><v n="Text">"{instance}"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>')
+    texts_xml = "\n".join(texts)
+    return textwrap.dedent(f'''\
+                  <o t="CFCBoxElement">
+                    <o n="Inputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCInputPin">
+                        {pins_xml}
+                      </l2>
+                    </o>
+                    <o n="Outputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCOutputPin">
+                        {out_pins}
+                      </l2>
+                    </o>
+                    <o n="Texts" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCText">
+                        {texts_xml}
+                      </l2>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="KindOfCall" t="KindOfCall">FunctionBlock</v>
+                    <v n="EnEno">false</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+def _make_sel_box(eid: int, input_pin_ids: list, output_pin_id: int) -> str:
+    """Build a SEL operator box."""
+    pins = ""
+    for pid in input_pin_ids:
+        pins += f'<o><v n="Negated">false</v><v n="Id">{pid}L</v></o>\n'
+    empty_texts = '                        <o><v n="Text">""</v><v n="Id">0L</v></o>\n' * len(input_pin_ids)
+    return textwrap.dedent(f'''\
+                  <o t="CFCBoxElement">
+                    <o n="Inputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCInputPin">
+{pins}                      </l2>
+                    </o>
+                    <o n="Outputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCOutputPin">
+                        <o><v n="Negated">false</v><v n="Id">{output_pin_id}L</v></o>
+                      </l2>
+                    </o>
+                    <o n="Texts" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCText">
+{empty_texts}                        <o><v n="Text">"SEL"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>
+                      </l2>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="KindOfCall" t="cyclic_enum">Operator</v>
+                    <v n="EnEno">false</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+def _make_negated_output_operator(eid: int, op_name: str,
+                                  input_pin_ids: list,
+                                  output_pin_id: int) -> str:
+    """Build an operator box with Negated=true on the output pin."""
+    inputs_xml = ""
+    for pid in input_pin_ids:
+        inputs_xml += f'<o><v n="Negated">false</v><v n="Id">{pid}L</v></o>\n'
+    empty_texts = '                        <o><v n="Text">""</v><v n="Id">0L</v></o>\n' * len(input_pin_ids)
+    return textwrap.dedent(f'''\
+                  <o t="CFCBoxElement">
+                    <o n="Inputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCInputPin">
+{inputs_xml}                      </l2>
+                    </o>
+                    <o n="Outputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCOutputPin">
+                        <o>
+                          <v n="Negated">true</v>
+                          <v n="Id">{output_pin_id}L</v>
+                        </o>
+                      </l2>
+                    </o>
+                    <o n="Texts" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCText">
+{empty_texts}                        <o><v n="Text">"{op_name}"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>
+                      </l2>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="KindOfCall" t="cyclic_enum">Operator</v>
+                    <v n="EnEno">false</v>
+                    <v n="Id">{eid}L</v>
+                  </o>''')
+
+
+MINIMAL_CFC_POU_WITH_ACTION = textwrap.dedent('''\
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="TestCFC" Id="{{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK TestCFC
+VAR
+    bOut : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <CFC>
+        <XmlArchive>
+          <Data>
+            <o xml:space="preserve" t="CFCImplementationObject">
+              <o n="Items" t="CFCItemList">
+                <l2 n="InnerList">
+{ELEMENTS}
+                </l2>
+              </o>
+            </o>
+          </Data>
+        </XmlArchive>
+      </CFC>
+    </Implementation>
+    <Action Name="MyAction" Id="{{11111111-2222-3333-4444-555555555555}}">
+      <Implementation>
+        <ST><![CDATA[bOut := TRUE;]]></ST>
+      </Implementation>
+    </Action>
+  </POU>
+</TcPlcObject>
+''')
+
+
+# ===================================================================
+# Bug 1: Connection marks (CFCSourceConnectionMark / CFCSinkConnectionMark)
+# ===================================================================
+
+class TestConnectionMarks:
+    def test_source_sink_mark_passthrough(self, tmp_path):
+        """Signal resolves through Source->Sink marks to the original input."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSignal"),
+            _make_source_mark(2, 20, "MyLabel"),
+            _make_sink_mark(3, 30, "MyLabel"),
+            _make_output_elem(4, 40, "bOut"),
+            _make_connection(10, 20),
+            _make_connection(30, 40),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        assert "MyLabel" in graph.mark_sources
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "bOut := bSignal;" in tc.generated_st
+        assert "(* unknown pin *)" not in tc.generated_st
+
+    def test_or_through_marks_to_output(self, tmp_path):
+        """OR operator output flows through marks and resolves correctly."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bA"),
+            _make_input_elem(2, 20, "bB"),
+            _make_operator_box(3, "OR", [30, 31], 32),
+            _make_source_mark(4, 40, "OrResult"),
+            _make_sink_mark(5, 50, "OrResult"),
+            _make_output_elem(6, 60, "bOut"),
+            _make_connection(10, 30),
+            _make_connection(20, 31),
+            _make_connection(32, 40),
+            _make_connection(50, 60),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "bA OR bB" in tc.generated_st
+        assert "(* unknown pin *)" not in tc.generated_st
+
+    def test_fan_out_via_multiple_sinks(self, tmp_path):
+        """One source mark fans out to multiple sink marks."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSignal"),
+            _make_source_mark(2, 20, "Fan"),
+            _make_sink_mark(3, 30, "Fan"),
+            _make_sink_mark(4, 40, "Fan"),
+            _make_output_elem(5, 50, "bOut1"),
+            _make_output_elem(6, 60, "bOut2"),
+            _make_connection(10, 20),
+            _make_connection(30, 50),
+            _make_connection(40, 60),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "bOut1 := bSignal;" in tc.generated_st
+        assert "bOut2 := bSignal;" in tc.generated_st
+
+    def test_mark_pins_registered(self, tmp_path):
+        """Source and sink mark pins are registered in graph.pins."""
+        elems = "\n".join([
+            _make_source_mark(1, 10, "X"),
+            _make_sink_mark(2, 20, "X"),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        assert 10 in graph.pins
+        assert 20 in graph.pins
+        assert graph.pins[10].pin_type == "input"
+        assert graph.pins[20].pin_type == "output"
+
+
+# ===================================================================
+# Bug 2: SUPER^ call
+# ===================================================================
+
+class TestSuperCall:
+    def test_super_base_emitted(self, tmp_path):
+        """SUPER^ with KindOfCall=Base emits SUPER^(); statement."""
+        elems = "\n".join([
+            _make_box_kindofcall(1, "SUPER^", "Base"),
+            _make_input_elem(2, 20, "bA"),
+            _make_output_elem(3, 30, "bOut"),
+            _make_connection(20, 30),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "SUPER^();" in tc.generated_st
+
+
+# ===================================================================
+# Bug 3: Action call (LocalAction)
+# ===================================================================
+
+class TestActionCall:
+    def test_local_action_emitted(self, tmp_path):
+        """Box with KindOfCall=LocalAction emits ActionName(); statement."""
+        elems = "\n".join([
+            _make_box_kindofcall(1, "MyAction", "LocalAction"),
+            _make_input_elem(2, 20, "bA"),
+            _make_output_elem(3, 30, "bOut"),
+            _make_connection(20, 30),
+        ])
+        xml = MINIMAL_CFC_POU_WITH_ACTION.replace("{ELEMENTS}", elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "MyAction();" in tc.generated_st
+
+
+# ===================================================================
+# Bug 4: Negated output pin
+# ===================================================================
+
+class TestNegatedOutputPin:
+    def test_negated_operator_output_wraps_not(self, tmp_path):
+        """Operator with Negated=true on output pin wraps expression in NOT."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bA"),
+            _make_input_elem(2, 20, "bB"),
+            _make_negated_output_operator(3, "OR", [30, 31], 32),
+            _make_output_elem(4, 40, "bOut"),
+            _make_connection(10, 30),
+            _make_connection(20, 31),
+            _make_connection(32, 40),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "NOT" in tc.generated_st
+        assert "bA OR bB" in tc.generated_st
+
+    def test_negated_sink_mark_wraps_not(self, tmp_path):
+        """Sink mark with Negated=true on output pin wraps in NOT."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSignal"),
+            _make_source_mark(2, 20, "Sig"),
+            _make_sink_mark(3, 30, "Sig", negated=True),
+            _make_output_elem(4, 40, "bOut"),
+            _make_connection(10, 20),
+            _make_connection(30, 40),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "NOT bSignal" in tc.generated_st
+
+
+# ===================================================================
+# Bug 5: SEL simplification
+# ===================================================================
+
+class TestSELSimplification:
+    def test_sel_false_true_simplifies(self, tmp_path):
+        """SEL(x, FALSE, TRUE) simplifies to x."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSwitch"),
+            _make_input_elem(2, 20, "FALSE"),
+            _make_input_elem(3, 30, "TRUE"),
+            _make_sel_box(4, [40, 41, 42], 43),
+            _make_output_elem(5, 50, "bOut"),
+            _make_connection(10, 40),
+            _make_connection(20, 41),
+            _make_connection(30, 42),
+            _make_connection(43, 50),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "SEL(" not in tc.generated_st
+        assert "bSwitch" in tc.generated_st
+
+    def test_sel_true_false_simplifies_to_not(self, tmp_path):
+        """SEL(x, TRUE, FALSE) simplifies to NOT x."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSwitch"),
+            _make_input_elem(2, 20, "TRUE"),
+            _make_input_elem(3, 30, "FALSE"),
+            _make_sel_box(4, [40, 41, 42], 43),
+            _make_output_elem(5, 50, "bOut"),
+            _make_connection(10, 40),
+            _make_connection(20, 41),
+            _make_connection(30, 42),
+            _make_connection(43, 50),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "SEL(" not in tc.generated_st
+        assert "NOT bSwitch" in tc.generated_st
+
+    def test_sel_other_values_preserved(self, tmp_path):
+        """SEL(x, A, B) with non-trivial values stays as SEL call."""
+        elems = "\n".join([
+            _make_input_elem(1, 10, "bSwitch"),
+            _make_input_elem(2, 20, "nValA"),
+            _make_input_elem(3, 30, "nValB"),
+            _make_sel_box(4, [40, 41, 42], 43),
+            _make_output_elem(5, 50, "nOut"),
+            _make_connection(10, 40),
+            _make_connection(20, 41),
+            _make_connection(30, 42),
+            _make_connection(43, 50),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "SEL(bSwitch, nValA, nValB)" in tc.generated_st
+
+
+# ===================================================================
+# Bug 6: POU type detection
+# ===================================================================
+
+class TestPOUTypeDetection:
+    def test_comment_before_fb(self):
+        from twincat_migrator_base import _detect_pou_type
+        decl = "// Some comment\nFUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
+        assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
+
+    def test_attribute_before_fb(self):
+        from twincat_migrator_base import _detect_pou_type
+        decl = "{attribute 'qualified_only'}\nFUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
+        assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
+
+    def test_multiline_comments_before_program(self):
+        from twincat_migrator_base import _detect_pou_type
+        decl = "(* multi-line comment *)\n// another comment\nPROGRAM MAIN\nVAR\nEND_VAR"
+        assert _detect_pou_type(decl) == "PROGRAM"
+
+    def test_empty_lines_before_function(self):
+        from twincat_migrator_base import _detect_pou_type
+        decl = "\n\n\nFUNCTION F_Test : BOOL\nVAR_INPUT\nEND_VAR"
+        assert _detect_pou_type(decl) == "FUNCTION"
+
+    def test_direct_keyword_still_works(self):
+        from twincat_migrator_base import _detect_pou_type
+        decl = "FUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
+        assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
+
+
+# ===================================================================
+# Bug 7: Accuracy metric
+# ===================================================================
+
+class TestAccuracyMetric:
+    def test_accuracy_uses_item_count(self):
+        from twincat_migrator_base import calculate_accuracy, NwlNetwork
+        tc = TcFile()
+        tc.networks = [NwlNetwork(index=0, items=[
+            AssignNode(outputs=[OperandNode(name="a")], rvalue=OperandNode(name="b")),
+            AssignNode(outputs=[OperandNode(name="c")], rvalue=OperandNode(name="d")),
+            AssignNode(outputs=[OperandNode(name="e")], rvalue=OperandNode(name="f")),
+            AssignNode(outputs=[OperandNode(name="g")], rvalue=OperandNode(name="h")),
+            AssignNode(outputs=[OperandNode(name="i")], rvalue=OperandNode(name="j")),
+        ])]
+        tc.warnings = ["some warning"]
+        acc = calculate_accuracy(tc)
+        assert acc == 90.0, f"Expected 90.0 got {acc}"
+
+    def test_accuracy_100_no_issues(self):
+        from twincat_migrator_base import calculate_accuracy, NwlNetwork
+        tc = TcFile()
+        tc.networks = [NwlNetwork(index=0, items=[
+            AssignNode(outputs=[OperandNode(name="a")], rvalue=OperandNode(name="b")),
+        ])]
+        acc = calculate_accuracy(tc)
+        assert acc == 100.0
+
+
+# ===================================================================
+# Bug 1b: Singular Output/Input on CFCBoxElement
+# ===================================================================
+
+class TestSingularPins:
+    def test_singular_output_on_box(self, tmp_path):
+        """Box with singular Output pin (not in CFCItemList) is parsed."""
+        xml_elem = textwrap.dedent('''\
+                  <o t="CFCBoxElement">
+                    <o n="Inputs" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCInputPin">
+                        <o><v n="Negated">false</v><v n="Id">10L</v></o>
+                      </l2>
+                    </o>
+                    <o n="Output" t="CFCOutputPin">
+                      <v n="Negated">false</v>
+                      <v n="Id">20L</v>
+                    </o>
+                    <o n="Texts" t="CFCItemList">
+                      <l2 n="InnerList" cet="CFCText">
+                        <o><v n="Text">"NOT"</v><v n="Modifiable">true</v><v n="Id">0L</v></o>
+                      </l2>
+                    </o>
+                    <v n="Bounds">"0, 0, 0, 0"</v>
+                    <v n="KindOfCall" t="cyclic_enum">Operator</v>
+                    <v n="EnEno">false</v>
+                    <v n="Id">1L</v>
+                  </o>''')
+        elems = "\n".join([
+            _make_input_elem(2, 30, "bA"),
+            xml_elem,
+            _make_output_elem(3, 40, "bOut"),
+            _make_connection(30, 10),
+            _make_connection(20, 40),
+        ])
+        xml = _build_cfc_xml(elems)
+        p = tmp_path / "test.TcPOU"
+        p.write_text(xml, encoding="utf-8")
+        tc = load_file(p)
+        graph = C.parse_cfc_graph(tc)
+        assert 20 in graph.pins
+        tc.networks = C.map_cfc_to_ir(graph, tc)
+        from twincat_migrator_base import convert_networks_to_st
+        convert_networks_to_st(tc, MigrationConfig())
+        assert "(* unknown pin *)" not in tc.generated_st
+
+

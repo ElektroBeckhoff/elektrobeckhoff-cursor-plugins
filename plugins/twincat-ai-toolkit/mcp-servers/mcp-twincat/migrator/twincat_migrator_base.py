@@ -164,12 +164,13 @@ class MigrationConfig:
 def calculate_accuracy(tc: 'TcFile') -> float:
     """Calculate migration accuracy as percentage with two decimals (0.00-100.00).
 
-    Based on the ratio of problem items to total items (networks or
-    ST-networks).  Each TODO counts as 1 failed item, each warning
-    as 0.5.  Files with zero items default to 100 when clean,
-    0 when issues exist.
+    Based on the ratio of problem items to total items.  Each TODO counts
+    as 1 failed item, each warning as 0.5.  Uses the item count within
+    networks as denominator when it exceeds the network count (e.g. CFC
+    packs many statements into a single network).
     """
-    total = max(len(tc.networks), len(tc.st_networks), 1)
+    item_count = sum(len(nw.items) for nw in tc.networks)
+    total = max(len(tc.networks), len(tc.st_networks), item_count, 1)
     penalty = len(tc.todos) + len(tc.warnings) * 0.5
     if penalty <= 0:
         return 100.0
@@ -532,11 +533,18 @@ def load_file(path: Path, encoding: str = "utf-8") -> Optional[TcFile]:
 
 
 def _detect_pou_type(declaration: str) -> str:
-    first_line = declaration.strip().split("\n")[0].strip().upper() if declaration else ""
-    for kw in ["PROGRAM", "FUNCTION_BLOCK", "FUNCTION", "METHOD", "ACTION", "PROPERTY",
-               "INTERFACE", "STRUCT", "ENUM", "TYPE"]:
-        if first_line.startswith(kw):
-            return kw
+    if not declaration:
+        return "UNKNOWN"
+    keywords = ["PROGRAM", "FUNCTION_BLOCK", "FUNCTION", "METHOD", "ACTION",
+                "PROPERTY", "INTERFACE", "STRUCT", "ENUM", "TYPE"]
+    for line in declaration.strip().split("\n"):
+        upper = line.strip().upper()
+        if not upper or upper.startswith("//") or upper.startswith("{") or upper.startswith("(*"):
+            continue
+        for kw in keywords:
+            if upper.startswith(kw):
+                return kw
+        break
     return "UNKNOWN"
 
 
@@ -1345,6 +1353,12 @@ def _gen_sel(box: BoxNode, tc: TcFile, cfg: MigrationConfig,
     exprs = [_gen_expression(inp, tc, cfg, hoisted) for inp in box.input_items]
     while len(exprs) < 3:
         exprs.append("???")
+    if exprs[1].upper() == "FALSE" and exprs[2].upper() == "TRUE":
+        return exprs[0]
+    if exprs[1].upper() == "TRUE" and exprs[2].upper() == "FALSE":
+        if " " in exprs[0] and not exprs[0].startswith("("):
+            return f"NOT ({exprs[0]})"
+        return f"NOT {exprs[0]}"
     return f"SEL({exprs[0]}, {exprs[1]}, {exprs[2]})"
 
 

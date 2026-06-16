@@ -100,6 +100,7 @@ class CFCGraph:
     edges: Dict[int, int] = field(default_factory=dict)
     reverse_edges: Dict[int, List[int]] = field(default_factory=dict)
     execution_order: List[CFCElement] = field(default_factory=list)
+    mark_sources: Dict[str, int] = field(default_factory=dict)
 
 
 CFC_SOURCE_TYPE = "CFC"
@@ -189,6 +190,22 @@ def _scan_elements(inner_list, graph: CFCGraph, tc: TcFile) -> None:
                 pin.owner_id = elem.element_id
                 graph.pins[pin.pin_id] = pin
 
+        elif t_attr == "CFCSourceConnectionMark":
+            elem = _parse_source_mark(item)
+            graph.elements[elem.element_id] = elem
+            for pin in elem.input_pins:
+                pin.owner_id = elem.element_id
+                graph.pins[pin.pin_id] = pin
+            if elem.var_name and elem.input_pins:
+                graph.mark_sources[elem.var_name] = elem.input_pins[0].pin_id
+
+        elif t_attr == "CFCSinkConnectionMark":
+            elem = _parse_sink_mark(item)
+            graph.elements[elem.element_id] = elem
+            for pin in elem.output_pins:
+                pin.owner_id = elem.element_id
+                graph.pins[pin.pin_id] = pin
+
 
 def _parse_input_element(item) -> CFCElement:
     elem = CFCElement(element_type="input")
@@ -245,6 +262,52 @@ def _parse_output_element(item) -> CFCElement:
     return elem
 
 
+def _parse_source_mark(item) -> CFCElement:
+    """Parse a CFCSourceConnectionMark (receives a signal, names it)."""
+    elem = CFCElement(element_type="source_mark")
+    elem.element_id = _parse_id(item)
+    elem.bounds = _get_v_str(item, "Bounds")
+
+    for child in item:
+        n_attr = child.get("n", "")
+        t_attr = child.get("t", "")
+        if n_attr == "Input" and t_attr in ("CFCInputPin", "CFCInputPinWithSetReset"):
+            pin = _parse_pin(child, "input", 0)
+            elem.input_pins = [pin]
+        elif n_attr == "Text" and t_attr == "CFCText":
+            elem.texts = [_get_v_str(child, "Text")]
+
+    if elem.texts:
+        for t in elem.texts:
+            if t:
+                elem.var_name = t
+                break
+    return elem
+
+
+def _parse_sink_mark(item) -> CFCElement:
+    """Parse a CFCSinkConnectionMark (provides a named signal to consumers)."""
+    elem = CFCElement(element_type="sink_mark")
+    elem.element_id = _parse_id(item)
+    elem.bounds = _get_v_str(item, "Bounds")
+
+    for child in item:
+        n_attr = child.get("n", "")
+        t_attr = child.get("t", "")
+        if n_attr == "Output" and t_attr == "CFCOutputPin":
+            pin = _parse_pin(child, "output", 0)
+            elem.output_pins = [pin]
+        elif n_attr == "Text" and t_attr == "CFCText":
+            elem.texts = [_get_v_str(child, "Text")]
+
+    if elem.texts:
+        for t in elem.texts:
+            if t:
+                elem.var_name = t
+                break
+    return elem
+
+
 def _parse_box_element(item) -> CFCElement:
     elem = CFCElement(element_type="box")
     elem.element_id = _parse_id(item)
@@ -253,12 +316,22 @@ def _parse_box_element(item) -> CFCElement:
     elem.en_eno = _get_v_str(item, "EnEno").lower() == "true"
 
     for child in item:
-        if child.get("n") == "Inputs" and child.get("t") == "CFCItemList":
+        n_attr = child.get("n", "")
+        t_attr = child.get("t", "")
+        if n_attr == "Inputs" and t_attr == "CFCItemList":
             elem.input_pins, extra_inout = _parse_box_input_pins(child)
             elem.inout_pins.extend(extra_inout)
+        elif n_attr == "Input" and t_attr in ("CFCInputPin", "CFCInputPinWithSetReset"):
+            if not elem.input_pins:
+                elem.input_pins = [_parse_pin(child, "input", 0)]
     for child in item:
-        if child.get("n") == "Outputs" and child.get("t") == "CFCItemList":
+        n_attr = child.get("n", "")
+        t_attr = child.get("t", "")
+        if n_attr == "Outputs" and t_attr == "CFCItemList":
             elem.output_pins = _parse_pin_list(child, "output")
+        elif n_attr == "Output" and t_attr == "CFCOutputPin":
+            if not elem.output_pins:
+                elem.output_pins = [_parse_pin(child, "output", 0)]
     for child in item:
         if child.get("n") == "Texts" and child.get("t") == "CFCItemList":
             elem.texts = _parse_text_list(child)
@@ -499,17 +572,42 @@ def _resolve_expression(pin_id: int, graph: CFCGraph) -> Union[BoxNode, OperandN
         return OperandNode(name="(* unknown element *)")
 
     if source_elem.element_type == "input":
-        return OperandNode(name=source_elem.var_name or "(* empty *)")
+        result = OperandNode(name=source_elem.var_name or "(* empty *)")
+        if source_pin.negated:
+            result = BoxNode(box_type="NOT", call_type="Not",
+                             input_items=[result], input_flags=[0])
+        return result
+
+    if source_elem.element_type == "sink_mark":
+        label = source_elem.var_name
+        source_input_pin = graph.mark_sources.get(label) if label else None
+        if source_input_pin is not None:
+            result = _resolve_expression(source_input_pin, graph)
+        else:
+            result = OperandNode(name=f"(* unresolved mark: {label} *)")
+        if source_pin.negated:
+            result = BoxNode(box_type="NOT", call_type="Not",
+                             input_items=[result], input_flags=[0])
+        return result
 
     if source_elem.element_type == "box":
         if source_elem.kind_of_call == "FunctionBlock":
             inst = source_elem.instance_name or source_elem.box_type
             out_name = source_pin.name
             if out_name:
-                return OperandNode(name=f"{inst}.{out_name}")
-            return OperandNode(name=inst)
+                result = OperandNode(name=f"{inst}.{out_name}")
+            else:
+                result = OperandNode(name=inst)
+            if source_pin.negated:
+                result = BoxNode(box_type="NOT", call_type="Not",
+                                 input_items=[result], input_flags=[0])
+            return result
 
-        return _build_operator_tree(source_elem, graph)
+        result = _build_operator_tree(source_elem, graph)
+        if source_pin.negated:
+            result = BoxNode(box_type="NOT", call_type="Not",
+                             input_items=[result], input_flags=[0])
+        return result
 
     return OperandNode(name="(* unresolved *)")
 
@@ -566,6 +664,16 @@ def map_cfc_to_ir(graph: CFCGraph, tc: TcFile) -> List[NwlNetwork]:
                 node = _map_function_block(elem, graph, tc)
                 desc = elem.instance_name or elem.box_type
                 exec_map[len(items)] = (order_idx, desc)
+                items.append(node)
+            elif elem.kind_of_call == "Base" and elem.box_type == "SUPER^":
+                node = BoxNode(box_type="SUPER^", call_type="Action",
+                               xml_id=str(elem.element_id))
+                exec_map[len(items)] = (order_idx, "SUPER^")
+                items.append(node)
+            elif elem.kind_of_call == "LocalAction":
+                node = BoxNode(box_type=elem.box_type, call_type="Action",
+                               xml_id=str(elem.element_id))
+                exec_map[len(items)] = (order_idx, f"Action: {elem.box_type}")
                 items.append(node)
 
         elif elem.element_type == "output":
