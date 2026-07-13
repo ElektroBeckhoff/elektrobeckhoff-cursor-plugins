@@ -544,7 +544,12 @@ class TcAutomationInterface:
             if not pid:
                 try:
                     _ = state["dte"].MainWindow.Caption
-                except Exception:
+                except Exception as exc:
+                    if self._is_call_rejected(exc):
+                        log.debug("Instance busy (modal dialog?), "
+                                  "skipping prune: %s",
+                                  state.get("sln_path", key))
+                        continue
                     log.info("Pruned stale instance (COM unreachable): %s",
                              state.get("sln_path", key))
                     self._kill_orphaned_entry(state, key)
@@ -580,11 +585,15 @@ class TcAutomationInterface:
                 )
                 self._kill_orphaned_entry(state, norm_sln)
                 return False
-        except Exception:
-            log.warning("Cached DTE for '%s' is stale -- removing",
-                        stored_sln)
-            self._kill_orphaned_entry(state, norm_sln)
-            return False
+        except Exception as exc:
+            if self._is_call_rejected(exc):
+                log.warning("Cached DTE for '%s' is busy (modal dialog?) "
+                            "-- restoring anyway", stored_sln)
+            else:
+                log.warning("Cached DTE for '%s' is stale -- removing",
+                            stored_sln)
+                self._kill_orphaned_entry(state, norm_sln)
+                return False
         self._dte = dte
         self._sys_man = state["sys_man"]
         self._plc_proj_item = state["plc_proj_item"]
@@ -593,6 +602,7 @@ class TcAutomationInterface:
         self._sln_path = state["sln_path"]
         self._plcproj_file_path = state.get("plcproj_file_path")
         self._prog_id = state.get("prog_id") or self._prog_id
+        self._ensure_silent_mode()
         log.info("Re-attached to cached XAE instance for '%s'",
                  self._sln_path)
         return True
@@ -613,7 +623,15 @@ class TcAutomationInterface:
                 continue
             try:
                 dte = win32com.client.GetActiveObject(candidate)
-                _ = dte.MainWindow.Caption
+                try:
+                    _ = dte.MainWindow.Caption
+                except Exception as caption_exc:
+                    if self._is_call_rejected(caption_exc):
+                        log.info("GetActiveObject(%s) OK but DTE busy "
+                                 "(modal dialog?) -- attaching anyway",
+                                 candidate)
+                    else:
+                        raise
                 self._prog_id = candidate
                 return dte
             except Exception as exc:
@@ -780,6 +798,7 @@ class TcAutomationInterface:
             if self._dte:
                 self._created_new = False
                 log.info("Attached to running TcXaeShell (%s)", self._prog_id)
+                self._ensure_silent_mode()
 
         # 2. If attached, check whether the loaded solution matches
         if self._dte and norm_expected:
@@ -792,11 +811,32 @@ class TcAutomationInterface:
                     current_sln = _canonical_path(
                         str(self._dte.Solution.FullName)
                     )
-            except Exception:
-                dte_is_alive = False
-                log.warning("DTE appears stale (Solution inaccessible) "
-                            "-- dropping reference")
-                self._dte = None
+            except Exception as exc:
+                if self._is_call_rejected(exc):
+                    log.warning("DTE busy (modal dialog?) during solution "
+                                "check -- retrying via _retry_com")
+                    try:
+                        sln_is_open = self._retry_com(
+                            lambda: bool(self._dte.Solution.IsOpen),
+                            max_retries=10, delay_s=3,
+                        )
+                        if sln_is_open:
+                            current_sln = _canonical_path(
+                                str(self._retry_com(
+                                    lambda: self._dte.Solution.FullName,
+                                    max_retries=5, delay_s=2,
+                                ))
+                            )
+                    except Exception:
+                        dte_is_alive = False
+                        log.warning("DTE still unreachable after retries "
+                                    "-- dropping reference")
+                        self._dte = None
+                else:
+                    dte_is_alive = False
+                    log.warning("DTE appears stale (Solution inaccessible) "
+                                "-- dropping reference")
+                    self._dte = None
 
             if not self._dte:
                 pass  # fall through to step 3
@@ -948,12 +988,7 @@ class TcAutomationInterface:
                 else:
                     raise
 
-        try:
-            settings = self._dte.GetObject("TcAutomationSettings")
-            settings.SilentMode = True
-            log.info("TcAutomationSettings.SilentMode enabled")
-        except Exception:
-            log.debug("SilentMode not available (requires Build >= 4020)")
+        self._ensure_silent_mode()
 
         self._wait_for_xae_idle(timeout_s)
         self._ensure_correct_solution(expected_sln, timeout_s)
@@ -1273,8 +1308,13 @@ class TcAutomationInterface:
         # Primary: ITcPlcIECProject.CheckAllObjects()
         # The COM call returns synchronously when done. A short poll catches
         # late output; 4026 may not write to the Build pane at all.
+        # Extended retry budget (10 × 3s = 30s) to survive modal dialogs
+        # being dismissed or file-reload settling.
         try:
-            self._retry_com(lambda: self._plc_proj_item.CheckAllObjects())
+            self._retry_com(
+                lambda: self._plc_proj_item.CheckAllObjects(),
+                max_retries=10, delay_s=3,
+            )
             self._wait_for_compile_complete(max_seconds=8)
             result = CheckResult(
                 success=True,
@@ -1289,7 +1329,10 @@ class TcAutomationInterface:
 
         # Fallback: DTE menu command
         try:
-            self._retry_com(self._dte.ExecuteCommand, "Build.Checkallobjects")
+            self._retry_com(
+                self._dte.ExecuteCommand, "Build.Checkallobjects",
+                max_retries=10, delay_s=3,
+            )
             self._wait_for_compile_complete(max_seconds=60)
             result = CheckResult(
                 success=True,
@@ -1336,13 +1379,20 @@ class TcAutomationInterface:
         cmd = "Build.RebuildSolution" if full_rebuild else "Build.BuildSolution"
         self._clear_build_pane()
         start = time.time()
-        self._retry_com(self._dte.ExecuteCommand, cmd)
+        self._retry_com(self._dte.ExecuteCommand, cmd, max_retries=10, delay_s=3)
 
         time.sleep(2)
         build_started = False
         while True:
             pythoncom.PumpWaitingMessages()
-            state = int(self._dte.Solution.SolutionBuild.BuildState)
+            try:
+                state = int(self._dte.Solution.SolutionBuild.BuildState)
+            except Exception as poll_exc:
+                if self._is_retryable_com_error(poll_exc):
+                    log.debug("BuildState poll busy, retrying: %s", poll_exc)
+                    time.sleep(1)
+                    continue
+                raise
             if state == _VS_BUILD_STATE_IN_PROGRESS:
                 build_started = True
             if build_started and state != _VS_BUILD_STATE_IN_PROGRESS:
@@ -1360,8 +1410,12 @@ class TcAutomationInterface:
 
         time.sleep(1)
         elapsed = round(time.time() - start, 1)
-        last_info = int(self._dte.Solution.SolutionBuild.LastBuildInfo)
-        bstate = int(self._dte.Solution.SolutionBuild.BuildState)
+        last_info = int(self._retry_com(
+            lambda: self._dte.Solution.SolutionBuild.LastBuildInfo,
+        ))
+        bstate = int(self._retry_com(
+            lambda: self._dte.Solution.SolutionBuild.BuildState,
+        ))
 
         ci_updated = False
         if ci_dir and os.path.isdir(ci_dir):
@@ -1894,6 +1948,38 @@ class TcAutomationInterface:
         return self._read_pane_text(self._get_output_pane("build"))
 
 
+    def _ensure_silent_mode(self):
+        """Enable TcAutomationSettings.SilentMode on the current DTE.
+
+        SilentMode suppresses modal dialogs (e.g. "file modified outside
+        the environment -- reload?") that block all COM calls with
+        RPC_E_CALL_REJECTED.  Safe to call multiple times; idempotent.
+
+        Uses retry because the COM call itself can be rejected when a
+        modal dialog is already open at attach time.
+        """
+        if not self._dte:
+            return
+        for attempt in range(6):
+            try:
+                settings = self._dte.GetObject("TcAutomationSettings")
+                settings.SilentMode = True
+                log.info("TcAutomationSettings.SilentMode enabled")
+                return
+            except Exception as exc:
+                if self._is_retryable_com_error(exc) and attempt < 5:
+                    log.info("SilentMode COM busy (attempt %d/6): %s",
+                             attempt + 1, exc)
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(2)
+                    continue
+                if self._is_retryable_com_error(exc):
+                    log.warning("SilentMode COM still busy after 6 attempts")
+                else:
+                    log.debug("SilentMode not available "
+                              "(requires Build >= 4020): %s", exc)
+                return
+
     def _retry_com(self, func, *args, max_retries=5, delay_s=2):
         """Call *func* with retry on transient COM errors (RPC_E_CALL_REJECTED).
 
@@ -1916,7 +2002,17 @@ class TcAutomationInterface:
 
     @staticmethod
     def _is_call_rejected(exc: Exception) -> bool:
-        return TcAutomationInterface._is_retryable_com_error(exc)
+        """Check specifically for RPC_E_CALL_REJECTED (modal dialog / busy).
+
+        Unlike _is_retryable_com_error this does NOT match
+        RPC_S_SERVER_UNAVAILABLE -- a dead process is not "busy".
+        """
+        if hasattr(exc, "hresult") and exc.hresult == RPC_E_CALL_REJECTED:
+            return True
+        for arg in getattr(exc, "args", ()):
+            if isinstance(arg, int) and arg == RPC_E_CALL_REJECTED:
+                return True
+        return False
 
     @staticmethod
     def _is_retryable_com_error(exc: Exception) -> bool:
@@ -1948,11 +2044,19 @@ class TcAutomationInterface:
         return False
 
     def _is_dte_alive(self) -> bool:
-        """Quick health check -- can we still talk to the DTE?"""
+        """Quick health check -- can we still talk to the DTE?
+
+        Returns True if the DTE responds OR if it rejects the call because
+        a modal dialog is open (RPC_E_CALL_REJECTED).  Only returns False
+        when the process is truly gone (RPC_S_SERVER_UNAVAILABLE, etc.).
+        """
         if not self._dte:
             return False
         try:
             _ = self._dte.MainWindow.Caption
             return True
-        except Exception:
+        except Exception as exc:
+            if self._is_call_rejected(exc):
+                log.debug("DTE alive but busy (modal dialog?): %s", exc)
+                return True
             return False
