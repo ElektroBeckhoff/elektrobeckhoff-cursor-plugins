@@ -16,7 +16,7 @@ description: >-
 Task Progress:
 - [ ] Step 1: Determine new version number
 - [ ] Step 2: Bump version in .plcproj and Global_Version.TcGVL
-- [ ] Step 3: Reload solution (structural change)
+- [ ] Step 3: Reload (only because `.plcproj` version was bumped)
 - [ ] Step 4: Validate (0 errors required)
 - [ ] Step 5: Export library files
 - [ ] Step 6: Create changelog
@@ -70,14 +70,16 @@ END_VAR
 
 Both must match exactly.
 
-## Step 3: Reload Solution
+## Step 3: Reload Solution (because `.plcproj` changed)
 
-The `.plcproj` version change is a structural change — XAE needs a reload:
+Version bump edits `.plcproj` — that is the **only** reason to reload. Do not reload for source-only edits.
 
 ```
-twincat_open(path="<path to .plcproj, .sln, or project folder>")
+twincat_open(path="<path to .sln preferred, or .plcproj / folder>")
 twincat_reload()
 ```
+
+Optional `xae_version="4024"` / `"4026"` only if the user requires a specific shell. If the solution is already open, ROT attach is used (no duplicate window).
 
 ## Step 4: Validate
 
@@ -87,21 +89,20 @@ The project must compile with **0 errors** before export:
 twincat_check_all_objects()
 ```
 
-The response includes all errors, warnings, and infos automatically.
-
-If errors exist, fix them and re-check. Do NOT proceed to export with errors.
-
-Warnings are acceptable but should be reviewed.
+Require `error_count: 0`. The response includes errors, warnings, and infos. Do NOT proceed to export with errors. Warnings are acceptable but should be reviewed.
 
 ## Step 5: Export Library
 
+Requires an open XAE session (`twincat_open` already done). Title/version are read from `.plcproj`.
+`twincat_export_library` runs CheckAllObjects again and fails if any errors remain.
+
 ```
-twincat_export_library(plcproj_path="<path>")
+twincat_export_library()
 ```
 
-This exports to `Versions/<version>/`:
-- `<Title>-<Version>.library` — source library (installable in TwinCAT)
-- `<Title>-<Version>.compiled-library` — precompiled library
+Optional: `plcproj_path="<path>"` if auto-detect fails; `output_dir` defaults to `<git_repo>/Versions/<ProjectVersion>/`.
+
+Defaults: export both `.library` and `.compiled-library`; install only `.library` into the local TwinCAT repo (`install_compiled_library=false`). Optional flags: `library`, `compiled_library`, `install_library`, `install_compiled_library`.
 
 Verify the response shows both files with non-zero sizes.
 
@@ -117,7 +118,7 @@ Key points:
 
 ## Session Handling
 
-Do **not** call `twincat_close()` after a release. Leave the XAE session open — it will be reused automatically. Only use `twincat_close()` if XAE is unresponsive or the user explicitly asks to close it.
+Do **not** call `twincat_close()` after a release. Leave the XAE session open — the next `twincat_open` re-attaches via ROT by solution path (safe with multiple XAE windows). Only use `twincat_close()` if XAE is unresponsive or the user explicitly asks to close it.
 
 ## Release Checklist
 

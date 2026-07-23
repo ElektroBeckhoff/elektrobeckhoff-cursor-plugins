@@ -17,6 +17,6 @@ Convert TwinCAT 3 FBD/FUP and CFC .TcPOU implementations to functionally identic
 1. **Analyze:** `twincat_migrate(input="<path>", analyze_only=true, recursive=true)`
 2. **Preview:** `twincat_migrate(input="<path>", dry_run=true, recursive=true)` -- verify 0 errors
 3. **Migrate:** `twincat_migrate(input="<path>", recursive=true)` -- user chooses mode
-4. **Verify:** `twincat_check_all_objects` + search for `TODO [FBD Migration]` / `TODO [CFC Migration]`
+4. **Verify:** Search for `TODO [FBD Migration]` / `TODO [CFC Migration]`. Do **not** run `twincat_open` / `twincat_check_all_objects` unless the user explicitly asks to compile / validate thoroughly.
 
 Do NOT skip steps 1 and 2 unless the user explicitly requests it.

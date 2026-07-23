@@ -1,5 +1,5 @@
 ---
-description: Safety rules for FBD/FUP and CFC to ST migration. Enforces preview-first workflow, backup requirements, TODO reporting, and post-migration verification. Applies to twincat_fup_migrate, twincat_cfc_migrate, and twincat_migrate.
+description: Safety rules for FBD/FUP and CFC to ST migration. Enforces preview-first workflow, backup requirements, TODO reporting, and post-migration checks. XAE compile only when the user explicitly asks. Applies to twincat_fup_migrate, twincat_cfc_migrate, and twincat_migrate.
 ---
 
 # TwinCAT Migration Safety Rules
@@ -48,13 +48,16 @@ The tools automatically skip files with unsupported implementation types:
 
 Do not attempt to force migration of skipped files. Report them as skipped.
 
-## Rule 7: Verify after migration
+## Rule 7: Post-migration checks (no automatic XAE compile)
 
-After any non-dry-run migration, recommend:
-1. `twincat_open(path="<.plcproj, .sln, or folder>")`
-2. `twincat_check_all_objects` (errors included in response)
-3. Search for TODO markers
-4. For CFC migrations: verify execution order matches original CFC behavior
+After any non-dry-run migration:
+1. Search for TODO markers (`TODO [FBD Migration]` / `TODO [CFC Migration]`)
+2. For CFC: warn about execution-order caveats (Rule 11)
+
+Do **not** call `twincat_open` / `twincat_check_all_objects` unless the user **explicitly** asks to compile / validate / check thoroughly in XAE. Then:
+1. `twincat_open(path="<.sln preferred, or .plcproj / folder>")`
+2. `twincat_check_all_objects`
+3. Report `error_count` / `warnings[]`
 
 ## Rule 8: Respect strict for safety-critical projects
 

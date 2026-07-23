@@ -119,6 +119,7 @@ def twincat_open(
     sln_path: str = "",
     proj_name: str = "",
     timeout_seconds: int = 180,
+    xae_version: str = "",
 ) -> str:
     """Open a TwinCAT solution in XAE and locate the PLC project.
 
@@ -133,12 +134,27 @@ def twincat_open(
     Legacy parameters (plcproj_path, sln_path, proj_name) are still
     supported for backward compatibility but 'path' is preferred.
 
+    xae_version (optional): which TwinCAT XAE shell to use.
+      - \"4024\" or \"15.0\" -> TcXaeShell 4024 (VS2017)
+      - \"4026\" or \"17.0\" -> TcXaeShell 4026 (VS2022)
+      - empty (default): attach to a running instance that already has
+        the solution; if starting new, prefer an already-running shell
+        version, else the newest registered ProgID.
+
     Behaviour:
+      - Searches ALL running XAE instances (ROT) for the matching solution
+        -- required when multiple solutions are open.
       - If XAE is running with the correct solution: reuse it.
       - If XAE is running with a different solution: start a
         separate XAE instance (the user's solution stays open).
       - If XAE is running with no solution: open the requested one.
       - If XAE is not running: start a new instance."""
+
+    resolved_sln = ""
+    if path and path.lower().endswith(".sln"):
+        resolved_sln = os.path.abspath(path)
+    elif sln_path:
+        resolved_sln = os.path.abspath(sln_path)
 
     if path:
         resolved = _resolve_path(path)
@@ -160,10 +176,11 @@ def twincat_open(
 
     try:
         return _json(bridge.open_solution(
-            sln_path=sln_path or None,
+            sln_path=resolved_sln or sln_path or None,
             plcproj_path=plcproj_path or None,
             proj_name=proj_name or None,
             timeout_s=timeout_seconds,
+            xae_version=xae_version or None,
         ))
     except Exception as exc:
         return _json({"success": False, "error": str(exc)})
@@ -177,16 +194,12 @@ def twincat_open(
 def twincat_reload(timeout_seconds: int = 180) -> str:
     """Reload the TwinCAT solution from disk (close without save, reopen).
 
-    NOT needed after editing .TcPOU / .TcDUT / .TcGVL content --
+    ONLY required after the .plcproj file was changed (version bump,
+    added/removed Compile entries, library references, plcproj sync).
+
+    NOT needed after editing .TcPOU / .TcDUT / .TcGVL / .TcIO content --
     twincat_check_all_objects re-reads those from disk automatically.
-
-    REQUIRED after changes to project structure files:
-      - .plcproj  (added/removed POUs, version changes, references)
-      - .tsproj   (project configuration changes)
-      - .sln      (solution-level changes)
-
-    Also useful when XAE is in an inconsistent state, e.g. after
-    a failed build left stale data in memory.
+    Do NOT reload for .tsproj / .sln / source-only edits.
 
     Takes ~5-10 seconds (polls for readiness instead of fixed timer).
     Requires twincat_open to have been called at least once."""
@@ -795,8 +808,10 @@ def twincat_plcproj_sync(
     directory tree. By default verifies first -- use force=true after
     adding or removing Tc* files on disk.
 
-    IMPORTANT: After syncing the .plcproj, call twincat_reload() before
-    twincat_check_all_objects() because .plcproj is a structural file.
+    IMPORTANT: After syncing the .plcproj, tell the user that XAE must
+    reload before the next compile. Do NOT call twincat_open /
+    twincat_reload / twincat_check_all_objects unless the user explicitly
+    asks to validate or compile thoroughly.
 
     Does NOT require a running TcXaeShell instance. Works on any OS.
 

@@ -25,7 +25,7 @@ Task Progress:
 - [ ] Step 1: Verify (check current state)
 - [ ] Step 2: Sync dry-run (preview changes)
 - [ ] Step 3: Sync (write changes)
-- [ ] Step 4: Reload + validate (if XAE is open)
+- [ ] Step 4: Inform user about XAE reload (optional compile only if asked)
 ```
 
 ## Step 1: Verify (check current state)
@@ -50,9 +50,9 @@ twincat_plcproj_sync(input="<path>", force=true, dry_run=true)
 
 This previews what would change without writing anything.
 
-**Why force=true?** Without force, sync only writes when verify passes (rare).
-After adding/removing files, force is needed to skip the verify gate and
-rebuild from disk.
+**Why force=true?** Without `force`, sync **aborts** when verify finds drift
+(it will not rewrite an out-of-sync plcproj). After adding/removing files,
+`force=true` skips that gate and rebuilds Compile/Folder ItemGroups from disk.
 
 ## Step 3: Sync (write changes)
 
@@ -73,19 +73,18 @@ Also fixes missing/duplicate/invalid Id attributes in Tc* source files.
 twincat_plcproj_sync(input="<path>", force=true, backup=false)
 ```
 
-## Step 4: Reload + validate
+## Step 4: After `.plcproj` write — inform, do not auto-compile
 
-> **CRITICAL:** The .plcproj is a structural file. After modifying it,
-> XAE must reload the solution before compiling.
+Because `.plcproj` changed, XAE needs a **reload** before the next compile. Tell the user that; they can reload in TwinCAT themselves.
 
-If XAE is open:
+Do **not** call `twincat_open` / `twincat_reload` / `twincat_check_all_objects` unless the user **explicitly** asks to validate / compile thoroughly. Only then:
 ```
+twincat_open(path="<.sln preferred, or .plcproj>")
 twincat_reload()
 twincat_check_all_objects()
 ```
 
-If XAE is not open, the user will see the changes when they next open the
-solution in TwinCAT XAE.
+Never reload for `.TcPOU` / `.TcDUT` / `.TcGVL` content edits alone.
 
 ## Troubleshooting
 

@@ -28,7 +28,7 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-migration-safety` | Unified safety rules for all FBD/CFC migration (preview-first, backup, TODOs) | — | — |
 | `twincat3-fup-safety` | FBD-specific migration notes (extends migration-safety) | — | — |
 | `twincat3-cfc-safety` | CFC-specific migration notes (extends migration-safety) | — | — |
-| `twincat3-plcproj-safety` | Safety rules for PlcProject sync (verify-first, backup, reload-after-sync) | — | — |
+| `twincat3-plcproj-safety` | Safety rules for PlcProject sync (verify-first, backup; XAE compile only if user asks) | — | — |
 | `twincat3-mcp-infosys-mshc` | Offline InfoSys MSHC lookup — when and how to use the search/read tools | — | — |
 
 ## Skills
@@ -102,14 +102,14 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 | Tool | Description |
 |------|-------------|
 | `twincat_plcproj_info` | Read .plcproj metadata (title, version, company) — no XAE needed |
-| `twincat_status` | Check whether TcXaeShell is installed and running |
-| `twincat_open` | Open a TwinCAT solution in XAE, locate PLC project |
-| `twincat_reload` | Reload solution from disk (after .plcproj / .tsproj changes) |
+| `twincat_status` | XAE installed? Running instances summarized in `message` |
+| `twincat_open` | Open / attach solution (ROT multi-instance; optional `xae_version`) |
+| `twincat_reload` | Reload solution from disk — only after `.plcproj` was changed |
 | `twincat_check_all_objects` | Compile ALL objects — primary validation for libraries |
-| `twincat_build` | Rebuild the TwinCAT solution |
-| `twincat_get_output_log` | Read structured build/check output (errors, warnings, infos) |
-| `twincat_export_library` | Export .library and .compiled-library, install to local repo |
-| `twincat_close` | Close solution and release COM resources |
+| `twincat_build` | Incremental build (`full_rebuild=true` for clean rebuild) |
+| `twincat_get_output_log` | Re-read build pane (usually unnecessary after check/build) |
+| `twincat_export_library` | Export .library / .compiled-library (requires prior `twincat_open`) |
+| `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
 | `twincat_fup_migrate` | Convert FBD/FUP .TcPOU to Structured Text — no XAE needed |
 | `twincat_cfc_migrate` | Convert CFC .TcPOU to Structured Text — no XAE needed |
 | `twincat_migrate` | Auto-detect FBD/CFC and convert to ST in one pass — no XAE needed |

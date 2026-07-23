@@ -11,59 +11,44 @@ alwaysApply: false
 
 | Tool | Purpose |
 |------|---------|
-| `twincat_status` | Check if XAE is installed / running |
-| `twincat_open` | Open solution in XAE, locate PLC project |
-| `twincat_check_all_objects` | Compile ALL objects — returns `error_count`, `warning_count`, `errors[]`, `warnings[]`, `infos[]` directly |
-| `twincat_build` | Full rebuild of the solution |
-| `twincat_get_output_log` | Read errors/warnings from last `twincat_build` (not needed after `twincat_check_all_objects`) |
-| `twincat_reload` | Close + reopen solution (re-reads structural files from disk) |
-| `twincat_export_library` | Export `.library` + `.compiled-library` |
-| `twincat_close` | Release session (never closes user solutions) |
+| `twincat_status` | XAE installed? Running instances summarized in `message` (ROT) |
+| `twincat_open` | Open / attach solution; locate PLC project |
+| `twincat_check_all_objects` | Compile ALL objects — includes `errors[]`, `warnings[]`, `infos[]` |
+| `twincat_build` | Incremental build (`full_rebuild=true` for RebuildSolution) |
+| `twincat_get_output_log` | Re-read build pane only — not needed after check/build |
+| `twincat_reload` | Close+reopen solution — **only** after `.plcproj` was changed |
+| `twincat_export_library` | Export `.library` / `.compiled-library` (needs prior `twincat_open`) |
+| `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
 
-### No XAE needed (pure file operations)
+### No XAE needed
 
 | Tool | Purpose |
 |------|---------|
 | `twincat_plcproj_info` | Read version/title from `.plcproj` |
-| `twincat_plcproj_verify` | Verify `.plcproj` matches disk |
-| `twincat_plcproj_sync` | Sync `.plcproj` from disk — force/dry-run/backup |
-| `twincat_migrate` | Auto-detect FBD/CFC, convert to ST in one pass |
-| `twincat_fup_migrate` | Convert FBD/FUP to ST |
-| `twincat_cfc_migrate` | Convert CFC to ST |
+| `twincat_plcproj_verify` / `twincat_plcproj_sync` | plcproj ↔ disk |
+| `twincat_migrate` / `twincat_fup_migrate` / `twincat_cfc_migrate` | FBD/CFC → ST |
+| `twincat_infosys_mshc_search` / `_read` | Offline InfoSys |
 
-### Offline documentation lookup (no XAE, no internet)
+## Validation (short)
 
-| Tool | Purpose |
-|------|---------|
-| `twincat_infosys_mshc_search` | Search local InfoSys offline docs (.mshc) -- BM25 fulltext, prefix, phrase search |
-| `twincat_infosys_mshc_read` | Read a specific page with structured extraction (syntax, I/O, methods, requirements) |
+1. `twincat_open(path="<.sln preferred | .plcproj | folder>")`
+2. `twincat_check_all_objects`
+3. Fix → repeat step 2
 
-## When to Validate
+Detailed workflow: skill `twincat3-validate`.
 
-After editing `.TcPOU`, `.TcDUT`, or `.TcGVL` files, validate with:
+## Critical Rules for `twincat_open`
 
-1. `twincat_open(path="<.plcproj, .sln, or folder>")` — resolves everything automatically
-2. `twincat_check_all_objects` — errors, warnings, and infos are included in the response
-3. Fix errors → repeat from step 2
+- Prefer **`.sln`** when known (best multi-instance attach). `.plcproj` / folder also work.
+- Multi-PLC solutions: tool returns the project list — pass the exact `.plcproj`.
+- **ROT attach:** finds the running XAE that already has this solution (TE1000 pattern). Does not start a duplicate only because another window is active.
+- **`xae_version`** (optional): `"4024"`/`"15.0"` or `"4026"`/`"17.0"`. Use only when the user asks or a specific shell is required.
+  - Empty: attach to matching open solution; if creating new, prefer an already-running shell version, else newest registered.
+  - If the solution is **already open** in another shell version, attach to that instance (no duplicate) even when `xae_version` differs.
+- Check response: `success`, `created_new_instance`, `xae_version`, `xae_prog_id`, `solution_path`. Unexpected `created_new_instance=true` when the project was already open → report, do not ignore.
+- Content edits (`.TcPOU`/`.TcDUT`/`.TcGVL`): **no** reload. Reload **only** if `.plcproj` changed: `twincat_open` (if needed) → `twincat_reload` → check.
+- Libraries → `twincat_check_all_objects`. Apps/boot → `twincat_build`.
 
-`twincat_get_output_log` is only needed after `twincat_build`. Do NOT call it after `twincat_check_all_objects`.
+## Session
 
-For the detailed workflow, use the `twincat3-validate` skill.
-
-## Critical Rules
-
-- **Use `path` parameter** for `twincat_open`. Accepts `.plcproj`, `.sln`, or a folder. The tool resolves the PLC project via XML parsing (.sln → .tsproj → .xti → .plcproj).
-- **Multi-project solutions**: If multiple PLC projects exist, the tool returns an error with the full list. Pick the correct `.plcproj` and pass it directly.
-- **No `twincat_reload` needed** after editing `.TcPOU` / `.TcDUT` / `.TcGVL` content — `twincat_check_all_objects` reads directly from disk.
-- **`twincat_reload` IS required** after structural changes to `.plcproj`, `.tsproj`, or `.sln` (added/removed files, version bumps, library references).
-- **Use `twincat_check_all_objects`** for library projects — it compiles every object. A normal `twincat_build` only compiles objects reachable from MAIN.
-
-## Do NOT call `twincat_close`
-
-The TwinCAT XAE solution should **stay open** between tool calls. Starting XAE and loading a solution takes significant time (~10-30 s), so keeping the session alive avoids unnecessary delays.
-
-**Never call `twincat_close`** unless:
-- TwinCAT XAE is completely unresponsive (COM calls time out or crash repeatedly).
-- The user explicitly asks to close or quit XAE.
-
-In normal workflows (validate, build, export, reload) simply leave the session open. The next `twincat_open` call will reuse the running instance automatically.
+Do **not** call `twincat_close` unless XAE is unresponsive or the user asks. Keep the session open; the next `twincat_open` re-attaches via ROT by solution path. Optional `force_quit=true` terminates XAE even when MCP only attached — use with caution.

@@ -14,7 +14,7 @@ Verify that the TwinCAT .plcproj matches the files on disk, and rebuild it if ne
 
 ## Mandatory Workflow
 
-1. **Verify:** `twincat_plcproj_verify` -- check current drift
-2. **Preview:** `twincat_plcproj_sync(force=true, dry_run=true)` -- preview changes
-3. **Sync:** `twincat_plcproj_sync(force=true)` -- write changes
-4. **Reload:** `twincat_reload` before `twincat_check_all_objects`
+1. **Verify:** `twincat_plcproj_verify(input="<path>")` -- check current drift
+2. **Preview:** `twincat_plcproj_sync(input="<path>", force=true, dry_run=true)` -- preview changes
+3. **Sync:** `twincat_plcproj_sync(input="<path>", force=true)` -- write changes
+4. **Inform:** Tell the user XAE must reload after `.plcproj` change. Do **not** run `twincat_open` / `twincat_reload` / `twincat_check_all_objects` unless the user explicitly asks to compile / validate thoroughly.

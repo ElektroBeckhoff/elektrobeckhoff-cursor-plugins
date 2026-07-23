@@ -1,5 +1,5 @@
 ---
-description: Safety rules for PlcProject sync operations. Enforces verify-first workflow, backup requirements, and reload-after-sync.
+description: Safety rules for PlcProject sync operations. Enforces verify-first workflow, backup requirements, and optional XAE validate only when the user asks.
 ---
 
 # TwinCAT PlcProject Sync Safety
@@ -22,9 +22,14 @@ The combination `force=true` + `backup=false` overwrites the .plcproj with no re
 
 Default is `backup=true` -- always keep it unless the user asks otherwise.
 
-## Rule 4: Reload after sync
+## Rule 4: After sync — tell the user; do not auto-compile
 
-After `twincat_plcproj_sync` modifies the .plcproj, ALWAYS call `twincat_reload()` before `twincat_check_all_objects()`. The .plcproj is a structural file that requires a solution reload -- unlike .TcPOU content changes which are read from disk automatically.
+After `twincat_plcproj_sync` modifies the `.plcproj`, tell the user that XAE must reload the solution before the next compile (reload is required **only** because `.plcproj` changed).
+
+Do **not** call `twincat_open` / `twincat_reload` / `twincat_check_all_objects` unless the user **explicitly** asks to validate / compile / check thoroughly in XAE. Then:
+1. `twincat_open(path="<.sln preferred>")`
+2. `twincat_reload()`
+3. `twincat_check_all_objects()`
 
 ## Rule 5: Report drift clearly
 

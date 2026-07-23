@@ -31,6 +31,32 @@ _DEFAULT_PROG_ID = f"{_PROG_ID_PREFIX}17.0"
 # Backward-compatible alias for callers/tests that import PROG_ID.
 PROG_ID = _DEFAULT_PROG_ID
 
+# TwinCAT build -> VS DTE ProgID (common aliases accepted by twincat_open)
+_XAE_VERSION_ALIASES = {
+    "4026": f"{_PROG_ID_PREFIX}17.0",
+    "4024": f"{_PROG_ID_PREFIX}15.0",
+    "17.0": f"{_PROG_ID_PREFIX}17.0",
+    "15.0": f"{_PROG_ID_PREFIX}15.0",
+    "17": f"{_PROG_ID_PREFIX}17.0",
+    "15": f"{_PROG_ID_PREFIX}15.0",
+}
+
+_PROG_ID_TO_TC_VERSION = {
+    f"{_PROG_ID_PREFIX}17.0": "4026",
+    f"{_PROG_ID_PREFIX}15.0": "4024",
+}
+
+
+def _prog_id_version_key(prog_id: str) -> tuple[int, ...]:
+    suffix = prog_id[len(_PROG_ID_PREFIX):] if prog_id.startswith(_PROG_ID_PREFIX) else prog_id
+    parts: list[int] = []
+    for piece in suffix.split("."):
+        try:
+            parts.append(int(piece))
+        except ValueError:
+            parts.append(-1)
+    return tuple(parts)
+
 
 def _discover_registered_prog_ids() -> list[str]:
     """Return registered TcXaeShell DTE ProgIDs, newest VS version first."""
@@ -58,31 +84,69 @@ def _discover_registered_prog_ids() -> list[str]:
     except OSError:
         pass
 
-    def _version_key(prog_id: str) -> tuple[int, ...]:
-        suffix = prog_id[len(_PROG_ID_PREFIX):]
-        parts: list[int] = []
-        for piece in suffix.split("."):
-            try:
-                parts.append(int(piece))
-            except ValueError:
-                parts.append(-1)
-        return tuple(parts)
-
-    found.sort(key=_version_key, reverse=True)
+    found.sort(key=_prog_id_version_key, reverse=True)
     return found
+
+
+def _normalize_xae_version(version: Optional[str]) -> Optional[str]:
+    """Map a user-facing XAE version string to a registered ProgID.
+
+    Accepts: ``4024``, ``4026``, ``15.0``, ``17.0``, ``TcXaeShell.DTE.17.0``.
+    Returns ``None`` when *version* is empty.  Raises ``ValueError`` when
+    a non-empty value cannot be resolved to a registered ProgID.
+    """
+    if version is None:
+        return None
+    raw = str(version).strip()
+    if not raw:
+        return None
+
+    registered = _discover_registered_prog_ids()
+    lower = raw.lower()
+
+    if lower in {p.lower() for p in registered}:
+        for p in registered:
+            if p.lower() == lower:
+                return p
+
+    alias = _XAE_VERSION_ALIASES.get(lower)
+    if alias and alias in registered:
+        return alias
+    if alias:
+        return alias  # may still work via CoCreate even if discovery missed it
+
+    # Allow bare VS version suffix matching registered ProgIDs
+    for p in registered:
+        if p.lower().endswith("." + lower) or p[len(_PROG_ID_PREFIX):].lower() == lower:
+            return p
+
+    raise ValueError(
+        f"Unknown XAE version '{version}'. "
+        f"Use 4024, 4026, 15.0, 17.0, or a ProgID. "
+        f"Registered: {registered or ['(none)']}"
+    )
+
+
+def _tc_version_label(prog_id: Optional[str]) -> str:
+    """Human-readable TwinCAT build label for a ProgID (e.g. '4026')."""
+    if not prog_id:
+        return ""
+    return _PROG_ID_TO_TC_VERSION.get(prog_id, prog_id)
 
 
 def _resolve_prog_id(preferred: Optional[str] = None) -> str:
     """Pick the best TcXaeShell ProgID for COM access.
 
     Priority:
-      1. Explicit preferred ProgID when registered
-      2. Running ROT instance (newest registered version first)
+      1. Explicit preferred ProgID when registered (or as given)
+      2. Running ROT instance (newest registered version first among running)
       3. Newest registered ProgID
       4. Default fallback (_DEFAULT_PROG_ID)
     """
     registered = _discover_registered_prog_ids()
-    if preferred and preferred in registered:
+    if preferred:
+        if preferred in registered:
+            return preferred
         return preferred
 
     for prog_id in registered:
@@ -94,7 +158,7 @@ def _resolve_prog_id(preferred: Optional[str] = None) -> str:
 
     if registered:
         return registered[0]
-    return preferred or _DEFAULT_PROG_ID
+    return _DEFAULT_PROG_ID
 
 
 def _canonical_path(p: str) -> str:
@@ -148,6 +212,8 @@ class OpenResult:
     solution_path: str = ""
     plc_project_name: str = ""
     created_new_instance: bool = False
+    xae_prog_id: str = ""
+    xae_version: str = ""
     message: str = ""
 
 @dataclass
@@ -615,6 +681,135 @@ class TcAutomationInterface:
             self._prog_id = _resolve_prog_id()
         return self._prog_id
 
+    def _enumerate_rot_dtes(self, prog_id_filter: Optional[str] = None):
+        """Yield ``(prog_id, moniker_name, dte)`` for every running TcXaeShell.
+
+        TcXaeShell registers ROT monikers as ``!TcXaeShell.DTE.X.Y:pid``.
+        ``GetActiveObject`` only returns one instance per ProgID; ROT
+        enumeration is required when multiple solutions are open.
+        """
+        if not HAS_WIN32:
+            return
+        try:
+            rot = pythoncom.GetRunningObjectTable()
+            enum = rot.EnumRunning()
+            ctx = pythoncom.CreateBindCtx(0)
+        except Exception as exc:
+            log.debug("ROT enumeration unavailable: %s", exc)
+            return
+
+        prefix = f"!{_PROG_ID_PREFIX}"
+        while True:
+            try:
+                mons = enum.Next(1)
+            except Exception:
+                break
+            if not mons:
+                break
+            try:
+                name = mons[0].GetDisplayName(ctx, None)
+            except Exception:
+                continue
+            if not name.startswith(prefix):
+                continue
+            # "!TcXaeShell.DTE.17.0:23572" -> "TcXaeShell.DTE.17.0"
+            body = name[1:]
+            prog_id = body.split(":", 1)[0]
+            if prog_id_filter and prog_id != prog_id_filter:
+                continue
+            try:
+                obj = rot.GetObject(mons[0])
+                dte = win32com.client.Dispatch(
+                    obj.QueryInterface(pythoncom.IID_IDispatch)
+                )
+                yield prog_id, name, dte
+            except Exception as exc:
+                log.debug("ROT GetObject failed for %s: %s", name, exc)
+
+    def _read_dte_solution_path(self, dte) -> tuple[bool, str]:
+        """Return ``(is_open, canonical_sln_path)`` for a DTE instance."""
+        try:
+            is_open = bool(dte.Solution.IsOpen)
+            if not is_open:
+                return False, ""
+            return True, _canonical_path(str(dte.Solution.FullName))
+        except Exception as exc:
+            if self._is_call_rejected(exc):
+                try:
+                    is_open = self._retry_com(
+                        lambda: bool(dte.Solution.IsOpen),
+                        max_retries=5, delay_s=1,
+                    )
+                    if not is_open:
+                        return False, ""
+                    return True, _canonical_path(str(self._retry_com(
+                        lambda: dte.Solution.FullName,
+                        max_retries=3, delay_s=1,
+                    )))
+                except Exception:
+                    return False, ""
+            return False, ""
+
+    def _find_dte_by_solution(
+        self,
+        norm_sln: str,
+        prog_id_filter: Optional[str] = None,
+    ):
+        """Find a running XAE whose open solution matches *norm_sln*.
+
+        Returns ``(prog_id, dte)`` or ``(None, None)``.
+        """
+        if not norm_sln:
+            return None, None
+        for prog_id, moniker, dte in self._enumerate_rot_dtes(prog_id_filter):
+            is_open, actual = self._read_dte_solution_path(dte)
+            if is_open and actual == norm_sln:
+                log.info("ROT match: %s has solution '%s'", moniker, norm_sln)
+                return prog_id, dte
+        return None, None
+
+    def _find_empty_dte(self, prog_id_filter: Optional[str] = None):
+        """Find a running XAE with no solution open.
+
+        Returns ``(prog_id, dte)`` or ``(None, None)``.
+        When *prog_id_filter* is None, prefers newer registered versions.
+        """
+        candidates = list(self._enumerate_rot_dtes(prog_id_filter))
+        if not prog_id_filter:
+            candidates.sort(
+                key=lambda t: _prog_id_version_key(t[0]), reverse=True,
+            )
+        for prog_id, moniker, dte in candidates:
+            is_open, _ = self._read_dte_solution_path(dte)
+            if not is_open:
+                log.info("ROT empty instance: %s", moniker)
+                return prog_id, dte
+        return None, None
+
+    def _prefer_running_prog_id(
+        self, preferred: Optional[str] = None,
+    ) -> Optional[str]:
+        """Pick ProgID for a *new* instance when none was requested.
+
+        Priority:
+          1. Explicit *preferred*
+          2. A version that is already running (newest among running)
+          3. None (caller falls back to newest registered)
+        """
+        if preferred:
+            return preferred
+        running: set[str] = set()
+        for prog_id, _, _ in self._enumerate_rot_dtes():
+            running.add(prog_id)
+        if not running:
+            return None
+        for prog_id in _discover_registered_prog_ids():
+            if prog_id in running:
+                log.info("Preferring already-running XAE version %s (%s)",
+                         _tc_version_label(prog_id), prog_id)
+                return prog_id
+        return next(iter(running))
+
     def _try_get_active_dte(self, prog_id: Optional[str] = None):
         """Attach to a running TcXaeShell ROT instance, if available."""
         candidates = [prog_id] if prog_id else _discover_registered_prog_ids()
@@ -637,6 +832,32 @@ class TcAutomationInterface:
             except Exception as exc:
                 log.debug("GetActiveObject(%s) failed: %s", candidate, exc)
         return None
+
+    def _attach_dte(self, dte, prog_id: str, created_new: bool = False):
+        """Bind *dte* as the active session and enable SilentMode."""
+        self._dte = dte
+        self._prog_id = prog_id
+        self._created_new = created_new
+        self._ensure_silent_mode()
+
+    def _open_result(
+        self,
+        success: bool,
+        message: str,
+        *,
+        created_new: bool = False,
+        solution_path: str = "",
+        plc_name: str = "",
+    ) -> OpenResult:
+        return OpenResult(
+            success=success,
+            solution_path=solution_path or (self._sln_path or ""),
+            plc_project_name=plc_name,
+            created_new_instance=created_new,
+            xae_prog_id=self._prog_id or "",
+            xae_version=_tc_version_label(self._prog_id),
+            message=message,
+        )
 
     def _create_dte_from_prog_id(self, prog_id: str):
         """Create a new out-of-process DTE for the given ProgID."""
@@ -669,10 +890,11 @@ class TcAutomationInterface:
         plcproj_path: Optional[str] = None,
         proj_name: Optional[str] = None,
         timeout_s: int = 180,
+        xae_version: Optional[str] = None,
     ) -> OpenResult:
         return self._call_sta(
             self._impl_open_solution,
-            sln_path, plcproj_path, proj_name, timeout_s,
+            sln_path, plcproj_path, proj_name, timeout_s, xae_version,
             timeout=timeout_s + 60,
         )
 
@@ -728,31 +950,57 @@ class TcAutomationInterface:
         cached_slns = list(self._instances.keys())
         registered = _discover_registered_prog_ids()
 
-        # Try attaching to any running instance (newest shell first)
+        # Enumerate ALL running instances via ROT (not just GetActiveObject)
+        running: list[dict] = []
+        for prog_id, moniker, dte in self._enumerate_rot_dtes():
+            is_open, sln = self._read_dte_solution_path(dte)
+            running.append({
+                "prog_id": prog_id,
+                "xae_version": _tc_version_label(prog_id),
+                "moniker": moniker,
+                "solution_path": sln if is_open else "",
+            })
+
+        if running:
+            primary = running[0]
+            plc = ""
+            if self._plc_proj_item and self._dte:
+                try:
+                    plc = str(self._plc_proj_item.Name)
+                except Exception:
+                    plc = ""
+            versions = ", ".join(
+                f"{r['xae_version'] or r['prog_id']}"
+                f"{'=' + os.path.basename(r['solution_path']) if r['solution_path'] else '=empty'}"
+                for r in running
+            )
+            msg = (
+                f"TcXaeShell running: {len(running)} instance(s) [{versions}]"
+            )
+            if cached_slns:
+                msg += f" | {len(cached_slns)} cached"
+            return StatusResult(
+                xae_available=True,
+                running_instance=True,
+                solution_path=primary["solution_path"],
+                plc_project_name=plc,
+                message=msg,
+            )
+
+        # Fallback probe via GetActiveObject
         for prog_id in registered:
             try:
                 dte = win32com.client.GetActiveObject(prog_id)
                 sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
-                plc = ""
-                if self._plc_proj_item and self._dte:
-                    try:
-                        plc = str(self._plc_proj_item.Name)
-                    except Exception:
-                        plc = ""
-                msg = f"TcXaeShell is running ({prog_id})"
-                if cached_slns:
-                    msg += f" | {len(cached_slns)} cached instance(s)"
                 return StatusResult(
                     xae_available=True,
                     running_instance=True,
                     solution_path=sln,
-                    plc_project_name=plc,
-                    message=msg,
+                    message=f"TcXaeShell is running ({prog_id})",
                 )
             except Exception as exc:
                 log.debug("GetActiveObject probe failed for %s: %s", prog_id, exc)
 
-        # Check whether any shell COM class is registered
         if registered:
             return StatusResult(
                 xae_available=True,
@@ -772,8 +1020,20 @@ class TcAutomationInterface:
 
     def _impl_open_solution(
         self, sln_path, plcproj_path, proj_name, timeout_s,
+        xae_version=None,
     ) -> OpenResult:
         self._prune_stale_instances()
+
+        preferred_prog_id: Optional[str] = None
+        if xae_version:
+            try:
+                preferred_prog_id = _normalize_xae_version(xae_version)
+            except ValueError as exc:
+                return self._open_result(False, str(exc))
+            if preferred_prog_id:
+                self._ensure_prog_id(preferred_prog_id)
+                log.info("XAE version requested: %s (%s)",
+                         xae_version, preferred_prog_id)
 
         if plcproj_path:
             self._plcproj_file_path = plcproj_path
@@ -783,120 +1043,155 @@ class TcAutomationInterface:
             expected_sln = self._find_sln_near(plcproj_path)
 
         if expected_sln and not os.path.isfile(expected_sln):
-            return OpenResult(
-                success=False,
-                message=f"Solution file not found: {expected_sln}",
+            return self._open_result(
+                False, f"Solution file not found: {expected_sln}",
             )
 
         norm_expected = (
             _canonical_path(expected_sln) if expected_sln else ""
         )
 
-        # 1. Try attaching to a running instance
-        if not self._dte:
-            self._dte = self._try_get_active_dte()
-            if self._dte:
-                self._created_new = False
-                log.info("Attached to running TcXaeShell (%s)", self._prog_id)
-                self._ensure_silent_mode()
-
-        # 2. If attached, check whether the loaded solution matches
+        # 0. If we already hold a DTE, verify it still matches
         if self._dte and norm_expected:
-            current_sln = ""
-            sln_is_open = False
-            dte_is_alive = True
-            try:
-                sln_is_open = bool(self._dte.Solution.IsOpen)
-                if sln_is_open:
-                    current_sln = _canonical_path(
-                        str(self._dte.Solution.FullName)
-                    )
-            except Exception as exc:
-                if self._is_call_rejected(exc):
-                    log.warning("DTE busy (modal dialog?) during solution "
-                                "check -- retrying via _retry_com")
-                    try:
-                        sln_is_open = self._retry_com(
-                            lambda: bool(self._dte.Solution.IsOpen),
-                            max_retries=10, delay_s=3,
-                        )
-                        if sln_is_open:
-                            current_sln = _canonical_path(
-                                str(self._retry_com(
-                                    lambda: self._dte.Solution.FullName,
-                                    max_retries=5, delay_s=2,
-                                ))
-                            )
-                    except Exception:
-                        dte_is_alive = False
-                        log.warning("DTE still unreachable after retries "
-                                    "-- dropping reference")
-                        self._dte = None
-                else:
-                    dte_is_alive = False
-                    log.warning("DTE appears stale (Solution inaccessible) "
-                                "-- dropping reference")
-                    self._dte = None
-
-            if not self._dte:
-                pass  # fall through to step 3
-            elif not sln_is_open and dte_is_alive:
-                log.info("XAE running but no solution open -- opening %s",
-                         expected_sln)
-                self._dte.Solution.Open(expected_sln)
-                self._wait_for_solution_open(timeout_s)
-                self._we_opened_solution = True
-            elif current_sln == norm_expected:
-                log.info("Correct solution already open")
+            is_open, current_sln = self._read_dte_solution_path(self._dte)
+            if is_open and current_sln == norm_expected:
+                log.info("Correct solution already bound to session")
             else:
-                # Wrong solution open -- save current state, then switch.
-                raw_current = str(self._dte.Solution.FullName)
-                log.info(
-                    "XAE has '%s' open -- switching to '%s'",
-                    raw_current, expected_sln,
-                )
-                self._save_active_to_registry()
+                if self._dte and is_open:
+                    self._save_active_to_registry()
+                log.info("Active session solution mismatch -- searching ROT")
                 self._dte = None
+                self._sys_man = None
+                self._plc_proj_item = None
 
-        # 2b. Check instance registry for a cached session
+        # 1. Registry: re-attach to a previously tracked instance
         if not self._dte and norm_expected:
             if self._restore_from_registry(norm_expected):
-                return OpenResult(
-                    success=True,
-                    solution_path=self._sln_path,
-                    plc_project_name=(
+                if preferred_prog_id and self._prog_id and (
+                    self._prog_id != preferred_prog_id
+                ):
+                    log.warning(
+                        "Registry instance is %s but %s was requested -- "
+                        "keeping matching solution",
+                        self._prog_id, preferred_prog_id,
+                    )
+                return self._open_result(
+                    True,
+                    "Re-attached to existing XAE instance",
+                    plc_name=(
                         str(self._plc_proj_item.Name)
                         if self._plc_proj_item else ""
                     ),
-                    created_new_instance=False,
-                    message="Re-attached to existing XAE instance",
                 )
 
-        # 3. No XAE available -> start a new instance
+        # 2. ROT: find ANY running instance that already has this solution
+        #    (fixes multi-instance: GetActiveObject only sees one DTE)
+        if not self._dte and norm_expected:
+            # Prefer requested version when both have it (unlikely), else any
+            prog_id, dte = (None, None)
+            if preferred_prog_id:
+                prog_id, dte = self._find_dte_by_solution(
+                    norm_expected, preferred_prog_id,
+                )
+            if not dte:
+                prog_id, dte = self._find_dte_by_solution(norm_expected)
+            if dte and prog_id:
+                if preferred_prog_id and prog_id != preferred_prog_id:
+                    log.warning(
+                        "Solution is open in %s (%s), not requested %s -- "
+                        "attaching to the running instance",
+                        _tc_version_label(prog_id), prog_id,
+                        preferred_prog_id,
+                    )
+                self._attach_dte(dte, prog_id, created_new=False)
+                self._we_opened_solution = False
+                log.info("Attached to ROT instance with matching solution (%s)",
+                         prog_id)
+
+        # 3. ROT: empty instance of preferred / already-running version
+        if not self._dte and expected_sln:
+            empty_filter = preferred_prog_id or self._prefer_running_prog_id()
+            prog_id, dte = self._find_empty_dte(empty_filter)
+            if not dte and preferred_prog_id:
+                # No empty of preferred version -- don't steal another version's empty
+                pass
+            elif not dte and empty_filter:
+                prog_id, dte = self._find_empty_dte(None)
+            if dte and prog_id:
+                self._attach_dte(dte, prog_id, created_new=False)
+                log.info("XAE running but no solution open -- opening %s",
+                         expected_sln)
+                try:
+                    self._retry_com(
+                        self._dte.Solution.Open, expected_sln,
+                        max_retries=5, delay_s=2,
+                    )
+                    self._wait_for_solution_open(timeout_s)
+                    self._we_opened_solution = True
+                except Exception as exc:
+                    log.warning("Failed to open solution in empty XAE: %s", exc)
+                    self._dte = None
+
+        # 4. Fallback: GetActiveObject (single instance per ProgID)
+        if not self._dte:
+            attach_prog = preferred_prog_id or self._prefer_running_prog_id()
+            dte = self._try_get_active_dte(attach_prog)
+            if dte:
+                self._attach_dte(dte, self._prog_id or attach_prog or "",
+                                 created_new=False)
+                log.info("Attached to running TcXaeShell (%s)", self._prog_id)
+                if norm_expected:
+                    is_open, current_sln = self._read_dte_solution_path(self._dte)
+                    if is_open and current_sln == norm_expected:
+                        log.info("Correct solution already open")
+                    elif not is_open:
+                        log.info("XAE running but no solution open -- opening %s",
+                                 expected_sln)
+                        self._retry_com(
+                            self._dte.Solution.Open, expected_sln,
+                            max_retries=5, delay_s=2,
+                        )
+                        self._wait_for_solution_open(timeout_s)
+                        self._we_opened_solution = True
+                    else:
+                        # Wrong solution -- do NOT reuse; search already done in ROT
+                        log.info(
+                            "GetActiveObject has '%s' -- not matching '%s'; "
+                            "will start a separate instance",
+                            current_sln, expected_sln,
+                        )
+                        self._save_active_to_registry()
+                        self._dte = None
+
+        # 5. No matching XAE -> start a new instance of the right version
         if not self._dte:
             if not expected_sln:
-                return OpenResult(
-                    success=False,
-                    message="No .sln path and no running XAE instance",
+                return self._open_result(
+                    False, "No .sln path and no running XAE instance",
                 )
+            create_prog = (
+                preferred_prog_id
+                or self._prefer_running_prog_id()
+                or self._ensure_prog_id()
+            )
             try:
-                self._dte = self._create_new_dte(expected_sln, timeout_s)
+                self._dte = self._create_new_dte(
+                    expected_sln, timeout_s, prog_id=create_prog,
+                )
             except Exception as exc:
                 self._reset_state()
                 if self._is_access_denied(exc):
                     log.warning("E_ACCESSDENIED creating new XAE: %s", exc)
-                    return OpenResult(
-                        success=False,
-                        message=(
-                            "Cannot start a new XAE instance -- another "
-                            "instance is blocking COM access (E_ACCESSDENIED). "
-                            "Close the other TcXaeShell manually, or call "
-                            "twincat_close(force_quit=true) first."
-                        ),
+                    return self._open_result(
+                        False,
+                        "Cannot start a new XAE instance -- another "
+                        "instance is blocking COM access (E_ACCESSDENIED). "
+                        "Close the other TcXaeShell manually, or call "
+                        "twincat_close(force_quit=true) first.",
                     )
                 raise
 
-        # 4. Verify the correct solution is actually loaded
+        # 6. Verify the correct solution is actually loaded
         if norm_expected:
             actual = ""
             try:
@@ -906,25 +1201,20 @@ class TcAutomationInterface:
             except Exception as exc:
                 log.debug("Could not read Solution.FullName: %s", exc)
             if actual and actual != norm_expected:
-                return OpenResult(
-                    success=False,
+                return self._open_result(
+                    False,
+                    f"SOLUTION MISMATCH: Expected '{expected_sln}', "
+                    f"but XAE loaded '{self._dte.Solution.FullName}'. "
+                    f"Close TcXaeShell manually and retry.",
                     solution_path=str(self._dte.Solution.FullName),
-                    message=(
-                        f"SOLUTION MISMATCH: Expected '{expected_sln}', "
-                        f"but XAE loaded '{self._dte.Solution.FullName}'. "
-                        f"Close TcXaeShell manually and retry."
-                    ),
                 )
 
-        # 5. SystemManager
+        # 7. SystemManager
         self._sys_man = self._get_system_manager()
         if not self._sys_man:
-            return OpenResult(
-                success=False,
-                message="SystemManager not reachable",
-            )
+            return self._open_result(False, "SystemManager not reachable")
 
-        # 6. PLC project in tree
+        # 8. PLC project in tree
         if not proj_name:
             proj_name = self._guess_proj_name()
         self._plc_proj_item = self._find_plc_project_with_retry(
@@ -936,27 +1226,26 @@ class TcAutomationInterface:
                 current = str(self._dte.Solution.FullName)
             except Exception as exc:
                 log.debug("Could not read Solution.FullName: %s", exc)
-            return OpenResult(
-                success=False,
-                message=(
-                    f"PLC project '{proj_name}' not found in XAE tree. "
-                    f"Loaded solution: {current}"
-                ),
+            return self._open_result(
+                False,
+                f"PLC project '{proj_name}' not found in XAE tree. "
+                f"Loaded solution: {current}",
             )
 
         self._sln_path = str(self._dte.Solution.FullName)
         if not self._plcproj_file_path:
             self._plcproj_file_path = self._detect_plcproj_path()
         self._save_active_to_registry()
-        return OpenResult(
-            success=True,
-            solution_path=self._sln_path,
-            plc_project_name=str(self._plc_proj_item.Name),
-            created_new_instance=self._created_new,
-            message="Solution open, PLC project found",
+        return self._open_result(
+            True,
+            "Solution open, PLC project found",
+            created_new=self._created_new,
+            plc_name=str(self._plc_proj_item.Name),
         )
 
-    def _create_new_dte(self, expected_sln: str, timeout_s: int):
+    def _create_new_dte(
+        self, expected_sln: str, timeout_s: int, prog_id: Optional[str] = None,
+    ):
         """Start a truly new TcXaeShell process via CLSCTX_LOCAL_SERVER.
 
         Dispatch(prog_id) uses CLSCTX_SERVER which includes INPROC_SERVER
@@ -964,9 +1253,13 @@ class TcAutomationInterface:
         one.  Using CoCreateInstance with LOCAL_SERVER only ensures a fresh
         out-of-process DTE.
         """
-        prog_id = self._ensure_prog_id()
+        if prog_id:
+            self._prog_id = prog_id
+        else:
+            prog_id = self._ensure_prog_id()
         log.info("Creating new TcXaeShell via CoCreateInstance(LOCAL_SERVER) "
-                 "(%s) for %s", prog_id, expected_sln)
+                 "(%s / %s) for %s",
+                 prog_id, _tc_version_label(prog_id), expected_sln)
 
         self._dte = self._create_dte_from_prog_id(prog_id)
         self._created_new = True

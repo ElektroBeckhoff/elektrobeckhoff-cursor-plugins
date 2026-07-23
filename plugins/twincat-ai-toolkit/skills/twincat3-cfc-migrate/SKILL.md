@@ -78,13 +78,14 @@ Requires explicit user confirmation. Never use `backup=false` with this.
 
 ## Step 4: Post-Migration Verification
 
-After any non-dry-run migration, recommend:
-1. `twincat_open(path="<.plcproj, .sln, or folder>")`
+After any non-dry-run migration:
+1. Search for `TODO [CFC Migration]` markers in generated code
+2. Report TODO counts; warn about CFC execution-order caveats; remind the user to review runtime
+
+Do **not** open XAE or run `twincat_check_all_objects` unless the user **explicitly** asks to compile / validate thoroughly. Only then:
+1. `twincat_open(path="<.sln preferred, or .plcproj / folder>")`
 2. `twincat_check_all_objects`
-3. Review compiler errors (included in response)
-4. Search for `TODO [CFC Migration]` markers in generated code
-5. Verify execution order matches the original CFC behavior
-6. Test runtime behavior against original CFC version
+3. Review compiler errors; verify execution order vs original CFC
 
 ## Parameter Quick Reference
 

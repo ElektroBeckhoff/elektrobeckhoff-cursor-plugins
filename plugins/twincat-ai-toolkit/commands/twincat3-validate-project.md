@@ -13,6 +13,8 @@ Compile all objects in the TwinCAT PLC project and report any errors.
 
 ## Instructions
 
-Find the `.plcproj` or `.sln` in the workspace, open with `twincat_open(path="...")`, run `twincat_check_all_objects`, and report all errors with file paths and line numbers.
+Find the `.plcproj` or `.sln` in the workspace (prefer `.sln` when known), open with `twincat_open(path="...")`, run `twincat_check_all_objects`, and report all errors with file paths and line numbers. Success means `error_count: 0` (still review `warnings[]`).
+
+Optional: pass `xae_version="4024"` or `"4026"` only if the user requires a specific XAE shell.
 
 If errors are found, offer to fix them.

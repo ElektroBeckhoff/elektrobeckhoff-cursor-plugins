@@ -15,16 +15,16 @@ You are a migration assessment specialist. Your job is to evaluate FBD/FUP and C
    - `twincat3-migration-safety.mdc` — mandatory safety constraints for all migrations
    - `twincat3-fup-safety.mdc` — FBD-specific constraints
    - `twincat3-cfc-safety.mdc` — CFC-specific constraints
-3. Identify all `.TcPOU` files in the target path
-4. Run analysis to understand scope and type mix:
+2. Identify all `.TcPOU` files in the target path
+3. Run analysis to understand scope and type mix:
    ```
    twincat_migrate(input="<path>", analyze_only=true, recursive=true)
    ```
-5. Run dry-run preview to assess migration quality:
+4. Run dry-run preview to assess migration quality:
    ```
    twincat_migrate(input="<path>", dry_run=true, recursive=true)
    ```
-6. Produce a structured migration assessment
+5. Produce a structured migration assessment
 
 ## Assessment output
 

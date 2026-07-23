@@ -79,13 +79,14 @@ Requires explicit user confirmation. Creates a shared backup folder for all file
 
 ## Step 4: Post-Migration Verification
 
-After any non-dry-run migration, recommend:
-1. `twincat_open(path="<.plcproj, .sln, or folder>")`
+After any non-dry-run migration:
+1. Search for `TODO [FBD Migration]` and `TODO [CFC Migration]` markers
+2. Report TODO counts; remind the user to review I/O mapping, execution order, and runtime
+
+Do **not** open XAE or run `twincat_check_all_objects` unless the user **explicitly** asks to compile / validate thoroughly. Only then:
+1. `twincat_open(path="<.sln preferred, or .plcproj / folder>")`
 2. `twincat_check_all_objects`
-3. Review compiler errors (included in response)
-4. Search for `TODO [FBD Migration]` and `TODO [CFC Migration]` markers
-5. Verify I/O mapping, execution order, and task assignment
-6. Test runtime behavior against original implementations
+3. Review compiler errors in the response
 
 ## Parameter Quick Reference
 
