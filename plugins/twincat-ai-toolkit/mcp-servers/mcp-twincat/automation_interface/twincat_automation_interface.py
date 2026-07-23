@@ -1212,7 +1212,11 @@ class TcAutomationInterface:
         # 7. SystemManager
         self._sys_man = self._get_system_manager()
         if not self._sys_man:
-            return self._open_result(False, "SystemManager not reachable")
+            dte_sln = self._try_read_dte_sln()
+            return self._open_result(
+                False, "SystemManager not reachable",
+                solution_path=dte_sln,
+            )
 
         # 8. PLC project in tree
         if not proj_name:
@@ -1221,15 +1225,12 @@ class TcAutomationInterface:
             proj_name, timeout_s=min(timeout_s, 60),
         )
         if not self._plc_proj_item:
-            current = ""
-            try:
-                current = str(self._dte.Solution.FullName)
-            except Exception as exc:
-                log.debug("Could not read Solution.FullName: %s", exc)
+            dte_sln = self._try_read_dte_sln()
             return self._open_result(
                 False,
                 f"PLC project '{proj_name}' not found in XAE tree. "
-                f"Loaded solution: {current}",
+                f"Loaded solution: {dte_sln}",
+                solution_path=dte_sln,
             )
 
         self._sln_path = str(self._dte.Solution.FullName)
@@ -1383,10 +1384,35 @@ class TcAutomationInterface:
         log.warning("Timeout (%ds) waiting for solution to close", timeout_s)
 
     def _guess_proj_name(self) -> str:
-        """Derive PLC project name from the loaded solution file name."""
+        """Derive PLC project name from plcproj metadata, then sln basename."""
+        if self._plcproj_file_path and os.path.isfile(self._plcproj_file_path):
+            name = self._read_plcproj_name(self._plcproj_file_path)
+            if name:
+                return name
         try:
             sln_name = os.path.basename(str(self._dte.Solution.FullName))
             return os.path.splitext(sln_name)[0]
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _read_plcproj_name(plcproj_path: str) -> str:
+        """Read <Name> from .plcproj XML (no external dependencies)."""
+        try:
+            import xml.etree.ElementTree as _ET
+            _tree = _ET.parse(plcproj_path)
+            _ns = {"ms": "http://schemas.microsoft.com/developer/msbuild/2003"}
+            el = _tree.getroot().find(".//ms:Name", _ns)
+            if el is not None and el.text:
+                return el.text.strip()
+        except Exception:
+            pass
+        return os.path.splitext(os.path.basename(plcproj_path))[0]
+
+    def _try_read_dte_sln(self) -> str:
+        """Read Solution.FullName from the active DTE, empty on failure."""
+        try:
+            return str(self._dte.Solution.FullName)
         except Exception:
             return ""
 

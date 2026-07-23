@@ -159,8 +159,19 @@ def twincat_open(
     if path:
         resolved = _resolve_path(path)
         if isinstance(resolved, dict):
-            return _json(resolved)
-        plcproj_path = resolved
+            err_code = resolved.get("error", "")
+            if err_code in ("multiple_plc_projects", "multiple_solutions"):
+                return _json(resolved)
+            if resolved_sln:
+                log.warning(
+                    "plcproj resolver failed for %s (%s) — "
+                    "proceeding with sln_path for ROT attach",
+                    path, err_code,
+                )
+            else:
+                return _json(resolved)
+        else:
+            plcproj_path = resolved
 
     if not path and not plcproj_path and not sln_path:
         return _json({
@@ -923,7 +934,7 @@ def _resolve_sln(sln_path: str) -> Union[str, dict]:
 
 
 def _resolve_tsproj(tsproj_path: str, sln_path: str) -> Union[str, dict]:
-    """Parse .tsproj XML → read <Plc><Project File="*.xti"/> → resolve each .xti."""
+    """Parse .tsproj XML → resolve PLC projects via .xti or inline PrjFilePath."""
     tsproj_dir = os.path.dirname(tsproj_path)
     config_plc_dir = os.path.join(tsproj_dir, "_Config", "PLC")
 
@@ -943,14 +954,22 @@ def _resolve_tsproj(tsproj_path: str, sln_path: str) -> Union[str, dict]:
     projects: List[Dict[str, str]] = []
     for proj_elem in plc_node.findall(f"{ns}Project" if ns else "Project"):
         xti_file = proj_elem.get("File", "")
-        if not xti_file:
-            continue
-        xti_path = os.path.normpath(os.path.join(config_plc_dir, xti_file))
-        if not os.path.isfile(xti_path):
-            continue
-        info = _parse_xti(xti_path)
-        if info:
-            projects.append(info)
+        if xti_file:
+            xti_path = os.path.normpath(os.path.join(config_plc_dir, xti_file))
+            if os.path.isfile(xti_path):
+                info = _parse_xti(xti_path)
+                if info:
+                    projects.append(info)
+                    continue
+
+        prj_file_path = proj_elem.get("PrjFilePath", "")
+        if prj_file_path:
+            abs_plcproj = os.path.normpath(
+                os.path.join(tsproj_dir, prj_file_path)
+            )
+            if os.path.isfile(abs_plcproj):
+                name = proj_elem.get("Name", "")
+                projects.append({"name": name, "plcproj_path": abs_plcproj})
 
     if len(projects) == 0:
         return {"success": False, "error": f"No PLC projects found in {tsproj_path}"}
