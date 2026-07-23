@@ -1031,7 +1031,9 @@ class TcAutomationInterface:
             except ValueError as exc:
                 return self._open_result(False, str(exc))
             if preferred_prog_id:
-                self._ensure_prog_id(preferred_prog_id)
+                # Prefer as filter only — do NOT mutate self._prog_id here.
+                # Early _ensure_prog_id would overwrite the bound shell before
+                # a solution-switch saves the active session to the registry.
                 log.info("XAE version requested: %s (%s)",
                          xae_version, preferred_prog_id)
 

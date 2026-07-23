@@ -413,6 +413,110 @@ class TestOpenSolutionMultiInstance:
         assert result.success is True
         assert create_new.call_args.kwargs.get("prog_id") == PROG_4026
 
+    def test_switch_with_xae_version_preserves_registry_prog_id(self):
+        """Solution switch with xae_version must not pollute registry prog_id.
+
+        Regression: early _ensure_prog_id(preferred) overwrote self._prog_id
+        before saving the active session, so re-attach without xae_version
+        reported the wrong shell version.
+        """
+        bridge = _make_bridge()
+        ba_sln = r"C:\proj\BA.sln"
+        sample_sln = r"C:\proj\Sample.sln"
+        ba_dte = _fake_dte(ba_sln)
+        sample_dte = _fake_dte(sample_sln)
+        ba_plc = MagicMock(Name="BA")
+        sample_plc = MagicMock(Name="SamplePLC")
+
+        # Active session: BA on 4024
+        bridge._dte = ba_dte
+        bridge._prog_id = PROG_4024
+        bridge._sln_path = ba_sln
+        bridge._sys_man = MagicMock()
+        bridge._plc_proj_item = ba_plc
+        bridge._created_new = False
+
+        def _enum(filt=None):
+            entries = [
+                (PROG_4024, f"!{PROG_4024}:1", ba_dte),
+                (PROG_4026, f"!{PROG_4026}:2", sample_dte),
+            ]
+            for e in entries:
+                if filt is None or e[0] == filt:
+                    yield e
+
+        with patch("twincat_automation_interface._canonical_path",
+                   side_effect=lambda p: p.lower()):
+            with patch("twincat_automation_interface.os.path.isfile",
+                       return_value=True):
+                with patch("twincat_automation_interface._discover_registered_prog_ids",
+                           return_value=REGISTERED):
+                    with patch.object(bridge, "_prune_stale_instances"):
+                        with patch.object(bridge, "_enumerate_rot_dtes",
+                                          side_effect=_enum):
+                            with patch.object(
+                                bridge, "_get_system_manager",
+                                return_value=MagicMock(),
+                            ):
+                                with patch.object(
+                                    bridge, "_find_plc_project_with_retry",
+                                    return_value=sample_plc,
+                                ):
+                                    with patch.object(
+                                        bridge, "_detect_plcproj_path",
+                                        return_value=None,
+                                    ):
+                                        with patch.object(
+                                            bridge, "_ensure_silent_mode",
+                                        ):
+                                            with patch.object(
+                                                bridge, "_create_new_dte",
+                                            ) as create_new:
+                                                result = bridge._impl_open_solution(
+                                                    sample_sln, None, None, 60,
+                                                    xae_version="4026",
+                                                )
+
+        assert result.success is True
+        assert bridge._prog_id == PROG_4026
+        assert result.xae_version == "4026"
+        create_new.assert_not_called()
+
+        # BA must have been saved with its real shell (4024), not preferred 4026
+        ba_key = ba_sln.lower()
+        assert ba_key in bridge._instances
+        assert bridge._instances[ba_key]["prog_id"] == PROG_4024
+
+        # Re-attach to BA without xae_version → report 4024, not 4026
+        with patch("twincat_automation_interface._canonical_path",
+                   side_effect=lambda p: p.lower()):
+            with patch("twincat_automation_interface.os.path.isfile",
+                       return_value=True):
+                with patch.object(bridge, "_prune_stale_instances"):
+                    with patch.object(
+                        bridge, "_get_system_manager",
+                        return_value=MagicMock(),
+                    ):
+                        with patch.object(
+                            bridge, "_find_plc_project_with_retry",
+                            return_value=ba_plc,
+                        ):
+                            with patch.object(
+                                bridge, "_detect_plcproj_path",
+                                return_value=None,
+                            ):
+                                with patch.object(
+                                    bridge, "_ensure_silent_mode",
+                                ):
+                                    result2 = bridge._impl_open_solution(
+                                        ba_sln, None, None, 60,
+                                    )
+
+        assert result2.success is True
+        assert bridge._prog_id == PROG_4024
+        assert result2.xae_version == "4024"
+        assert result2.xae_prog_id == PROG_4024
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
