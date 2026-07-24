@@ -55,13 +55,14 @@ Versions/
 
 ## Changelog Format
 
-For detailed changelog writing instructions, templates, and real examples, use the `twincat3-changelog` skill (`.cursor/skills/twincat3-changelog/SKILL.md`).
+For detailed changelog writing, use the `twincat3-changelog` skill.
+For thematic local commits (never push), use the `twincat3-git-commit` skill.
 
 Key rules:
 - English only
 - One file per version in `Versions/X.X.X.X/changelog-X.X.X.X.md`
-- Major releases: `# Changelog — Tc3_IoT_BA X.X.X.X` with Added/Changed/Fixed/Deprecated
-- Bug fix releases: `## Version X.X.X.X – Title` with categorized sections
-- Breaking changes use `> [!CAUTION]` blocks
+- Prefer `# Changelog — <LibName> X.X.X.X` with Highlights → All Changes (Added/Changed/Fixed/Style) → Migration
+- Slim bug-fix: `## Version X.X.X.X – Title` only for tiny internal patches
+- Breaking changes use `> [!CAUTION]` with **BREAKING CHANGE:**
 - Code examples use `iecst` syntax highlighting
 - No implementation details — purpose and impact only

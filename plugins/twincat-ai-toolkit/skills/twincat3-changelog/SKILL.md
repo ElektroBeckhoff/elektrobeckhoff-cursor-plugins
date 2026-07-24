@@ -2,15 +2,18 @@
 name: twincat3-changelog
 description: >-
   Create and update changelogs for TwinCAT3 PLC library releases. Covers file
-  naming, folder structure, header format, section templates, breaking change
-  warnings, and code examples. Use when creating a new version changelog,
-  documenting bug fixes, new features, breaking changes, or any release notes
-  for a TwinCAT3 library project.
+  naming, folder structure, header format, Highlights/All Changes/Migration
+  sections, breaking change warnings, and git-log sourcing. Use when creating
+  a new version changelog, documenting bug fixes, new features, breaking
+  changes, or any release notes for a TwinCAT3 library project.
 ---
 
 # Changelog Writing Guide
 
-Universal guide for all TwinCAT3 PLC library projects.
+Universal guide for TwinCAT3 PLC library projects. Audience: **library users**
+(what is new, changed, fixed — not implementation internals).
+
+Gold-standard layout: Tc3_EB_BA `Versions/*/changelog-*.md`.
 
 ## File Location and Naming
 
@@ -24,11 +27,29 @@ Versions/
 - Lowercase `changelog-` prefix
 - Version directory must match the version number exactly
 
+## Gather Changes (from git)
+
+Before writing, collect user-facing changes since the previous release:
+
+1. Read current version from `.plcproj` `<ProjectVersion>` or `Global_Version.TcGVL`
+2. Find previous version folder under `Versions/` (or previous tag if present)
+3. Run (adjust range as needed):
+
+```
+git log --oneline <prev-version-commit-or-tag>..HEAD
+git log --stat <prev-version-commit-or-tag>..HEAD
+```
+
+If no clear baseline, diff PLC sources against the previous `Versions/<prev>/` release commit or ask the user for the range.
+
+4. Rewrite commit subjects into **user-facing** entries (WHAT/WHY). Drop pure `style:` / formatting noise unless it affects the public API surface.
+5. Do **not** auto-commit or push the changelog from this skill (use `/twincat3-commit` only if the user asks).
+
 ## Header Format
 
-Two header styles depending on release scope:
+### Primary template (feature / major / user-relevant patch)
 
-### Major / Feature Release
+Prefer this for any release that library consumers should read:
 
 ```markdown
 # Changelog — <LibraryName> X.X.X.X
@@ -38,7 +59,7 @@ Two header styles depending on release scope:
 ## Highlights
 
 **1. Feature Title**
-Brief description of the feature and its impact.
+Brief description of the feature and its impact for the application developer.
 
 **2. Second Feature**
 Brief description.
@@ -48,21 +69,43 @@ Brief description.
 ## All Changes
 
 ### Added
-- Description of added functionality
+
+**Theme or type name**
+- User-facing description
 
 ### Changed
-- Description of changed behavior
+
+**Theme or rename**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** What changed and what the user must update.
+
+- Details
 
 ### Fixed
-- Description of bug fix
 
-### Deprecated
-- Description of deprecated feature and migration path
+**`FB_Example` or theme**
+- Problem → corrected behavior
+
+### Style
+
+- Formatting / naming cleanup that is worth noting (optional; omit if empty)
+
+---
+
+## Migration
+
+1. Concrete step for upgrading projects
+2. Further steps as needed
 ```
 
-Replace `<LibraryName>` with the actual library name (e.g. `Tc3_IoT_BA`, `Tc3_IoT_Utilities`, `Tc3_Modbus_RTU`).
+Replace `<LibraryName>` with the actual library name (e.g. `Tc3_EB_BA`, `Tc3_IoT_Utilities`).
 
-### Bug Fix / Maintenance Release
+Use `---` between major sections. Em dash `—` in the H1 title.
+
+### Slim bug-fix template (tiny internal patches only)
+
+When the release is a single small fix and Highlights would be empty noise:
 
 ```markdown
 ## Version X.X.X.X – Short Title
@@ -71,23 +114,18 @@ Replace `<LibraryName>` with the actual library name (e.g. `Tc3_IoT_BA`, `Tc3_Io
 
 ---
 
-### Section Title
+### Fixed
 
 **`FB_Name`**
 - Description of the change.
-
----
-
-### Another Section
-
-- More changes.
 ```
 
+If the patch is still **user-relevant**, prefer the primary template (same sections as feature releases).
+
 **Rules:**
-- Major releases use `#` (single hash) with `Changelog — <LibraryName>`
-- Bug fix releases use `##` (double hash) with `Version X.X.X.X – Title`
-- Use `–` (en dash) between version and title, not `-` (hyphen)
-- Use `---` separators between major sections
+- Primary releases use `#` with `Changelog — <LibraryName>`
+- Slim bug-fix releases use `##` with `Version X.X.X.X – Title`
+- Use `–` (en dash) between version and title in slim headers, not `-` (hyphen)
 
 ## Language and Style
 
@@ -139,12 +177,14 @@ Use `iecst` syntax highlighting for all code blocks.
 > **BREAKING CHANGE:** Description of what changed and what action is required.
 ```
 
-Place breaking changes at the top of the changelog, before other sections.
+Place under the relevant `### Changed` theme (or at the top of All Changes if it spans the release). Always pair with **Migration** steps when user action is required.
 
 ### Systematic Fix (pattern applied across multiple POUs)
 
 ```markdown
-### Section Title – Systematic Correction
+### Fixed
+
+**Section Title – Systematic Correction**
 
 Brief explanation of the root cause and scope of the fix.
 
@@ -177,38 +217,32 @@ Brief explanation of the root cause and scope of the fix.
 
 ## Categorizing Changes
 
-### For Major Releases (Added/Changed/Fixed/Deprecated)
-
 | Category | Use for |
 |----------|---------|
 | Added | New FBs, DUTs, GVLs, Functions, inputs, outputs, methods |
-| Changed | Modified behavior, renamed items, refactored logic |
-| Fixed | Bug fixes, typo corrections |
+| Changed | Modified behavior, renamed items, refactored public API |
+| Fixed | Bug fixes affecting runtime behavior |
+| Style | Naming/format cleanup worth noting for consumers (optional) |
 | Deprecated | Features to be removed, with migration path |
+| Migration | Step-by-step upgrade actions (own `## Migration` section) |
 
-### For Bug Fix Releases (by severity)
-
-| Section | Use for |
-|---------|---------|
-| Critical Bug Fixes | Bugs causing wrong behavior, data loss, crashes |
-| Systematic Corrections | Pattern-based fixes across multiple POUs |
-| Functional Fixes | Behavioral improvements, duplicate removal |
-| Comment and Typo Corrections | Documentation fixes, spelling |
-| Dead Code Removed | Unused code cleanup |
+Omit empty sections.
 
 ## Completeness Checklist
 
 Before finalizing a changelog:
 
-- [ ] Every code change has a corresponding changelog entry
+- [ ] Every **user-facing** code change has a corresponding entry
 - [ ] File is in `Versions/X.X.X.X/changelog-X.X.X.X.md`
-- [ ] Header uses correct format (major vs. bug fix)
-- [ ] Breaking changes use `> [!CAUTION]` block
-- [ ] All affected FBs/DUTs/Functions listed
+- [ ] Header uses primary template (or slim bug-fix when appropriate)
+- [ ] Breaking changes use `> [!CAUTION]` with **BREAKING CHANGE:**
+- [ ] Migration steps present when breaking or rename-required
+- [ ] All affected FBs/DUTs/Functions listed where relevant
 - [ ] Code examples use `iecst` syntax highlighting
 - [ ] Sections separated with `---`
 - [ ] Written in English
 - [ ] No implementation details — purpose and impact only
+- [ ] Not pushed; commit only via `/twincat3-commit` if the user requests it
 
 ## Reference
 

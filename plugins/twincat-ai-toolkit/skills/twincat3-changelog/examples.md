@@ -82,44 +82,63 @@ The message logging now uses numeric values instead of enum:
 
 ---
 
-## Example 4: Major Feature Release
+## Example 4: Major Feature Release (EB_BA-style)
 
-Major release with highlights section and categorized changes.
+Primary template: Highlights → All Changes (Added/Changed/Fixed/Style) → Migration.
 
 ```markdown
-# Changelog — Tc3_MyLib 1.2.0.0
+# Changelog — Tc3_MyLib 1.4.3.0
 
 ---
 
-## ⭐ Highlights
+## Highlights
 
-**1. Multi-Widget OnChange Merging**
-When multiple widgets change during the same PLC cycle, the changes are now
-combined into a single MQTT message instead of falling back to a full update.
+**1. Persistent Restore with Client Age Guard**
+All persistent state is gated by a global restore-checked flag so actuators wait
+before writing retain values on cold start.
 
-**2. Performance Mode**
-New parameter `ePerformanceMode` automatically detects the Beckhoff hardware
-and applies the best throughput preset.
+**2. LightAutomatic → LightDaylightAutomatic Rename**
+Daylight-based light automation types are renamed for clarity.
 
 ---
 
 ## All Changes
 
 ### Added
-- Added Multi-Widget OnChange Merging — deep-merge deltas into single message
-- Added `ePerformanceMode` (`E_PerfMode`) to `ST_Param`
-- Added `FB_HeatingCooling` — new function block for heating/cooling control
+
+**Persistent Restore Infrastructure**
+- Global restore-checked flag and latch-based restore on room/facade control FBs
+
+**Status DUTs**
+- New status structs for daylight automation and threshold learning
 
 ### Changed
-- Replaced `eColorMode : E_LightType` bitmask with `nColorMode : INT`
-- Removed pre-defined initial values from `aModes` arrays across all DUTs
+
+**LightAutomatic → LightDaylightAutomatic Rename**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** All `LightAutomatic`-related types are renamed to include
+> "Daylight". Instance declarations and config struct references must be updated.
+
+- `FB_MyLib_LightAutomatic` → `FB_MyLib_LightDaylightAutomatic`
+- Matching DUTs and interfaces renamed the same way
 
 ### Fixed
-- Fixed `ProcessMessagesEx` clearing wrong array after send (copy-paste bug)
-- Fixed initialization progress stuck at start when no views are used
 
-### Deprecated
-- `nSlaveOffMode` (INT) on scene FBs — use `eExternalOffListener` ENUMs instead
+**BlindThermoAutomatic Temperature Activation**
+- Re-arm temperature timers after Neutral exit; avoid false activation after reboot
+
+### Style
+
+- Normalized ProductVersion headers after TwinCAT save (no API impact)
+
+---
+
+## Migration
+
+1. Rename all `LightAutomatic` instance and type references to `LightDaylightAutomatic`
+2. Wire the new restore-checked / enable-persistent-restore inputs where rooms use retain data
+3. Rebuild and verify light automation and persistent restore on a cold start
 ```
 
 ---

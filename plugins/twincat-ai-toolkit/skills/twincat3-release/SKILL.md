@@ -8,7 +8,7 @@ description: >-
 
 # Release TwinCAT3 Library
 
-> **Prerequisites:** See `twincat3-versioning` rule for version format and `twincat3-changelog` skill for changelog writing.
+> **Prerequisites:** See `twincat3-versioning` rule for version format, `twincat3-changelog` for changelogs, and `twincat3-git-commit` for thematic local commits (never push).
 
 ## Quick Start
 
@@ -20,6 +20,7 @@ Task Progress:
 - [ ] Step 4: Validate (0 errors required)
 - [ ] Step 5: Export library files
 - [ ] Step 6: Create changelog
+- [ ] Step 7: Local commits if requested (never push)
 ```
 
 ## Step 1: Determine Version Number
@@ -111,10 +112,18 @@ Verify the response shows both files with non-zero sizes.
 Create `Versions/<version>/changelog-<version>.md` following the `twincat3-changelog` skill.
 
 Key points:
-- Major/feature release: Use `# Changelog — <LibName> X.X.X.X` header with Added/Changed/Fixed/Deprecated sections
-- Bug fix release: Use `## Version X.X.X.X – Title` header with categorized sections
-- Breaking changes: Use `> [!CAUTION]` blocks at the top
-- English only, professional tone
+- Prefer primary template: `# Changelog — <LibName> X.X.X.X` with Highlights → All Changes (Added/Changed/Fixed/Style) → Migration
+- Slim bug-fix header only for tiny internal patches
+- Breaking changes: `> [!CAUTION]` with **BREAKING CHANGE:** plus Migration steps
+- English only, user-facing tone (WHAT/WHY)
+
+## Step 7: Local Commits (optional)
+
+If the user wants the release artifacts committed:
+
+1. Follow `twincat3-git-commit` / `/twincat3-commit`
+2. Typical split: `release:` (version + libraries) and `docs:` (changelog alone)
+3. **NEVER** `git push` — the user always pushes manually
 
 ## Session Handling
 
@@ -122,7 +131,7 @@ Do **not** call `twincat_close()` after a release. Leave the XAE session open �
 
 ## Release Checklist
 
-Before committing the release:
+Before finishing the release:
 
 - [ ] Version bumped in `.plcproj` AND `Global_Version.TcGVL`
 - [ ] Both versions match
@@ -130,3 +139,5 @@ Before committing the release:
 - [ ] `.library` and `.compiled-library` exported to `Versions/<version>/`
 - [ ] Changelog created in `Versions/<version>/changelog-<version>.md`
 - [ ] Breaking changes documented with `[!CAUTION]` blocks
+- [ ] If committing: thematic local commits only (`release:` / `docs:`) via `twincat3-git-commit`
+- [ ] **No push** — user pushes manually

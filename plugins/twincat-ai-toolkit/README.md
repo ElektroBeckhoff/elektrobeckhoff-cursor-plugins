@@ -47,6 +47,8 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 | `twincat3-new-library` | Create a new TwinCAT3 PLC library from scratch |
 | `twincat3-infosys-lookup` | Look up Beckhoff InfoSys documentation via web search |
 | `twincat3-changelog` | Create and update changelogs for library releases |
+| `twincat3-git-commit` | Thematic Conventional Commits locally (never push) |
+| `twincat3-release` | Full library release: version bump, validate, export, changelog |
 | `twincat3-fup-migrate` | FBD/FUP-to-ST migration workflow (analyze, preview, migrate) |
 | `twincat3-cfc-migrate` | CFC-to-ST migration workflow (analyze, preview, migrate) |
 | `twincat3-migrate` | Unified FBD/CFC migration with auto-detection (analyze, preview, migrate) |
@@ -64,6 +66,9 @@ Agent-executable commands for common tasks (`commands/`).
 | `twincat3-add-method` | Add method to an existing function block |
 | `twincat3-add-property` | Add property to an existing function block (3 GUIDs) |
 | `twincat3-new-library` | Create new PLC library with complete folder structure |
+| `twincat3-release-library` | Release library: bump version, validate, export, changelog (never push) |
+| `twincat3-commit` | Split changes into thematic Conventional Commits locally (never push) |
+| `twincat3-write-changelog` | Write `Versions/<ver>/changelog-<ver>.md` for library users |
 | `twincat3-new-struct` | Create a new struct as valid TcDUT XML |
 | `twincat3-new-enum` | Create a new enum as valid TcDUT XML with attribute pragmas |
 | `twincat3-new-gvl` | Create a new global variable list as valid TcGVL XML |
