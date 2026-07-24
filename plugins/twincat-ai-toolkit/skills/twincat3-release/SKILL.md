@@ -117,6 +117,10 @@ Key points:
 - Breaking changes: `> [!CAUTION]` with **BREAKING CHANGE:** plus Migration steps
 - English only, user-facing tone (WHAT/WHY)
 
+### Do not touch CI-managed release files
+
+Do **not** edit the `README.md` download section (between auto-generated markers) or `Versions/release_dates.txt` during release. These are updated by GitHub Actions after the user pushes (bot commits such as `Update README with new version and release_dates.txt` are expected — do not recreate them manually).
+
 ## Step 7: Local Commits (optional)
 
 If the user wants the release artifacts committed:
@@ -139,5 +143,6 @@ Before finishing the release:
 - [ ] `.library` and `.compiled-library` exported to `Versions/<version>/`
 - [ ] Changelog created in `Versions/<version>/changelog-<version>.md`
 - [ ] Breaking changes documented with `[!CAUTION]` blocks
+- [ ] Did **not** edit `README.md` download section or `Versions/release_dates.txt` (GitHub Actions)
 - [ ] If committing: thematic local commits only (`release:` / `docs:`) via `twincat3-git-commit`
 - [ ] **No push** — user pushes manually

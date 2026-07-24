@@ -53,6 +53,15 @@ Versions/
     changelog-1.0.0.0.md
 ```
 
+## CI-managed files (do not edit on release)
+
+Do **not** manually update:
+
+- `README.md` download table (AUTO-GENERATED markers)
+- `Versions/release_dates.txt`
+
+Repos with the corresponding GitHub Actions workflow refresh these after push. Bot commits that touch them are expected — do not recreate that work by hand.
+
 ## Changelog Format
 
 For detailed changelog writing, use the `twincat3-changelog` skill.

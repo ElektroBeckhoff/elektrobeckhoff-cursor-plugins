@@ -15,5 +15,6 @@ Prepare and export a new library release.
 ## Instructions
 
 1. Ask the user for the new version number (or suggest one based on changes), bump version in `.plcproj` and `Global_Version.TcGVL`, validate with 0 errors, export library files, and create the changelog per `twincat3-release`.
-2. If the user wants commits afterward, use `/twincat3-commit` (thematic `release:` / `docs:` split).
-3. **NEVER** run `git push` or any remote update. The user always pushes manually.
+2. Do **not** edit `README.md` download section or `Versions/release_dates.txt` — GitHub Actions updates those after push.
+3. If the user wants commits afterward, use `/twincat3-commit` (thematic `release:` / `docs:` split).
+4. **NEVER** run `git push` or any remote update. The user always pushes manually.
