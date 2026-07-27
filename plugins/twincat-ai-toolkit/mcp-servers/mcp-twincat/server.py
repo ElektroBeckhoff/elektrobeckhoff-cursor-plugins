@@ -92,14 +92,26 @@ def twincat_plcproj_info(plcproj_path: str = "") -> str:
 
 @mcp.tool()
 def twincat_status() -> str:
-    """Check whether TcXaeShell (TwinCAT XAE) is installed and running.
+    """Diagnose TcXaeShell / MCP session health without opening a solution.
 
-    Returns availability info without opening anything."""
+    Reports XAE install/running state, per-instance solution paths and
+    COM-busy flags (modal dialog), visible TcXaeShell message boxes,
+    MCP session binding, SilentMode, recent auto-dismissed dialogs, and
+    SysManager error text when a session is attached.
+
+    If ``dte_busy`` or ``blocking_dialogs`` is set, tell the user to
+    dismiss the popup in XAE before retrying open/build/check — do not
+    blind-retry until timeout.
+    """
 
     if not HAS_WIN32:
         return _json({
             "xae_available": False,
             "running_instance": False,
+            "instances": [],
+            "mcp_session_active": False,
+            "blocking_dialogs": [],
+            "dismissed_dialogs_recent": [],
             "message": "pywin32 not installed (Windows + TwinCAT XAE required)",
         })
     try:

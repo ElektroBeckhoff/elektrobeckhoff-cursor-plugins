@@ -107,7 +107,7 @@ Connects to Beckhoff TcXaeShell (Visual Studio) via COM automation on a dedicate
 | Tool | Description |
 |------|-------------|
 | `twincat_plcproj_info` | Read .plcproj metadata (title, version, company) — no XAE needed |
-| `twincat_status` | XAE installed? Running instances summarized in `message` |
+| `twincat_status` | XAE install/running, instances (busy/dialogs), MCP session, SilentMode |
 | `twincat_open` | Open / attach solution (ROT multi-instance; optional `xae_version`) |
 | `twincat_reload` | Reload solution from disk — only after `.plcproj` was changed |
 | `twincat_check_all_objects` | Compile ALL objects — primary validation for libraries |

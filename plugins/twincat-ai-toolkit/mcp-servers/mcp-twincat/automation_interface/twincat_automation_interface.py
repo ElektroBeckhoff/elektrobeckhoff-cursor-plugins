@@ -205,6 +205,15 @@ class StatusResult:
     solution_path: str = ""
     plc_project_name: str = ""
     message: str = ""
+    instances: list = field(default_factory=list)
+    mcp_session_active: bool = False
+    mcp_solution_path: str = ""
+    mcp_plc_project_name: str = ""
+    silent_mode: Optional[bool] = None
+    blocking_dialogs: list = field(default_factory=list)
+    dismissed_dialogs_recent: list = field(default_factory=list)
+    sys_manager_errors: str = ""
+    twincat_runtime_started: Optional[bool] = None
 
 @dataclass
 class OpenResult:
@@ -369,6 +378,63 @@ class TcAutomationInterface:
     _POLL_IDLE_S = 0.5
     _POLL_BURST_S = 0.15
 
+    def _enumerate_xae_dialogs(self) -> list[dict]:
+        """Return visible TcXaeShell ``#32770`` dialogs (read-only).
+
+        Each entry: ``hwnd``, ``title``, ``text``, ``auto_dismissable``,
+        ``matched_pattern``. Used by ``twincat_status`` and the dismiss
+        worker. Does not click any buttons.
+        """
+        if not HAS_WIN32GUI:
+            return []
+
+        found: list[dict] = []
+
+        def enum_cb(hwnd, _):
+            try:
+                if not win32gui.IsWindowVisible(hwnd):
+                    return True
+                title = win32gui.GetWindowText(hwnd)
+                if title != "TcXaeShell":
+                    return True
+                if win32gui.GetClassName(hwnd) != "#32770":
+                    return True
+
+                dialog_texts = []
+
+                def enum_children(child_hwnd, _):
+                    if win32gui.GetClassName(child_hwnd) == "Static":
+                        text = win32gui.GetWindowText(child_hwnd)
+                        if text:
+                            dialog_texts.append(text.lower())
+                    return True
+
+                try:
+                    win32gui.EnumChildWindows(hwnd, enum_children, None)
+                except Exception:
+                    return True
+
+                full_text = " ".join(dialog_texts)
+                matched = [
+                    p for p in self._SAFE_DIALOG_PATTERNS if p in full_text
+                ]
+                found.append({
+                    "hwnd": int(hwnd),
+                    "title": title,
+                    "text": full_text[:200],
+                    "auto_dismissable": bool(matched),
+                    "matched_pattern": matched[0] if matched else "",
+                })
+            except Exception:
+                pass
+            return True
+
+        try:
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception as exc:
+            log.debug("EnumWindows for XAE dialogs failed: %s", exc)
+        return found
+
     def _dialog_dismiss_worker(self, stop_event: threading.Event):
         """Background worker that auto-dismisses known XAE modal dialogs.
 
@@ -389,41 +455,15 @@ class TcAutomationInterface:
         while not stop_event.is_set():
             dismissed_any = False
             try:
-                dismissed = []
-
-                def enum_cb(hwnd, _):
-                    if not win32gui.IsWindowVisible(hwnd):
-                        return True
-                    if win32gui.GetWindowText(hwnd) != "TcXaeShell":
-                        return True
-                    if win32gui.GetClassName(hwnd) != "#32770":
-                        return True
-
-                    dialog_texts = []
-                    def enum_children(child_hwnd, _):
-                        if win32gui.GetClassName(child_hwnd) == "Static":
-                            text = win32gui.GetWindowText(child_hwnd)
-                            if text:
-                                dialog_texts.append(text.lower())
-                        return True
-
-                    try:
-                        win32gui.EnumChildWindows(hwnd, enum_children, None)
-                    except Exception:
-                        return True
-
-                    full_text = " ".join(dialog_texts)
-                    matched = [p for p in self._SAFE_DIALOG_PATTERNS if p in full_text]
-                    if matched:
-                        win32gui.PostMessage(
-                            hwnd, win32con.WM_COMMAND, IDYES, 0,
-                        )
-                        dismissed.append((hwnd, matched[0], full_text[:120]))
-                    return True
-
-                win32gui.EnumWindows(enum_cb, None)
-
-                for hwnd, pattern, text in dismissed:
+                for dlg in self._enumerate_xae_dialogs():
+                    if not dlg.get("auto_dismissable"):
+                        continue
+                    hwnd = dlg["hwnd"]
+                    pattern = dlg.get("matched_pattern", "")
+                    text = dlg.get("text", "")[:120]
+                    win32gui.PostMessage(
+                        hwnd, win32con.WM_COMMAND, IDYES, 0,
+                    )
                     log.warning(
                         "Auto-dismissed TcXaeShell dialog (hwnd=%s, "
                         "pattern='%s', text='%s')", hwnd, pattern, text,
@@ -431,7 +471,7 @@ class TcAutomationInterface:
                     self._dismissed_dialogs.append(
                         f"[{pattern}] {text}"
                     )
-                dismissed_any = bool(dismissed)
+                    dismissed_any = True
             except Exception as exc:
                 log.debug("Dialog watcher error: %s", exc)
 
@@ -726,8 +766,14 @@ class TcAutomationInterface:
             except Exception as exc:
                 log.debug("ROT GetObject failed for %s: %s", name, exc)
 
-    def _read_dte_solution_path(self, dte) -> tuple[bool, str]:
-        """Return ``(is_open, canonical_sln_path)`` for a DTE instance."""
+    def _read_dte_solution_path(
+        self, dte, *, retry_on_busy: bool = True,
+    ) -> tuple[bool, str]:
+        """Return ``(is_open, canonical_sln_path)`` for a DTE instance.
+
+        When *retry_on_busy* is False (e.g. ``twincat_status``), a busy
+        DTE returns ``(False, "")`` immediately instead of waiting.
+        """
         try:
             is_open = bool(dte.Solution.IsOpen)
             if not is_open:
@@ -735,6 +781,8 @@ class TcAutomationInterface:
             return True, _canonical_path(str(dte.Solution.FullName))
         except Exception as exc:
             if self._is_call_rejected(exc):
+                if not retry_on_busy:
+                    return False, ""
                 try:
                     is_open = self._retry_com(
                         lambda: bool(dte.Solution.IsOpen),
@@ -749,6 +797,16 @@ class TcAutomationInterface:
                 except Exception:
                     return False, ""
             return False, ""
+
+    def _probe_dte_busy(self, dte) -> bool:
+        """Return True if *dte* rejects COM with RPC_E_CALL_REJECTED (modal)."""
+        if dte is None:
+            return False
+        try:
+            _ = dte.MainWindow.Caption
+            return False
+        except Exception as exc:
+            return self._is_call_rejected(exc)
 
     def _find_dte_by_solution(
         self,
@@ -950,28 +1008,84 @@ class TcAutomationInterface:
         cached_slns = list(self._instances.keys())
         registered = _discover_registered_prog_ids()
 
+        blocking_dialogs = self._enumerate_xae_dialogs()
+        dismissed_recent = list(self._dismissed_dialogs[-20:])
+        if dismissed_recent:
+            self._dismissed_dialogs.clear()
+
+        mcp_plc = ""
+        if self._plc_proj_item and self._dte:
+            try:
+                mcp_plc = str(self._plc_proj_item.Name)
+            except Exception:
+                mcp_plc = ""
+
+        mcp_session_active = bool(self._dte and self._is_dte_alive())
+        mcp_sln = self._sln_path or ""
+        silent_mode = self._read_silent_mode() if mcp_session_active else None
+        sys_errs = self._read_sys_manager_errors()
+        runtime_started = self._read_twincat_runtime_started()
+
         # Enumerate ALL running instances via ROT (not just GetActiveObject)
         running: list[dict] = []
         for prog_id, moniker, dte in self._enumerate_rot_dtes():
-            is_open, sln = self._read_dte_solution_path(dte)
-            running.append({
+            busy = self._probe_dte_busy(dte)
+            is_open, sln = self._read_dte_solution_path(
+                dte, retry_on_busy=False,
+            )
+            pid = self._get_dte_pid(dte)
+            entry = {
                 "prog_id": prog_id,
                 "xae_version": _tc_version_label(prog_id),
                 "moniker": moniker,
                 "solution_path": sln if is_open else "",
-            })
+                "dte_busy": busy,
+            }
+            if pid is not None:
+                entry["pid"] = pid
+            running.append(entry)
+
+        def _build_message(base: str) -> str:
+            parts = [base]
+            busy_n = sum(1 for r in running if r.get("dte_busy"))
+            if busy_n:
+                parts.append(
+                    f"{busy_n} instance(s) COM-busy (modal dialog?)"
+                )
+            if blocking_dialogs:
+                auto = sum(
+                    1 for d in blocking_dialogs if d.get("auto_dismissable")
+                )
+                parts.append(
+                    f"{len(blocking_dialogs)} TcXaeShell dialog(s) visible"
+                    f" ({auto} auto-dismissable)"
+                )
+            if mcp_session_active:
+                parts.append("MCP session active")
+            elif self._dte:
+                parts.append("MCP session stale")
+            if sys_errs:
+                parts.append("SysManager has error messages")
+            return " | ".join(parts)
+
+        common_kw = dict(
+            instances=running,
+            mcp_session_active=mcp_session_active,
+            mcp_solution_path=mcp_sln,
+            mcp_plc_project_name=mcp_plc,
+            silent_mode=silent_mode,
+            blocking_dialogs=blocking_dialogs,
+            dismissed_dialogs_recent=dismissed_recent,
+            sys_manager_errors=sys_errs,
+            twincat_runtime_started=runtime_started,
+        )
 
         if running:
             primary = running[0]
-            plc = ""
-            if self._plc_proj_item and self._dte:
-                try:
-                    plc = str(self._plc_proj_item.Name)
-                except Exception:
-                    plc = ""
             versions = ", ".join(
                 f"{r['xae_version'] or r['prog_id']}"
                 f"{'=' + os.path.basename(r['solution_path']) if r['solution_path'] else '=empty'}"
+                f"{'(busy)' if r.get('dte_busy') else ''}"
                 for r in running
             )
             msg = (
@@ -983,20 +1097,44 @@ class TcAutomationInterface:
                 xae_available=True,
                 running_instance=True,
                 solution_path=primary["solution_path"],
-                plc_project_name=plc,
-                message=msg,
+                plc_project_name=mcp_plc,
+                message=_build_message(msg),
+                **common_kw,
             )
 
         # Fallback probe via GetActiveObject
         for prog_id in registered:
             try:
                 dte = win32com.client.GetActiveObject(prog_id)
-                sln = str(dte.Solution.FullName) if dte.Solution.IsOpen else ""
+                busy = self._probe_dte_busy(dte)
+                is_open, sln = self._read_dte_solution_path(
+                    dte, retry_on_busy=False,
+                )
+                if not is_open and not busy:
+                    try:
+                        sln = (
+                            str(dte.Solution.FullName)
+                            if dte.Solution.IsOpen else ""
+                        )
+                    except Exception:
+                        sln = ""
+                running = [{
+                    "prog_id": prog_id,
+                    "xae_version": _tc_version_label(prog_id),
+                    "moniker": "",
+                    "solution_path": sln,
+                    "dte_busy": busy,
+                }]
+                common_kw["instances"] = running
                 return StatusResult(
                     xae_available=True,
                     running_instance=True,
                     solution_path=sln,
-                    message=f"TcXaeShell is running ({prog_id})",
+                    plc_project_name=mcp_plc,
+                    message=_build_message(
+                        f"TcXaeShell is running ({prog_id})"
+                    ),
+                    **common_kw,
                 )
             except Exception as exc:
                 log.debug("GetActiveObject probe failed for %s: %s", prog_id, exc)
@@ -1005,16 +1143,52 @@ class TcAutomationInterface:
             return StatusResult(
                 xae_available=True,
                 running_instance=False,
-                message=(
+                message=_build_message(
                     f"TcXaeShell is installed ({registered[0]}) but not running"
                 ),
+                **common_kw,
             )
 
         return StatusResult(
             xae_available=False,
             running_instance=False,
-            message="TcXaeShell not available: no registered ProgID found",
+            message=_build_message(
+                "TcXaeShell not available: no registered ProgID found"
+            ),
+            **common_kw,
         )
+
+    def _read_silent_mode(self) -> Optional[bool]:
+        """Read TcAutomationSettings.SilentMode from the active DTE."""
+        if not self._dte:
+            return None
+        try:
+            settings = self._dte.GetObject("TcAutomationSettings")
+            return bool(settings.SilentMode)
+        except Exception as exc:
+            log.debug("SilentMode read failed: %s", exc)
+            return None
+
+    def _read_sys_manager_errors(self) -> str:
+        """Return ITcSysManager2.GetLastErrorMessages when SysMan is bound."""
+        if not self._sys_man:
+            return ""
+        try:
+            msgs = self._sys_man.GetLastErrorMessages()
+            return str(msgs) if msgs else ""
+        except Exception as exc:
+            log.debug("GetLastErrorMessages failed: %s", exc)
+            return ""
+
+    def _read_twincat_runtime_started(self) -> Optional[bool]:
+        """Return ITcSysManager.IsTwinCATStarted when SysMan is bound."""
+        if not self._sys_man:
+            return None
+        try:
+            return bool(self._sys_man.IsTwinCATStarted())
+        except Exception as exc:
+            log.debug("IsTwinCATStarted failed: %s", exc)
+            return None
 
     # -------- open --------
 

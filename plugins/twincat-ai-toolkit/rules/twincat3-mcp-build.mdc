@@ -11,7 +11,7 @@ alwaysApply: false
 
 | Tool | Purpose |
 |------|---------|
-| `twincat_status` | XAE installed? Running instances summarized in `message` (ROT) |
+| `twincat_status` | XAE install/running, `instances[]` (incl. `dte_busy`), MCP session, `blocking_dialogs`, SilentMode, SysManager errors |
 | `twincat_open` | Open / attach solution; locate PLC project |
 | `twincat_check_all_objects` | Compile ALL objects — includes `errors[]`, `warnings[]`, `infos[]` |
 | `twincat_build` | Incremental build (`full_rebuild=true` for RebuildSolution) |
@@ -50,5 +50,7 @@ Detailed workflow: skill `twincat3-validate`.
 - Libraries → `twincat_check_all_objects`. Apps/boot → `twincat_build`.
 
 ## Session
+
+Call `twincat_status` before open/build when XAE may be stuck: if any `instances[].dte_busy` is true or `blocking_dialogs` is non-empty, tell the user to dismiss the TcXaeShell popup — do not blind-retry COM calls until timeout. Known “file modified outside” dialogs may be auto-dismissed; others require manual action.
 
 Do **not** call `twincat_close` unless XAE is unresponsive or the user asks. Keep the session open; the next `twincat_open` re-attaches via ROT by solution path. Optional `force_quit=true` terminates XAE even when MCP only attached — use with caution.
