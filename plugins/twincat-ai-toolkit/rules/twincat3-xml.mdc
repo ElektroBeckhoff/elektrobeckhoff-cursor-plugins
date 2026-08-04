@@ -1,0 +1,385 @@
+---
+description: TwinCAT3 TcPlcObject XML for .TcPOU, .TcDUT, .TcGVL, .TcIO — CDATA-only edits, GUIDs, line endings, encoding/BOM, and per-type structure.
+globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL,**/*.TcIO"
+alwaysApply: false
+---
+
+# TwinCAT3 TcPlcObject XML Format
+
+Applies to `.TcPOU`, `.TcDUT`, `.TcGVL`, and `.TcIO`. All share root `<TcPlcObject>` with ST (or empty) content inside `<![CDATA[...]]>`.
+
+## Universal edit rules (all types)
+
+1. **Only change CDATA / ST content** — `.TcPOU` / `.TcDUT` / `.TcGVL` / `.TcIO` are XML. Outside `<![CDATA[...]]>` change nothing (tags, attributes, whitespace between elements, `Version` / `ProductVersion`) unless you are intentionally creating a new object or adding a new Method/Property/Action element.
+2. **Never copy or reuse GUIDs** — `Id="{...}"` values must never be copied from another element or file. Generate fresh UUIDs for new elements only; leave existing Ids untouched when editing code.
+3. **Do not rewrite line endings** — TwinCAT files in repos are typically LF. When batch-writing (Python/scripts), do not force `\r\n`. Preserving the file’s existing newlines avoids Git treating every line as changed (as with forced CRLF rewrites).
+4. **Do not touch encoding / BOM** — Keep the file’s existing encoding (UTF-8, with or without BOM). Do not “re-save” with a different encoding or strip/add a BOM unless the file was already that way.
+5. **`Name` attribute must match** the type/member name inside the corresponding Declaration CDATA (`FUNCTION_BLOCK` / `FUNCTION` / `PROGRAM` / `INTERFACE` / `TYPE` / GVL name / `METHOD` / `PROPERTY`).
+
+### Safe write pattern (scripts)
+
+```python
+# Read bytes → decode with detected encoding → edit CDATA only → encode same way → write bytes
+# Use newline="" / write bytes so Python does not translate \n ↔ \r\n
+path.write_bytes(edited_text.encode(detected_encoding))  # or open(..., "wb")
+```
+
+Prefer targeted CDATA edits (search/replace inside CDATA) over full XML re-serialize.
+
+---
+
+## GUID rules
+
+Every XML element with an `Id` attribute requires a GUID. GUIDs are the primary identity mechanism for TwinCAT objects — they link POUs, methods, properties, and actions across the solution.
+
+### Format
+
+Standard UUID v4, lowercase hex with hyphens, wrapped in curly braces:
+
+```
+Id="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
+```
+
+- 8-4-4-4-12 hex digits: `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`
+- Lowercase letters: `{a1b2...}` not `{A1B2...}`
+- Always include curly braces in the XML attribute value
+
+### Generation
+
+Generate a fresh random GUID for each **new** element:
+
+- PowerShell: `[guid]::NewGuid().ToString('D')` then wrap in `{}`
+- Python: `import uuid; f'{{{uuid.uuid4()}}}'`
+
+### Uniqueness scope
+
+Every GUID must be **unique across the entire PLC project** (all `.TcPOU`, `.TcIO`, `.TcDUT`, `.TcGVL` files combined). Two different elements must never share the same GUID, even across different files.
+
+### GUID count per element
+
+| Element | GUIDs needed | Id locations |
+|---------|:------------:|--------------|
+| POU (FB / Function / Program) | 1 | `<POU Id="...">` |
+| Interface (`<Itf>`) | 1 | `<Itf Id="...">` |
+| Method | 1 | `<Method Id="...">` |
+| Action | 1 | `<Action Id="...">` |
+| Property (read-write) | 3 | `<Property Id="...">` + `<Get Id="...">` + `<Set Id="...">` |
+| Property (read-only, no Set) | 2 | `<Property Id="...">` + `<Get Id="...">` |
+| DUT (Struct / Enum / Union) | 1 | `<DUT Id="...">` |
+| GVL | 1 | `<GVL Id="...">` |
+
+### GUID do / don't
+
+- **Never reuse** a GUID from another element — always generate fresh
+- **Never change** an existing GUID when editing code — GUIDs are stable identifiers
+- **Never omit** the `Id` attribute — TwinCAT requires it on every POU/Itf/Method/Property/Action/DUT/GVL (and Get/Set) element
+- **Never copy-paste** a file without replacing ALL GUIDs with fresh ones
+- **Never invent** GUIDs by typing hex digits — always use `uuid.uuid4()` or equivalent
+
+### Fake GUID detection
+
+The `--ensure-object-guids` repair detects AI-generated fake GUIDs that parse as valid UUIDs but contain obvious non-random patterns. These are replaced automatically with real `uuid.uuid4()` values.
+
+Detected patterns (any single match triggers replacement):
+
+- **Repeated digits**: 5+ consecutive identical hex digits (`00000`, `55555`, `aaaaa`)
+- **Sequential ascending**: 5+ consecutive ascending hex digits (`56789`, `9abcd`, `bcdef`)
+- **Sequential descending**: 5+ consecutive descending hex digits (`fedcb`, `98765`)
+- **Low entropy**: fewer than 6 distinct hex digits in the 32-char hex string
+- **Counter suffix**: last segment (12 hex) is 75%+ one digit with small counter (`555555555001`)
+- **Known AI prefixes**: first 8 hex digits match known patterns (`d4e5f6a7`, `a1b2c3d4`, `12345678`, etc.)
+- **Segment sequences**: 2+ of the five hyphen-separated segments are ascending hex runs
+- **Mirrored segments**: adjacent segments are reversed copies (`abcd-dcba`)
+
+---
+
+## .TcPOU — Function blocks, functions, programs
+
+Root element: `<POU Name="..." Id="{GUID}" SpecialFunc="None">`.
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <POU Name="FB_Example" Id="{GUID}" SpecialFunc="None">
+    <Declaration><![CDATA[
+FUNCTION_BLOCK FB_Example
+VAR_INPUT
+    bEnable : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+(* Implementation code here *)
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
+```
+
+### POU-specific rules
+
+- **SpecialFunc** is usually `"None"`. Only `"FB_init"`, `"FB_reinit"`, `"FB_exit"` for special cases.
+- POU types in Declaration CDATA:
+  - `FUNCTION_BLOCK FB_Name` — stateful, instantiated
+  - `FUNCTION F_Name : ReturnType` — stateless, direct call
+  - `PROGRAM MAIN` — entry point, called by task
+
+### Methods (inside POU, after `</Implementation>`)
+
+```xml
+    <Method Name="MethodName" Id="{DIFFERENT-GUID}">
+      <Declaration><![CDATA[
+METHOD MethodName : BOOL
+VAR_INPUT
+    nParam : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[
+MethodName := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+```
+
+Each method needs its **own unique GUID**, different from the POU’s GUID.
+
+### Properties (inside POU)
+
+```xml
+    <Property Name="PropName" Id="{UNIQUE-GUID}">
+      <Declaration><![CDATA[
+PROPERTY PropName : INT
+]]></Declaration>
+      <Get Name="Get" Id="{UNIQUE-GUID}">
+        <Declaration><![CDATA[VAR END_VAR]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PropName := _nValue;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{UNIQUE-GUID}">
+        <Declaration><![CDATA[VAR END_VAR]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_nValue := PropName;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+```
+
+Property + Get + Set = 3 separate GUIDs. Read-only (Get only) = 2 GUIDs.
+
+### Actions (inside POU, after `</Implementation>`)
+
+```xml
+    <Action Name="A_HandleError" Id="{UNIQUE-GUID}">
+      <Implementation>
+        <ST><![CDATA[
+nErrorCounter := nErrorCounter + 1;
+bError        := TRUE;
+]]></ST>
+      </Implementation>
+    </Action>
+```
+
+- Each action needs its **own unique GUID**
+- Actions have **no** `<Declaration>` section (unlike methods)
+- Actions are **not registered separately** in `.plcproj`
+- Call via `A_HandleError();` inside the FB’s cyclic code
+- Naming: `A_[Verb][Object]` — e.g. `A_CalculatePower`, `A_HandleFailsafe`
+
+---
+
+## .TcIO — Interfaces (`<Itf>`)
+
+Interfaces are stored in `.TcIO` files using the `<Itf>` element. They define method and property contracts without implementation.
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Example" Id="{GUID}">
+    <Declaration><![CDATA[INTERFACE I_Example
+]]></Declaration>
+  </Itf>
+</TcPlcObject>
+```
+
+### Interface methods (Declaration only — no Implementation)
+
+```xml
+    <Method Name="Start" Id="{GUID}">
+      <Declaration><![CDATA[METHOD Start : BOOL
+VAR_INPUT
+    nMode : INT;
+END_VAR
+]]></Declaration>
+    </Method>
+```
+
+### Interface properties
+
+**Read-write (Get + Set) — 3 GUIDs:**
+
+```xml
+    <Property Name="DisplayName" Id="{GUID}">
+      <Declaration><![CDATA[PROPERTY DisplayName : STRING
+]]></Declaration>
+      <Get Name="Get" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+```
+
+**Read-only (Get only) — 2 GUIDs:**
+
+```xml
+    <Property Name="IsEnabled" Id="{GUID}">
+      <Declaration><![CDATA[PROPERTY IsEnabled : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{GUID}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+```
+
+### POU vs Interface
+
+| Aspect | POU (`<POU>`) | Interface (`<Itf>`) |
+|--------|---------------|---------------------|
+| Root element | `<POU Name="..." Id="..." SpecialFunc="None">` | `<Itf Name="..." Id="...">` |
+| ST declaration | `FUNCTION_BLOCK FB_Name` | `INTERFACE I_Name` |
+| Implementation | Has `<Implementation><ST>` | No implementation section |
+| Methods | Declaration + Implementation | Declaration only (no Implementation) |
+| Properties | Get/Set have Declaration + Implementation | Get/Set have Declaration only (empty CDATA) |
+| Actions | Supported | Not supported |
+| SpecialFunc | Required (`"None"` default) | Not present |
+
+### Interface-specific rules
+
+- Interface names use `I_` prefix: `I_Controller`, `I_EB_BA_Widget`
+- Methods in interfaces have **no** `<Implementation>` — only `<Declaration>`
+- Property Get/Set in interfaces have empty `<Declaration><![CDATA[]]></Declaration>` — no Implementation
+- Exception: A Set accessor may have a VAR block in its Declaration if local variables are needed for validation in the implementing FB
+- Never add `SpecialFunc` to `<Itf>` — that attribute only exists on `<POU>`
+- File naming: `I_[Lib]_[Purpose].TcIO` — e.g. `I_EB_BA_Widget.TcIO`
+
+---
+
+## .TcDUT — STRUCT, ENUM, UNION
+
+DUTs have **only** `<Declaration>`, no `<Implementation>` section.
+
+### STRUCT
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="ST_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+TYPE ST_Example :
+STRUCT
+    nValue   : INT;
+    fPower   : LREAL;
+    sName    : STRING(80);
+    bEnabled : BOOL := TRUE;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+### ENUM
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="E_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_Example :
+(
+    IDLE    := 0,
+    RUNNING := 1,
+    ERROR   := 99
+) := IDLE;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+Always use `{attribute 'qualified_only'}` and `{attribute 'strict'}` on enums.
+
+### UNION
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <DUT Name="U_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+TYPE U_Example :
+UNION
+    nValue   : DINT;
+    arrBytes : ARRAY[0..3] OF BYTE;
+END_UNION
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
+```
+
+### DUT-specific rules
+
+- One unique GUID in `<DUT Id="{...}">`
+- `Name` attribute must match the TYPE name inside CDATA
+- `STRUCT` / `UNION` keyword goes on its own line (after `TYPE … :`)
+- Prefix: `ST_` for structs, `E_` for enums, `U_` for unions
+
+---
+
+## .TcGVL — Global variable lists
+
+GVLs have **only** `<Declaration>`, no `<Implementation>` section.
+
+### Standard GVL
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <GVL Name="GVL_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+VAR_GLOBAL
+    gbSystemReady : BOOL;
+    gfActualSpeed : REAL;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>
+```
+
+### Constant GVL (parameters)
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.15">
+  <GVL Name="Param_Example" Id="{GUID}">
+    <Declaration><![CDATA[
+VAR_GLOBAL CONSTANT
+    cMaxRetries : UINT := 3;
+    cTimeout    : TIME := T#5S;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>
+```
+
+### GVL-specific rules
+
+- One unique GUID in `<GVL Id="{...}">`
+- `Name` attribute must match the GVL name inside CDATA
+- Naming: `GVL_[Domain]` for runtime globals, `Param_[Library]` for constants
+- `Global_Version` GVL for library version info (uses `ST_LibVersion` from `Tc2_System`)

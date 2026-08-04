@@ -13,7 +13,7 @@ Fields:
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-xml-tcdut`, `twincat3-comments`
+**Rules:** `twincat3-naming`, `twincat3-xml`, `twincat3-comments`
 
 ## Instructions
 

@@ -14,7 +14,7 @@ Payload format: [JSON / Plain String]
 
 ## Required Context
 
-**Rules:** `twincat3-mqtt`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`, `twincat3-formatting`
+**Rules:** `twincat3-mqtt`, `twincat3-naming`, `twincat3-xml`, `twincat3-comments`, `twincat3-formatting`
 **Skills:** `twincat3-mqtt` (SKILL.md + mqtt-patterns.md), `twincat3-json-strings` (if JSON payload)
 
 ## Deliverables

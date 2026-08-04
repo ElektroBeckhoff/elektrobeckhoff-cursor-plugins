@@ -20,10 +20,7 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-iot-patterns` | Tc3_IoT_BA, MQTT widgets, ComClient, Views | — | `Tc3_IoT_*/**`, `Tc3_Iot_*/**` |
 | `twincat3-logging` | F_IoT_Utilities_MessageLog, edge-detected logging | — | `*.TcPOU`, `*.TcGVL` |
 | `twincat3-plcproj` | File/folder registration, PlaceholderReference | — | `*.plcproj` |
-| `twincat3-xml-tcpou` | TcPOU XML structure, CDATA, GUIDs, methods, properties, actions | — | `*.TcPOU` |
-| `twincat3-xml-tcitf` | TcIO Interface XML structure, declaration-only methods/properties | — | `*.TcIO` |
-| `twincat3-xml-tcdut` | TcDUT XML for STRUCT, ENUM, UNION | — | `*.TcDUT` |
-| `twincat3-xml-tcgvl` | TcGVL XML for global variable lists | — | `*.TcGVL` |
+| `twincat3-xml` | TcPlcObject XML for TcPOU/TcDUT/TcGVL/TcIO — CDATA-only edits, GUIDs, line endings, encoding/BOM | — | `*.TcPOU`, `*.TcDUT`, `*.TcGVL`, `*.TcIO` |
 | `twincat3-mcp-build` | MCP build tools, validation workflow, session management | — | — |
 | `twincat3-migration-safety` | Unified safety rules for all FBD/CFC migration (preview-first, backup, TODOs) | — | — |
 | `twincat3-fup-safety` | FBD-specific migration notes (extends migration-safety) | — | — |

@@ -15,7 +15,7 @@ Outputs: [LIST]
 
 Read and follow these before generating code:
 
-**Rules:** `twincat3-core`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`, `twincat3-formatting`
+**Rules:** `twincat3-core`, `twincat3-naming`, `twincat3-xml`, `twincat3-comments`, `twincat3-formatting`
 
 ## Instructions
 

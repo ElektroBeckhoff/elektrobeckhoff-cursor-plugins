@@ -13,7 +13,7 @@ Return type: [TYPE]
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-comments`
+**Rules:** `twincat3-naming`, `twincat3-xml`, `twincat3-comments`
 
 ## Instructions
 

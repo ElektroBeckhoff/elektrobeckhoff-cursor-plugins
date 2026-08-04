@@ -16,7 +16,7 @@ IP: [192.168.1.x], Unit ID: [1], Read Interval: [T#5S]
 
 ## Required Context
 
-**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml`, `twincat3-comments`, `twincat3-formatting`
 **Skills:** `twincat3-modbus` (SKILL.md + modbus-tcp-patterns.md)
 
 ## Deliverables

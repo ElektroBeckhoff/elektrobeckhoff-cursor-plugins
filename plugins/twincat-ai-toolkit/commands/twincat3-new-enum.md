@@ -13,7 +13,7 @@ Values:
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-xml-tcdut`
+**Rules:** `twincat3-naming`, `twincat3-xml`
 **Skills:** `twincat3-attributes` (for `qualified_only` and `strict` pragmas)
 
 ## Instructions

@@ -13,7 +13,7 @@ Purpose: [DESCRIPTION]
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-oop`, `twincat3-xml-tcpou`
+**Rules:** `twincat3-naming`, `twincat3-oop`, `twincat3-xml`
 
 ## Instructions
 

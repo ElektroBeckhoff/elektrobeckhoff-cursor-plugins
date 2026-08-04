@@ -12,7 +12,7 @@ Required libraries: [e.g. Tc2_Standard, Tc3_IotBase, Tc2_ModbusSrv]
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-versioning`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-xml-tcgvl`, `twincat3-plcproj`
+**Rules:** `twincat3-naming`, `twincat3-versioning`, `twincat3-xml`, `twincat3-plcproj`
 **Skills:** `twincat3-new-library` (follow completely)
 
 ## Instructions

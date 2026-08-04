@@ -15,7 +15,7 @@ Auth: [API-Key / Bearer Token / None]
 
 ## Required Context
 
-**Rules:** `twincat3-http`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Rules:** `twincat3-http`, `twincat3-naming`, `twincat3-xml`, `twincat3-comments`, `twincat3-formatting`
 **Skills:** `twincat3-http` (SKILL.md + http-patterns.md), `twincat3-json-strings` (for JSON parsing/writing)
 
 ## Deliverables

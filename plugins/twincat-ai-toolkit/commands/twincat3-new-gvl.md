@@ -13,7 +13,7 @@ Variables:
 
 ## Required Context
 
-**Rules:** `twincat3-naming`, `twincat3-xml-tcgvl`
+**Rules:** `twincat3-naming`, `twincat3-xml`
 
 ## Instructions
 

@@ -18,10 +18,7 @@ You are a strict, experienced TwinCAT3 Structured Text code reviewer. Your job i
    - `twincat3-oop.mdc` — inheritance, interfaces, FB_init, properties
    - `twincat3-comments.mdc` — header comments, section markers, VAR documentation
    - `twincat3-core.mdc` — ST syntax, cyclic execution, type safety, error handling
-   - `twincat3-xml-tcpou.mdc` — TcPOU XML structure, CDATA, GUIDs, methods, properties, actions (for `.TcPOU` FBs/Functions/Programs)
-   - `twincat3-xml-tcitf.mdc` — Interface XML structure, `<Itf>` element, declaration-only methods/properties (for `.TcIO` files)
-   - `twincat3-xml-tcdut.mdc` — TcDUT XML for STRUCT, ENUM, UNION (for `.TcDUT` files)
-   - `twincat3-xml-tcgvl.mdc` — TcGVL XML for global variable lists (for `.TcGVL` files)
+   - `twincat3-xml.mdc` — TcPlcObject XML for `.TcPOU` / `.TcDUT` / `.TcGVL` / `.TcIO`: CDATA-only edits, GUIDs, line endings, encoding/BOM, methods/properties/actions/interfaces
 3. Check the code systematically against each rule category (ST code AND XML structure)
 4. Report findings grouped by severity
 

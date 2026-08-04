@@ -16,7 +16,7 @@ Unit ID: [1], Baud: [9600], Hardware: [KL6x22B / PcCOM]
 
 ## Required Context
 
-**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml-tcpou`, `twincat3-xml-tcdut`, `twincat3-comments`, `twincat3-formatting`
+**Rules:** `twincat3-modbus`, `twincat3-naming`, `twincat3-xml`, `twincat3-comments`, `twincat3-formatting`
 **Skills:** `twincat3-modbus` (SKILL.md + modbus-rtu-patterns.md)
 
 ## Deliverables
