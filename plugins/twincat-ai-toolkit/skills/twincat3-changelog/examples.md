@@ -1,203 +1,127 @@
 # Changelog Examples
 
-Real-world examples from TwinCAT3 library projects, ordered by complexity.
+Slim-first, user-facing. Commit links use the repo’s real `origin` base URL.
 
 ---
 
-## Example 1: Minimal Bug Fix
-
-A single-issue fix — no breaking changes, no new API.
+## Example 1: Patch fix (default slim)
 
 ```markdown
-## Version 1.1.0.4 – ForceUpdate for view metadata
-
-In `FB_View`, after adding the view metadata, the `ForceUpdate` flag in the JSON
-document is now automatically set to `TRUE` if it is not already set. This ensures
-that the app receives an update after a metadata change.
-```
-
----
-
-## Example 2: New Feature with Code Example
-
-New feature affecting multiple FBs with new inputs that users need to wire.
-
-```markdown
-## Version 1.0.9.7 – Smart Optimization Feature for Thermostat Control
-
-- **New Feature:** Smart Optimization for Thermostat Control System
-  - Enables dynamic adjustment of setpoints based on central control
-  - Heating: Setpoint can be increased by configurable offset
-  - Cooling: Setpoint can be decreased by configurable offset
-  - Min/Max limits are respected when applying offsets
-
-**`FB_ThermostatControl`**
-- New inputs added:
-  - `bSmartOptimization : BOOL` – Enables/disables Smart Optimization
-  - `fHeatingOffset : REAL` – Offset for heating [°C]
-  - `fCoolingOffset : REAL` – Offset for cooling [°C]
-
-‍```iecst
-// example
-fbThermostat[1].bSmartOptimization := TRUE;
-fbThermostat[1].fHeatingOffset     := 2.0;
-fbThermostat[1].fCoolingOffset     := 1.5;
-‍```
-
-**Data structures extended:**
-- `ST_Thermostat_Data`: Smart Optimization parameters added
-- `ST_ThermostatStatus`: Smart Optimization status added
-```
-
----
-
-## Example 3: Breaking Change with Migration
-
-Changes that require user action — removed/renamed APIs, new dependencies.
-
-```markdown
-## Version 1.1.0.0 – Message Logging Migration
-
-### Breaking Change
-
-> [!CAUTION]
-> **Migration Required:** This version migrates from internal message logging
-> to the external `Tc3_IoT_Utilities` library.
->
-> - **New Dependency:** Now requires `Tc3_IoT_Utilities` library
-> - **Action Required:** Add library reference to your project before updating
-
-### Message Log Level Changes
-
-**Breaking Change in `Param_MyLib`:**
-
-- **New:** `cnMessageLog : BYTE := 2;`
-
-The message logging now uses numeric values instead of enum:
-
-‍```
-0 = None, 1 = Critical, 2 = Error (default), 3 = Warning, 4 = Info, 5 = Debug
-‍```
-```
-
----
-
-## Example 4: Major Feature Release (EB_BA-style)
-
-Primary template: Highlights → All Changes (Added/Changed/Fixed/Style) → Migration.
-
-```markdown
-# Changelog — Tc3_MyLib 1.4.3.0
-
----
+# Changelog — Tc3_IoT_BA 1.2.4.6
 
 ## Highlights
 
-**1. Persistent Restore with Client Age Guard**
-All persistent state is gated by a global restore-checked flag so actuators wait
-before writing retain values on cold start.
+- **Scene color recall** — RGB scenes no longer fall back to HS+White. ([`a1b2c3d`](https://github.com/ElektroBeckhoff/Tc3_IoT_BA/commit/a1b2c3d))
+- **Scene feedback** — match requires the active color mode to equal the saved mode. ([`e4f5a6b`](https://github.com/ElektroBeckhoff/Tc3_IoT_BA/commit/e4f5a6b))
 
-**2. LightAutomatic → LightDaylightAutomatic Rename**
-Daylight-based light automation types are renamed for clarity.
+## Fixed
 
----
+**`FB_IoT_SceneRGBWBase.CallSceneValues`**
+- Saved RGB scenes were recalled via HS+White → wrong output. ([`a1b2c3d`](https://github.com/ElektroBeckhoff/Tc3_IoT_BA/commit/a1b2c3d))
 
-## All Changes
-
-### Added
-
-**Persistent Restore Infrastructure**
-- Global restore-checked flag and latch-based restore on room/facade control FBs
-
-**Status DUTs**
-- New status structs for daylight automation and threshold learning
-
-### Changed
-
-**LightAutomatic → LightDaylightAutomatic Rename**
-
-> [!CAUTION]
-> **BREAKING CHANGE:** All `LightAutomatic`-related types are renamed to include
-> "Daylight". Instance declarations and config struct references must be updated.
-
-- `FB_MyLib_LightAutomatic` → `FB_MyLib_LightDaylightAutomatic`
-- Matching DUTs and interfaces renamed the same way
-
-### Fixed
-
-**BlindThermoAutomatic Temperature Activation**
-- Re-arm temperature timers after Neutral exit; avoid false activation after reboot
-
-### Style
-
-- Normalized ProductVersion headers after TwinCAT save (no API impact)
-
----
-
-## Migration
-
-1. Rename all `LightAutomatic` instance and type references to `LightDaylightAutomatic`
-2. Wire the new restore-checked / enable-persistent-restore inputs where rooms use retain data
-3. Rebuild and verify light automation and persistent restore on a cold start
+**Scene feedback** (`FB_IoT_SceneRGBBase`, `FB_IoT_SceneRGBWBase`, …)
+- Feedback counted a match without checking `eActiveColorMode`. ([`e4f5a6b`](https://github.com/ElektroBeckhoff/Tc3_IoT_BA/commit/e4f5a6b))
 ```
 
 ---
 
-## Example 5: Systematic Bug Fix Collection
-
-Audit/cleanup release with categorized fixes across the codebase.
+## Example 2: Small feature (new I/O)
 
 ```markdown
-## Version 1.2.0.2 – Systematic Bug Fixes and Code Cleanup
+# Changelog — Tc3_MyLib 1.0.9.7
 
-- Comprehensive code analysis followed by correction of 8 critical bugs,
-  systematic persistent saving fixes, and over 30 comment corrections.
+## Highlights
 
----
+- **Smart Optimization** — thermostat setpoints can follow a central offset within min/max. ([`b2c3d4e`](https://github.com/ElektroBeckhoff/Tc3_MyLib/commit/b2c3d4e))
 
-### Critical Bug Fixes
+## Added
 
-**`FB_General`**
-- `sMode3` was incorrectly read from `aModes2` instead of `aModes3` (copy-paste error).
+**`FB_ThermostatControl`**
+- `bSmartOptimization : BOOL`, `fHeatingOffset` / `fCoolingOffset : REAL` [°C]. ([`b2c3d4e`](https://github.com/ElektroBeckhoff/Tc3_MyLib/commit/b2c3d4e))
 
-**`FB_Widget_Blind`**
-- Added `_bTrigSavePersistent := TRUE` in the `bAngleDown_Ads` block.
-
----
-
-### Persistent Saving – Systematic Correction
-
-Systematic audit of all Standard Control FBs with `VAR PERSISTENT`.
-Only `FB_HeatingCooling(Ex)` correctly triggered disk writes on PLC-side changes.
-
-**`FB_SwitchPers` / `FB_SwitchPers_General`**
-- Added `bSavePersistent` trigger in the `IF bSwitch <> _bSwitchPers` block.
-
-**Blind FBs** (`FB_RolBldActr`, `FB_SunBldActr`, `FB_Window`)
-- Added `bSavePersistent` trigger on `_R_TRIG_SaveShadowPos.Q`.
+```iecst
+fbThermostat[1].bSmartOptimization := TRUE;
+fbThermostat[1].fHeatingOffset     := 2.0;
+```
+```
 
 ---
 
-### Functional Fixes
+## Example 3: Breaking change + Migration
 
-**`FB_ComClient` (WriteAdsSym)**
-- Fixed FIND comparison typo `.sMode_Strenght` → `.sMode_Strength`.
+```markdown
+# Changelog — Tc3_Easee 1.0.0.0
+
+## Highlights
+
+- **HTTP client hang fixed** — abandoned requests and expired tokens no longer lock the shared client. ([`c3d4e5f`](https://github.com/ElektroBeckhoff/Tc3_Easee/commit/c3d4e5f))
+- **Slave Wallbox removed** — use `FB_Easee_MasterWallbox` for all chargers. ([`d4e5f6a`](https://github.com/ElektroBeckhoff/Tc3_Easee/commit/d4e5f6a))
+
+## Changed
+
+**`FB_Easee_SlaveWallbox` / `ST_Easee_Set_Slave`**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** Slave Wallbox types are removed. Switch instances to `FB_Easee_MasterWallbox`.
+
+## Fixed
+
+**`FB_EaseeClient`**
+- Shared request slot and token refresh no longer deadlock the charger FBs. ([`c3d4e5f`](https://github.com/ElektroBeckhoff/Tc3_Easee/commit/c3d4e5f))
+
+## Migration
+
+1. Replace `FB_Easee_SlaveWallbox` with `FB_Easee_MasterWallbox`
+2. Remove `ST_Easee_Set_Slave` usages
+3. Update library reference to 1.0.0.0
+```
 
 ---
 
-### Comment and Typo Corrections
+## Example 4: Several commits → one highlight (compare link)
 
-**Widget comments** – Copy-paste comments in BuildWidget corrected:
-- `FB_Widget_BarChart` → `(* JSON Widget BARCHART *)`
-- `FB_Widget_Blind` → `(* JSON Widget BLIND *)`
+```markdown
+# Changelog — Tc3_EB_BA 1.5.5.0
 
-**DUT corrections:**
-- `ST_Input_BOOL` → `'Boolean Value'` instead of `'Boolen Value'`
+## Highlights
+
+- **Room facade brightness** — RoomControl uses blind facade NESW bits to pick weather kLux. ([compare](https://github.com/ElektroBeckhoff/Tc3_EB_BA/compare/1.5.4.0...1.5.5.0))
+- **Milder Daylight PI defaults** — `fKp := 0.02`, `tTi := T#45S`. ([`8084d4a`](https://github.com/ElektroBeckhoff/Tc3_EB_BA/commit/8084d4a))
+
+## Changed
+
+**`I_EB_BA_RoomFeedbackCollector.AddBlindFeedback`**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** `AddBlindFeedback` now requires `eFacade : E_EB_BA_Facade`.
+
+## Migration
+
+1. Pass the blind’s `eFacade` into `AddBlindFeedback` if you call it yourself
+2. Review Daylight PI defaults if you relied on the previous values
+```
 
 ---
 
-### Dead Code Removed
+## Example 5: Multi-commit theme with SHA list
 
-- `FB_RolBldActr` → Removed `IF FALSE THEN` block
-- `FB_SunBldActr` → Removed identical `IF FALSE THEN` block
+```markdown
+# Changelog — Tc3_EMS 1.0.1.3
+
+## Highlights
+
+- **Locked reason on charge points** — HMI can show why a point is locked (`eLockedReason`). ([`f1a2b3c`](https://github.com/ElektroBeckhoff/Tc3_EMS/commit/f1a2b3c))
+- **Virtual-limit deadbands** — separate up/down deadbands; faster reaction above setpoint. ([`a9b8c7d`](https://github.com/ElektroBeckhoff/Tc3_EMS/commit/a9b8c7d), [`b8c7d6e`](https://github.com/ElektroBeckhoff/Tc3_EMS/commit/b8c7d6e))
+
+## Changed
+
+**`ST_EMS_ECabinet_Param`**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** Deadband members renamed/split; unit is **[% of output range]**.
+
+## Migration
+
+1. Update deadband member names (`…_up` / `…_Down`)
+2. Retune overrides if you set custom deadbands or PID defaults
 ```

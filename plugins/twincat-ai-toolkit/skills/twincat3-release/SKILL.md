@@ -76,11 +76,11 @@ Both must match exactly.
 Version bump edits `.plcproj` — that is the **only** reason to reload. Do not reload for source-only edits.
 
 ```
-twincat_open(path="<path to .sln preferred, or .plcproj / folder>")
+twincat_open(path="<path to .sln preferred, or .plcproj / folder>", xae_version="4024")
 twincat_reload()
 ```
 
-Optional `xae_version="4024"` / `"4026"` only if the user requires a specific shell. If the solution is already open, ROT attach is used (no duplicate window).
+**Default shell: `xae_version="4024"`.** Use `xae_version="4026"` only if the user explicitly requests 4026. If the solution is already open, ROT attach is used (no duplicate window).
 
 ## Step 4: Validate
 

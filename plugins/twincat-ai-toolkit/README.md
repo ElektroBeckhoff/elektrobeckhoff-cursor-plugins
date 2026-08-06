@@ -43,7 +43,7 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 | `twincat3-http` | HTTP(S) REST client, auth, JSON body workflow |
 | `twincat3-new-library` | Create a new TwinCAT3 PLC library from scratch |
 | `twincat3-infosys-lookup` | Look up Beckhoff InfoSys documentation via web search |
-| `twincat3-changelog` | Create and update changelogs for library releases |
+| `twincat3-changelog` | Slim user-facing changelogs with GitHub commit links |
 | `twincat3-git-commit` | Thematic Conventional Commits locally (never push) |
 | `twincat3-release` | Full library release: version bump, validate, export, changelog |
 | `twincat3-fup-migrate` | FBD/FUP-to-ST migration workflow (analyze, preview, migrate) |
