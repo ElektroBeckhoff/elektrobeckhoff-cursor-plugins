@@ -1,9 +1,47 @@
 ---
-description: Core TwinCAT3 IEC 61131-3 Structured Text rules. Prevents C-style syntax errors and enforces PLC programming fundamentals.
+description: Core TwinCAT3 IEC 61131-3 Structured Text rules — priority stack (safety > function > performance > style), ST fundamentals, memory safety, DRY.
 alwaysApply: true
 ---
 
 # TwinCAT3 IEC 61131-3 Core Rules
+
+## Priority stack (resolve conflicts in this order)
+
+When goals conflict, follow this order. Do **not** trade a higher priority for a lower one.
+
+| Pri | Goal | Means |
+|-----|------|--------|
+| **1** | **Safety** | No memory faults: no page faults, buffer overflows, use-after-free, unchecked pointers/refs, or unbounded cyclic work that can stall the PLC. |
+| **2** | **Functionality** | Correct, complete behavior for the required feature (incl. error paths and edge cases). |
+| **3** | **Performance** | Avoid wasted CPU/memory each cycle; no busy-wait, no redundant heavy work. |
+| **4** | **Code quality (style)** | Readable, consistent naming/formatting, maintainable. Important — but lowest vs 1–3. |
+
+**Conflict examples**
+
+- Prefer a slightly longer safe null-check over a shorter unsafe pointer deref (1 > 4).
+- Prefer a correct state machine over a “clever” micro-optimization that breaks edge cases (2 > 3).
+- Prefer a clear, slightly longer name over a cryptic short one **only if** safety and function stay equal (4 last).
+
+### Style ownership (no rule duplication)
+
+Detailed style lives elsewhere — apply those rules; **do not restate or invent parallel style here**:
+
+- Naming → `twincat3-naming`
+- Layout / control-flow formatting → `twincat3-formatting`
+- Comments / headers → `twincat3-comments`
+- XML / CDATA / GUIDs / encodings → `twincat3-xml`
+
+If a style rule fights Safety, Functionality, or Performance → keep 1–3 and adjust style.
+
+### Deduplication (DRY)
+
+- Do **not** copy-paste the same logic into multiple FBs/methods — extract a shared FB, method, function, or action.
+- Do **not** duplicate constants/magic numbers — use `VAR CONSTANT` / Param GVL.
+- Do **not** duplicate near-identical `CASE` branches — share helpers or unify states when behavior is the same.
+- Prefer one well-tested path over two divergent copies that will drift.
+- Dedup must **not** break Safety (1) or Functionality (2): shared code still validates pointers, bounds, and errors.
+
+---
 
 ## This is NOT C/C++/Python
 
@@ -19,28 +57,41 @@ alwaysApply: true
 | String concat | `CONCAT(s1, s2)` | `s1 + s2` |
 | Comments | `(* text *)` | `/* text */` or `//` |
 
-## Cyclic Execution
+---
 
-- PLC code runs in cycles (e.g. every 10ms). There is no `main()` with `while(true)`.
-- Function Blocks are **stateful** - they keep their internal variables between cycles.
+## Cyclic execution
+
+- PLC code runs in cycles (e.g. every 10 ms). There is no `main()` with `while(true)`.
+- Function Blocks are **stateful** — internal variables persist between cycles.
 - FB instances must be **declared** before use and **called every cycle**.
-- Use **state machines** (`CASE _nStep OF`) for multi-step processes - never blocking loops.
+- Use **state machines** (`CASE _nStep OF`) for multi-step processes — never blocking loops.
+- Bound every `FOR`/`WHILE` so one cycle cannot run unbounded (Safety + Performance).
 
-## Type Safety
+---
 
-- Strong typing enforced. Use explicit conversions: `TO_INT()`, `TO_REAL()`, `TO_STRING()`, `UINT_TO_BOOL()`, `INT_TO_UINT()`, etc.
-- No implicit type coercion between numeric types.
+## Type safety
 
-## Memory Model
+- Strong typing. Use explicit conversions: `TO_INT()`, `TO_REAL()`, `TO_STRING()`, `UINT_TO_BOOL()`, `INT_TO_UINT()`, etc.
+- No implicit numeric coercion.
 
-- No dynamic memory by default. All variables allocated at compile time.
-- Arrays have fixed size. No resizable containers.
-- Exception: `__NEW(BYTE, nSize)` / `__DELETE(ptr)` for JSON payloads only.
-- `POINTER TO` and `REFERENCE TO` for indirection. Always validate: `IF _pPtr <> 0 THEN` / `IF __ISVALIDREF(ref) THEN`.
+---
 
-## Error Handling Pattern
+## Memory model (Safety-critical)
+
+- No dynamic memory by default. Variables are allocated at compile time.
+- Arrays have fixed size. No resizable containers. Always check index bounds before write/read when the index is not a proven constant range.
+- Exception: `__NEW(BYTE, nSize)` / `__DELETE(ptr)` for JSON/IoT payloads only.
+  - Validate `__NEW` result (`<> 0`) before use.
+  - `__DELETE` exactly once; never use the pointer after delete (no use-after-free).
+  - Pair every successful `__NEW` with `__DELETE` on all paths (incl. error paths).
+- `POINTER TO` / `REFERENCE TO`: always validate before use — `IF _pPtr <> 0 THEN` / `IF __ISVALIDREF(ref) THEN`. Never assume validity across cycles without re-check when the referent can disappear.
+
+---
+
+## Error handling pattern
 
 Every FB that can fail exposes:
+
 ```iecst
 VAR_OUTPUT
     bError      : BOOL;       (* Error flag *)
@@ -48,6 +99,8 @@ VAR_OUTPUT
     eError      : E_*_Error;  (* Domain-specific enum, optional *)
 END_VAR
 ```
+
+---
 
 ## Attributes
 

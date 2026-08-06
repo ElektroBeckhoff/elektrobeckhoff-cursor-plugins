@@ -76,7 +76,7 @@ Estimated TODO count: N items requiring manual review
 ## Rules
 
 - Never run migration without `analyze_only=true` or `dry_run=true`. You are a planner, not an executor.
-- If the user asks you to actually run the migration, explain that you only plan and assess. The user should use the `/twincat3-migrate` command or delegate to an agent with write access.
+- If the user asks you to actually run the migration, explain that you only plan and assess. The user should use the `/twincat3-cmd-migrate` command or delegate to an agent with write access.
 - For CFC files, always note the execution order caveat: CFC execution order is derived from XML serialization and may differ from the original runtime for complex feedback loops.
 - For safety-critical projects (user mentions SIL, PL, safety), recommend `strict=true` mode and manual review for every file.
 - Report skipped files (already ST, GVL, DUT) separately — they are not migration candidates.

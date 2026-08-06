@@ -43,7 +43,7 @@ git log --stat <prev-version-commit-or-tag>..HEAD
 If no clear baseline, diff PLC sources against the previous `Versions/<prev>/` release commit or ask the user for the range.
 
 4. Rewrite commit subjects into **user-facing** entries (WHAT/WHY). Drop pure `style:` / formatting noise unless it affects the public API surface.
-5. Do **not** auto-commit or push the changelog from this skill (use `/twincat3-commit` only if the user asks).
+5. Do **not** auto-commit or push the changelog from this skill (use `/twincat3-cmd-commit` only if the user asks).
 
 ## Header Format
 
@@ -242,7 +242,7 @@ Before finalizing a changelog:
 - [ ] Sections separated with `---`
 - [ ] Written in English
 - [ ] No implementation details — purpose and impact only
-- [ ] Not pushed; commit only via `/twincat3-commit` if the user requests it
+- [ ] Not pushed; commit only via `/twincat3-cmd-commit` if the user requests it
 
 ## Reference
 

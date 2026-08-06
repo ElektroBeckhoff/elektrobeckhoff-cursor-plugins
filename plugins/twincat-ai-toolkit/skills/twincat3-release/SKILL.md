@@ -125,7 +125,7 @@ Do **not** edit the `README.md` download section (between auto-generated markers
 
 If the user wants the release artifacts committed:
 
-1. Follow `twincat3-git-commit` / `/twincat3-commit`
+1. Follow `twincat3-git-commit` / `/twincat3-cmd-commit`
 2. Typical split: `release:` (version + libraries) and `docs:` (changelog alone)
 3. **NEVER** `git push` — the user always pushes manually
 

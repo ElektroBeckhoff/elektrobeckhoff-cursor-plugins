@@ -4,7 +4,7 @@ description: >-
   Create thematic Conventional Commit groups for TwinCAT3 PLC library repos.
   Analyzes git status/diff, splits changes by theme or file family, and commits
   locally. Never pushes. Use when the user asks to commit, split commits, or
-  run /twincat3-commit.
+  run /twincat3-cmd-commit.
 ---
 
 # TwinCAT3 Thematic Git Commits
@@ -122,7 +122,7 @@ Summarize for the user: commit hashes, subjects, and that **nothing was pushed**
 
 - Pushing, tagging, GitHub Releases
 - Rewriting published history
-- Changelog authoring (use `twincat3-changelog` / `/twincat3-write-changelog`)
+- Changelog authoring (use `twincat3-changelog` / `/twincat3-cmd-changelog`)
 
 ## Reference
 

@@ -8,7 +8,7 @@ Coding rules applied automatically or on request (`rules/`).
 
 | Rule | Description | Always Apply | Globs |
 |------|-------------|:------------:|-------|
-| `twincat3-core` | ST syntax, cyclic execution, type safety, memory model | Yes | — |
+| `twincat3-core` | Priority stack (safety > function > performance > style), ST syntax, memory safety, DRY | Yes | — |
 | `twincat3-naming` | Variable prefixes, type names, file naming, unit suffixes | Yes | — |
 | `twincat3-oop` | EXTENDS, interfaces, abstract FBs, FB_init injection | — | — |
 | `twincat3-formatting` | Indentation, alignment, blank lines, control flow | — | `*.TcPOU`, `*.TcDUT`, `*.TcGVL` |
@@ -54,34 +54,25 @@ On-demand skills, loaded when the AI assistant needs them (`skills/`).
 
 ## Commands
 
-Agent-executable commands for common tasks (`commands/`).
+Slash commands (`commands/`). Pattern: `twincat3-cmd-<topic>`. Each command lists **Read first** paths (skill + rules) before work. Scaffolding-only helpers were removed — use rules/`twincat3-xml` for new FB/DUT/GVL.
 
-| Command | Description |
-|---------|-------------|
-| `twincat3-new-function-block` | Create a new function block as valid TcPOU XML with GUID |
-| `twincat3-new-state-machine` | Add step-based state machine to an existing FB |
-| `twincat3-add-method` | Add method to an existing function block |
-| `twincat3-add-property` | Add property to an existing function block (3 GUIDs) |
-| `twincat3-new-library` | Create new PLC library with complete folder structure |
-| `twincat3-release-library` | Release library: bump version, validate, export, changelog (never push) |
-| `twincat3-commit` | Split changes into thematic Conventional Commits locally (never push) |
-| `twincat3-write-changelog` | Write `Versions/<ver>/changelog-<ver>.md` for library users |
-| `twincat3-new-struct` | Create a new struct as valid TcDUT XML |
-| `twincat3-new-enum` | Create a new enum as valid TcDUT XML with attribute pragmas |
-| `twincat3-new-gvl` | Create a new global variable list as valid TcGVL XML |
-| `twincat3-modbus-tcp-device` | Create Modbus TCP device integration with state machine |
-| `twincat3-modbus-rtu-device` | Create Modbus RTU device integration with FIFO buffer |
-| `twincat3-modbus-add-write` | Add write functionality to existing Modbus device FB |
-| `twincat3-mqtt-function-block` | Create MQTT FB with client, queue, reconnection, topic routing |
-| `twincat3-http-rest-client` | Create HTTP REST client FB with error mapping and param struct |
-| `twincat3-json-parse` | Add JSON parsing logic to existing FB with dynamic memory |
-| `twincat3-json-build` | Add JSON payload building logic to existing FB |
-| `twincat3-register-plcproj` | Register TcPOU, TcDUT, or TcGVL files in .plcproj |
-| `twincat3-fup-migrate` | Migrate TwinCAT FBD/FUP implementations to Structured Text |
-| `twincat3-cfc-migrate` | Migrate TwinCAT CFC implementations to Structured Text |
-| `twincat3-migrate` | Auto-detect FBD/CFC and migrate to Structured Text in one pass |
-| `twincat3-plcproj-sync` | Verify and sync TwinCAT .plcproj against disk |
-| `twincat3-infosys-mshc-lookup` | Look up a Beckhoff type or attribute from local offline InfoSys |
+| Command | Skill(s) | Description |
+|---------|----------|-------------|
+| `twincat3-cmd-commit` | `twincat3-git-commit` | Thematic Conventional Commits locally (never push) |
+| `twincat3-cmd-changelog` | `twincat3-changelog` | Write `Versions/<ver>/changelog-<ver>.md` |
+| `twincat3-cmd-release` | `twincat3-release` (+ changelog) | Version bump, validate, export, changelog |
+| `twincat3-cmd-validate` | `twincat3-validate` | MCP CheckAllObjects validation |
+| `twincat3-cmd-migrate` | `twincat3-migrate` (+ fup/cfc if needed) | FBD/CFC → ST (preview-first) |
+| `twincat3-cmd-plcproj-sync` | `twincat3-plcproj-sync` | Verify/sync `.plcproj` vs disk |
+| `twincat3-cmd-new-library` | `twincat3-new-library` | New PLC library scaffold |
+| `twincat3-cmd-modbus` | `twincat3-modbus` | Modbus TCP/RTU device integration |
+| `twincat3-cmd-mqtt` | `twincat3-mqtt` | MQTT FB (optional JSON) |
+| `twincat3-cmd-http` | `twincat3-http` | HTTP(S) REST client FB |
+| `twincat3-cmd-json` | `twincat3-json-strings` | JSON parse and/or build |
+| `twincat3-cmd-logging` | `twincat3-logging` | Structured MessageLog logging |
+| `twincat3-cmd-infosys` | `twincat3-infosys-mshc` (+ lookup fallback) | Beckhoff type/docs lookup |
+| `twincat3-cmd-attributes` | `twincat3-attributes` | Attribute pragma apply/explain |
+| `twincat3-cmd-code-style` | `twincat3-code-style` | Formatting + comments standards |
 
 ## Agents
 

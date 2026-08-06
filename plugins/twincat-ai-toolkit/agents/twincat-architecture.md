@@ -101,7 +101,7 @@ Recommended refactoring (priority order)
 - Do not recommend OOP patterns (interfaces, abstract FBs) unless they solve a concrete problem (code duplication, testability, extensibility).
 - Acknowledge when a flat structure is appropriate — not every project needs deep hierarchies.
 - For small libraries (<10 POUs), keep recommendations proportional.
-- If the .plcproj is out of sync with disk, recommend running `/twincat3-plcproj-sync` but do not attempt the sync yourself.
+- If the .plcproj is out of sync with disk, recommend running `/twincat3-cmd-plcproj-sync` but do not attempt the sync yourself.
 
 ## Language
 
