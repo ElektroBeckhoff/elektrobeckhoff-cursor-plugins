@@ -1,0 +1,43 @@
+---
+description: >-
+  InfoSys-backed TwinCAT3 page-fault / access-violation rules only (AND never
+  short-circuits; POINTER/REFERENCE/INTERFACE checks; __NEW/__DELETE; MEMCPY
+  size; array bounds). Skill twincat3-pagefault-audit.
+alwaysApply: false
+---
+
+# TwinCAT ST — Pagefault Safety (InfoSys-only)
+
+Use for page faults, access violations, null POINTER/REFERENCE/INTERFACE,
+`AND` vs `AND_THEN`, `__NEW`/`__DELETE`, MEMCPY size, array bounds, or
+`/twincat3-cmd-pagefault-audit`.
+
+Check-IDs: skill `twincat3-pagefault-audit` → `checklist.md` + `infosys-evidence.md`.
+
+## Hard rules (only MSHC-proven)
+
+| Topic | Required |
+|-------|----------|
+| `POINTER TO` | `p <> 0` before every `p^` / call through pointer (SA0039) |
+| `REFERENCE TO` | `__ISVALIDREF(ref)` before use |
+| Interface | `i <> 0` before method/property — **never** `__ISVALIDREF` |
+| `AND` / `OR` | Never use IEC `AND`/`OR` to guard a deref/index/call/division — always evaluates further operands; use nested `IF` or `AND_THEN`/`OR_ELSE` — **also in `WHILE`/`REPEAT` conditions** |
+| `__NEW` | Check result `<> 0` before use |
+| `__DELETE` | No use of operand or aliases after delete |
+| `MEMCPY`/`MEMMOVE`/`MEMSET` | Byte count `n` must not exceed real buffer (crash class) |
+| Arrays | Variable index within **declared** bounds |
+| Division | Divisor `<> 0` before `/`/`DIV` (InfoSys: exception → **task stop**; IDs `EX-DIV-*`, not pagefault) |
+
+## Do not report as pagefault (out of scope)
+
+- CONCAT / string truncation
+- MEMCPY null dest/src alone (returns 0)
+- Memory leak without `__DELETE` (unstable/leak ≠ pagefault ID)
+- Speculative lifetime / Online-Change / JSON toolkit IDs not in checklist
+- Treating `VAR_IN_OUT` as optional/invalid (InfoSys: always assigned)
+
+## Related
+
+- Command: `/twincat3-cmd-pagefault-audit`
+- Skill: `twincat3-pagefault-audit`
+- Agent: `twincat-pagefault-auditor`
