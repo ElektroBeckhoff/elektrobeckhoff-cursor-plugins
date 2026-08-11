@@ -1,0 +1,54 @@
+---
+description: >-
+  MCP STweep Format-code awareness. When to use twincat_stweep_status /
+  twincat_format_code / twincat_format_progress, install+license gates,
+  file/folder vs project confirm.
+alwaysApply: false
+---
+
+# TwinCAT MCP STweep Format
+
+Use when the user asks to format Structured Text via STweep, "Format code",
+or `/twincat3-cmd-format`. Detailed workflow: skill `twincat3-stweep-format`.
+
+## Tools (same session as `twincat_open`)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_stweep_status` | Install + DTE commands; includes `format_progress` snapshot |
+| `twincat_format_code` | Format file/folder/project via XAE Formatcode (not CLI) |
+| `twincat_format_progress` | Live job poll (`running`, `percent`, `current_file`) — no STA |
+
+Same `_get_bridge()` / DTE as `twincat_check_all_objects` / `twincat_build`.
+
+## Mandatory preflight
+
+1. `twincat_open` (prefer `.sln`; optional `xae_version`)
+2. `twincat_stweep_status` — require `installed`, `commands_loaded`, `ready=true` (no UI)
+3. `twincat_format_code` — license checked **fail-fast** on first Formatcode; abort rest if unlicensed
+
+Do **not** open the STweep License wizard for routine checks (`probe_license` defaults false). Optional `probe_license=true` only if the user explicitly wants the wizard status/days.
+
+If format returns `method=unlicensed` / `license_ok=false`: stop and tell the user to activate via **STweep → License** in XAE. Do not loop format. Never surface activation keys.
+
+## Long-running format
+
+- Prefer `wait=false` + poll `twincat_format_progress` for folders/projects (raise `timeout_seconds`).
+- MCP progress is **file-count** based; STweep may show its own XAE loading UI (not auto-dismissed).
+- Do not use `twincat_stweep_status` as the live poll — it uses STA and can block behind format.
+
+## Scope rules
+
+| `path` | `confirm` |
+|--------|-----------|
+| File `.TcPOU`/`.TcGVL`/`.TcDUT`/`.TcIO` | not required |
+| Folder (not PLC project root) | not required |
+| Empty / `.plcproj` / project root | **`confirm=true` required** |
+
+Never call STweep.CLI (separate license, not in team license).
+
+## Do not
+
+- Format the whole project without explicit user confirm
+- Treat STweep as a Beckhoff TE1000 API (it is a third-party VSIX)
+- Skip `twincat_open` and hope the focused XAE window is used — attach is by solution path / `xae_version`
