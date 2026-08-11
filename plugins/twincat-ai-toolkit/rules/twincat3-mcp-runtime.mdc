@@ -1,0 +1,99 @@
+---
+description: >-
+  MCP runtime / Usermode Runtime / ADS awareness. When to use UmRT, activate,
+  runtime messages, PLC start, and ADS symbol/list R/W tools.
+alwaysApply: false
+---
+
+# TwinCAT MCP Runtime & ADS
+
+Use when activating configurations, targeting Usermode Runtime (TC170x),
+diagnosing fatal/license/SAFEOP messages, or reading/writing PLC variables via ADS.
+
+Detailed E2E checklist: skill `twincat3-umrt-systemtest` /
+command `/twincat3-cmd-online-test`.
+
+## Tool discovery (canonical)
+
+Before calling any TwinCAT MCP tool: use **`GetMcpTools(server, toolName)`**
+(or server catalog) to load the live schema. Do **not** Glob/Read
+`mcps/**/tools/*.json` as the primary discovery path.
+
+## Canonical server ID
+
+| Mode | Server ID | When |
+|------|-----------|------|
+| **Team** | `plugin-twincat-ai-toolkit-mcp-twincat` | Marketplace / shared plugin |
+| **Local (dev)** | `user-mcp-twincat-local` | Unpushed repo `server.py` via `~/.cursor/mcp.json` key `mcp-twincat-local` |
+
+Pick **one** server per turn. Do **not** call the same tool on both servers
+(DTE/ROT races). Prefer local when developing unpushed MCP changes; otherwise
+use the plugin server.
+
+## Dual-XAE (4024 library / 4026 sample)
+
+Decision tree for `twincat_open(..., xae_version=…)`:
+
+1. Solution **already open** in any shell → attach to that instance
+   (`pin_honored=false` + `pin_ignored_reason` if pin differs).
+2. Empty shell of requested version → open there (`pin_honored=true`).
+3. Else create new instance of requested version (`created_new_instance=true`).
+
+Response fields: `requested_xae_version`, `attached_xae_version`,
+`pin_honored`, `pin_ignored_reason`, `created_new_instance`,
+`attached_instance_id`, `open_solutions[]`.
+
+Typical DeskCal flow: export library on **4024**, UmRT sample on **4026** —
+close/switch solution between steps; do not assume one shell does both.
+
+## Tool map
+
+### Usermode Runtime (no XAE required for start/stop)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_umrt_status` | Install + instances + MCP NetId |
+| `twincat_umrt_start` | Start instance (`confirm=true`; prefer `window_mode=hidden`) |
+| `twincat_umrt_stop` | Stop MCP instance only (`confirm=true`) |
+| `twincat_umrt_e2e` | Full chain orchestrator (`confirm=true`) |
+
+### XAE runtime (needs `twincat_open`)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_get_target` / `twincat_set_target` | AMS NetId (`confirm` on set) |
+| `twincat_io_list` / `twincat_io_set_disabled` | Disable I/O before UmRT activate (sets prereq) |
+| `twincat_activate` / `twincat_start` | Boot + StartRestart — use `activate_ok` / `boot_ok` |
+| `twincat_runtime_messages` | Prefer `since_last_activate=true`; severity summary |
+| `twincat_verify_library_on_target` | Export version vs sample / Boot `_Libraries` |
+| `twincat_task_list` / `twincat_task_info` | Real-time tasks |
+
+### ADS (pyads; XAE optional)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_runtime_state` | System + PLC readiness (`ready_for_ads`) |
+| `twincat_set_runtime_mode` | RUN/CONFIG/STOP via WriteControl (`confirm`) |
+| `twincat_plc_start` / `twincat_plc_stop` | PLC port 851 WriteControl (`confirm`) |
+| `twincat_ads_symbols` | Top-level symbol list (filtered) |
+| `twincat_ads_read` / `twincat_ads_write` | Single path R/W |
+| `twincat_ads_read_list` / `twincat_ads_write_list` | Batch Sum-Command R/W |
+
+## Critical rules
+
+1. **UmRT ≠ IPC** — After UmRT start, set target to the MCP UmRT NetId before activate.
+2. **Disable I/O** on UmRT (`twincat_io_set_disabled(all_devices=true)`). Session remembers `prereqs.io_disabled_all`.
+3. **Trial licenses** — blocking `user_action_required` only when license errors are detected (`licenses_ok=false`). Ask user in skill Step 0 if unknown; do not stop solely because target is UmRT.
+4. After activate/start use **`activate_ok` / `boot_ok`** (not Output-log tails). Call `twincat_runtime_messages(since_last_activate=true)`.
+5. **System RUN ≠ PLC ready** — use `ready_for_ads` from `twincat_runtime_state` / `plc_start` before ADS smoke.
+6. Prefer **`twincat_ads_read_list`**. Nested/`_` paths OK; single-var hide → 1808.
+7. Default ADS NetId: explicit → running MCP UmRT → XAE target → local.
+8. **Non-UmRT safety** — `target_is_mcp_umrt=false` → warn user before further control.
+9. **Confirm refusals** — `error_code=confirm_required`, `required_args`, `example_next_call`. Not a soft fail.
+10. **Timers slower on UmRT** — do not FAIL solely on wall-clock TON/TOF drift.
+
+## Destructive confirms
+
+`confirm=true` required for: UmRT start/stop, umrt_e2e, set_target, activate,
+start, io_set_disabled, set_runtime_mode, plc_start/stop, ads_write,
+ads_write_list. Refusal shape is always `error_code=confirm_required`.

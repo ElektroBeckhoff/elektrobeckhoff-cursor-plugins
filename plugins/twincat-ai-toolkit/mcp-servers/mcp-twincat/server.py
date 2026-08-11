@@ -1,14 +1,16 @@
 """
 TwinCAT MCP Server for Cursor IDE.
 
-Exposes TcXaeShell build automation, FBD/FUP-to-ST migration, and
-CFC-to-ST migration as MCP tools that Cursor can call directly:
-status check, solution open, CheckAllObjects, build, error retrieval,
-library export, close, FBD-to-ST migration, and CFC-to-ST migration.
+Exposes TcXaeShell build automation, runtime control (TE1000 + ADS),
+Usermode Runtime (TC170x), FBD/FUP-to-ST and CFC-to-ST migration as MCP tools:
+status/open/check/build/export/close, target/activate/start/tasks,
+UmRT start/stop, ADS mode + PLC + variable R/W, STweep format via DTE,
+migrators, plcproj, InfoSys.
 
 Transport: stdio  (Cursor starts this process as a child)
-COM:       All TcXaeShell interaction runs on a dedicated STA thread
-           managed by twincat_automation_interface.TcAutomationInterface (TE1000).
+COM:       TcXaeShell via STA thread (twincat_automation_interface / TE1000)
+ADS:       pyads client (ads/twincat_ads_client) for runtime & symbols
+UmRT:      TC170x Usermode Runtime controller (umrt/twincat_umrt_controller)
 """
 
 import io
@@ -24,7 +26,11 @@ from typing import Optional, List, Dict, Union
 from dataclasses import asdict
 
 _server_dir = os.path.dirname(os.path.abspath(__file__))
-for _subdir in ("migrator", "automation_interface", "plcproj", "infosys_mshc"):
+if _server_dir not in sys.path:
+    sys.path.insert(0, _server_dir)
+for _subdir in (
+    "migrator", "automation_interface", "plcproj", "infosys_mshc", "ads", "umrt",
+):
     _p = os.path.join(_server_dir, _subdir)
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -63,6 +69,203 @@ def _json(obj) -> str:
     return json.dumps(obj, indent=2, ensure_ascii=False)
 
 
+def _as_dict(obj) -> dict:
+    if hasattr(obj, "__dataclass_fields__"):
+        return asdict(obj)
+    if isinstance(obj, dict):
+        return dict(obj)
+    return {"value": obj}
+
+
+def _target_is_mcp_umrt() -> bool:
+    """True when XAE target NetId matches the running MCP UmRT instance."""
+    return bool(_target_context().get("target_is_mcp_umrt"))
+
+
+def _target_context(net_id: str = "") -> dict:
+    """Resolve whether a runtime-control NetId is the MCP Usermode Runtime.
+
+    net_id empty → use current XAE target (when a session is open).
+    """
+    umrt_id = ""
+    umrt_running = False
+    try:
+        umrt = _get_umrt()
+        umrt_id = umrt.get_mcp_ams_net_id_if_running() or ""
+        umrt_running = bool(umrt_id)
+        if not umrt_id:
+            try:
+                st = umrt.status()
+                umrt_id = getattr(st, "mcp_ams_net_id", "") or ""
+            except Exception:
+                pass
+    except Exception as exc:
+        log.debug("UmRT context failed: %s", exc)
+
+    target = (net_id or "").strip()
+    if not target:
+        try:
+            if HAS_WIN32:
+                tid = _get_bridge().get_target_net_id()
+                if getattr(tid, "success", False):
+                    target = (tid.net_id or "").strip()
+        except Exception as exc:
+            log.debug("XAE target context failed: %s", exc)
+
+    is_umrt = bool(umrt_id and target and target == umrt_id and umrt_running)
+    return {
+        "target_net_id": target,
+        "mcp_umrt_net_id": umrt_id,
+        "mcp_umrt_running": umrt_running,
+        "target_is_mcp_umrt": is_umrt,
+    }
+
+
+def _attach_target_safety(data: dict, operation: str, net_id: str = "") -> dict:
+    """Warn when activate/start/stop/mode hits a non-MCP-UmRT target."""
+    from user_actions import attach_non_umrt_target_warning
+
+    ctx = _target_context(net_id)
+    return attach_non_umrt_target_warning(
+        data,
+        operation=operation,
+        target_net_id=ctx["target_net_id"],
+        mcp_umrt_net_id=ctx["mcp_umrt_net_id"],
+        mcp_umrt_running=ctx["mcp_umrt_running"],
+        target_is_mcp_umrt=ctx["target_is_mcp_umrt"],
+    )
+
+
+def _enrich_umrt_runtime_result(result, operation: str = "runtime control") -> dict:
+    """Attach license / I/O prompts, structured activate flags, non-UmRT safety.
+
+    Agents must use activate_ok / boot_ok / licenses_ok — not log-tail text.
+    Trial license user_action_required is attached only on detected license errors.
+    """
+    from user_actions import (
+        attach_user_actions,
+        looks_like_license_error,
+        umrt_activate_actions,
+    )
+    from runtime_messages import (
+        infer_build_outcome,
+        looks_like_activate_canceled,
+        looks_like_boot_written,
+    )
+
+    data = _as_dict(result)
+    op = (operation or "").strip()
+    is_activate = op.endswith("activate") or "activate" in op
+    is_start = op.endswith("start") and "plc" not in op
+    com_ok = bool(data.get("success"))
+    blob = f"{data.get('message', '')} {data.get('error', '')}"
+    license_err = looks_like_license_error(blob)
+
+    # Prefer messages since last activate baseline (avoids stale pagefaults).
+    try:
+        msgs = _get_bridge().get_runtime_messages(since_last_activate=True)
+        md = _as_dict(msgs)
+        data["runtime_findings"] = md.get("findings") or []
+        data["has_blocking_runtime_error"] = bool(
+            md.get("has_blocking_runtime_error")
+            if "has_blocking_runtime_error" in md
+            else md.get("has_blocking_error")
+        )
+        data["history_incomplete"] = bool(md.get("history_incomplete", True))
+        if md.get("sys_manager_errors"):
+            data["sys_manager_errors"] = md["sys_manager_errors"]
+        if any(f.get("id") == "license" for f in data["runtime_findings"]):
+            license_err = True
+        pane_blob = "\n".join([
+            md.get("twincat_output") or "",
+            md.get("build_output_tail") or "",
+            md.get("sys_manager_errors") or "",
+            blob,
+        ])
+        canceled = looks_like_activate_canceled(pane_blob, blob)
+        boot_written = looks_like_boot_written(pane_blob) or (
+            com_ok and is_activate and not canceled
+        )
+        data["build_outcome"] = infer_build_outcome(pane_blob)
+        if data["runtime_findings"]:
+            ids = sorted({f.get("id") for f in data["runtime_findings"] if f.get("id")})
+            data["message"] = (
+                (data.get("message") or "")
+                + f" | runtime_findings={','.join(ids)} "
+                "(inspect via twincat_runtime_messages)"
+            ).strip(" |")
+    except Exception as exc:
+        log.debug("runtime message enrich failed: %s", exc)
+        data.setdefault("runtime_findings", [])
+        data.setdefault("has_blocking_runtime_error", False)
+        canceled = looks_like_activate_canceled(blob)
+        boot_written = False
+        data["build_outcome"] = infer_build_outcome(blob)
+        data["history_incomplete"] = True
+
+    blocking = bool(data.get("has_blocking_runtime_error"))
+    if is_activate:
+        if not com_ok:
+            status = "failed"
+            activate_ok = False
+        elif canceled or blocking:
+            status = "canceled" if canceled else "failed"
+            activate_ok = False
+        else:
+            status = "success"
+            activate_ok = True
+        boot_ok = bool(activate_ok and boot_written and not blocking)
+        data["status"] = status
+        data["activate_ok"] = activate_ok
+        data["boot_written"] = bool(boot_written)
+        data["boot_ok"] = boot_ok
+        if not activate_ok:
+            data["success"] = False
+        try:
+            prereqs = _get_bridge()._ensure_prereqs()
+            prereqs["last_activate_ok"] = activate_ok
+            prereqs["last_boot_ok"] = boot_ok
+        except Exception:
+            pass
+    elif is_start:
+        start_ok = bool(com_ok and not blocking and not looks_like_activate_canceled(blob))
+        data["status"] = "success" if start_ok else ("failed" if not com_ok else "failed")
+        data["boot_ok"] = start_ok
+        data["activate_ok"] = data.get("activate_ok")
+        if not start_ok:
+            data["success"] = False
+        try:
+            prereqs = _get_bridge()._ensure_prereqs()
+            prereqs["last_boot_ok"] = start_ok
+        except Exception:
+            pass
+
+    data["licenses_ok"] = (False if license_err else True)
+    data["blocking_license_issue"] = bool(license_err)
+    data["license_states"] = []
+
+    # I/O prereq: only attach when not already satisfied
+    io_needed = True
+    try:
+        prereqs = _get_bridge()._ensure_prereqs()
+        if prereqs.get("io_disabled_all"):
+            io_needed = False
+        data["prereqs"] = dict(prereqs)
+    except Exception:
+        data["prereqs"] = {}
+
+    action_ids = umrt_activate_actions(
+        license_error=license_err,
+        include_io=io_needed and (_target_is_mcp_umrt() or blocking),
+    )
+    if action_ids:
+        data = attach_user_actions(data, *action_ids)
+
+    ctx = _target_context()
+    data["target_net_id"] = ctx.get("target_net_id") or data.get("target_net_id") or ""
+    return _attach_target_safety(data, operation=operation)
+
+
 # ================================================================
 #  twincat_plcproj_info  (pure XML -- no COM / no XAE needed)
 # ================================================================
@@ -96,8 +299,9 @@ def twincat_status() -> str:
 
     Reports XAE install/running state, per-instance solution paths and
     COM-busy flags (modal dialog), visible TcXaeShell message boxes,
-    MCP session binding, SilentMode, recent auto-dismissed dialogs, and
-    SysManager error text when a session is attached.
+    MCP session binding, SilentMode, recent auto-dismissed dialogs,
+    SysManager error text, twincat_runtime_started, and target_net_id
+    when a session is attached.
 
     If ``dte_busy`` or ``blocking_dialogs`` is set, tell the user to
     dismiss the popup in XAE before retrying open/build/check — do not
@@ -134,6 +338,12 @@ def twincat_open(
     xae_version: str = "",
 ) -> str:
     """Open a TwinCAT solution in XAE and locate the PLC project.
+
+    XAE pin / attach: response includes requested_xae_version,
+    attached_xae_version, pin_honored, pin_ignored_reason,
+    created_new_instance, attached_instance_id, open_solutions[].
+    If the solution is already open in another shell, MCP attaches to that
+    instance even when xae_version differs (pin_honored=false).
 
     Accepts a single 'path' parameter that can be:
       - A .plcproj file  (opens directly)
@@ -320,6 +530,102 @@ def twincat_get_output_log() -> str:
 
 
 # ================================================================
+#  twincat_stweep_status / twincat_format_code  (STweep via XAE DTE)
+# ================================================================
+
+@mcp.tool()
+def twincat_stweep_status(probe_license: bool = False) -> str:
+    """Detect STweep install and Formatcode DTE commands (no UI by default).
+
+    STweep is a third-party XAE extension — not a Beckhoff Automation Interface
+    API. Default probes (background, no window):
+      - filesystem: TcXaeShell Extensions\\\\GeBa Engineering\\\\STweep*
+      - DTE commands when twincat_open session exists
+
+    License: by default NOT opened in the UI. Verified fail-fast on the first
+    twincat_format_code call. Optional probe_license=true opens STweep > License
+    wizard briefly (reads STATIC status only; never returns activation keys).
+
+    Response: success, installed, version, install_paths[], commands{},
+    commands_loaded, dte_attached, license_ok, license_state, license_detail,
+    license_days_remain, license_days_total, ready, message,
+    format_progress{} (live job snapshot; also via twincat_format_progress)."""
+
+    try:
+        return _json(_get_bridge().get_stweep_status(
+            probe_license=probe_license,
+        ))
+    except Exception as exc:
+        return _json({"success": False, "installed": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_format_progress() -> str:
+    """Poll live STweep format job progress (no STA / safe while formatting).
+
+    Use after twincat_format_code(..., wait=false) for large folders/projects.
+    Also works during a blocking wait=true call if the client can poll in parallel.
+
+    Response: running, phase (idle|starting|formatting|done|error), target,
+    files_total/done/formatted/failed, current_file, percent, elapsed_s,
+    message, result{} (final StweepFormatResult when finished)."""
+
+    try:
+        return _json(_get_bridge().get_format_progress())
+    except Exception as exc:
+        return _json({"success": False, "running": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_format_code(
+    path: str = "",
+    recursive: bool = True,
+    timeout_seconds: int = 300,
+    confirm: bool = False,
+    wait: bool = True,
+) -> str:
+    """Format Structured Text via STweep \"Format code\" in the open XAE shell.
+
+    Uses EnvDTE ExecuteCommand (same menu as Solution Explorer / editor
+    context menu). Does not use STweep.CLI.
+
+    Preflight (same session as twincat_open, no license window):
+      - STweep installed on disk
+      - Formatcode DTE commands loaded
+      - license: fail-fast on first Formatcode error (aborts remaining files)
+
+    Allowed without confirm (file / folder only):
+      - file: .TcPOU / .TcGVL / .TcDUT / .TcIO
+      - folder: formattable files in that folder (not the PLC project root)
+
+    Whole-project format requires confirm=true:
+      - path empty (open PLC project)
+      - path to a .plcproj
+      - path to the PLC project root directory (folder containing .plcproj)
+
+    wait=true (default): block until finished. wait=false: start in background
+    (method=async_started) and poll twincat_format_progress until running=false.
+    Prefer wait=false + higher timeout_seconds for many files. STweep may show
+    its own UI progress in XAE; MCP progress is file-count based.
+
+    Requires twincat_open first (same bridge session as build/check).
+
+    Response: success, method, command, target, files_*, installed,
+    license_ok, license_state, license_detail, async_started, message."""
+
+    try:
+        return _json(_get_bridge().format_code(
+            path=path,
+            recursive=recursive,
+            timeout_s=timeout_seconds,
+            confirm=confirm,
+            wait=wait,
+        ))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
 #  twincat_export_library
 # ================================================================
 
@@ -331,6 +637,7 @@ def twincat_export_library(
     compiled_library: bool = True,
     install_library: bool = True,
     install_compiled_library: bool = False,
+    force: bool = False,
 ) -> str:
     """Export the PLC project as .library and/or .compiled-library.
 
@@ -346,7 +653,14 @@ def twincat_export_library(
 
     Title and version are auto-read from the .plcproj file.
     Default output: <git_repo_root>/Versions/<ProjectVersion>/
-    Runs CheckAllObjects automatically before export -- fails if errors exist."""
+    Runs CheckAllObjects automatically before export -- fails if errors exist.
+
+    Guards: refuses ProjectVersion 0.0.0.0 and non-library projects unless
+    force=true. Always echoes resolved_plcproj_path, project_title,
+    project_version, output_dir. Prefer an explicit plcproj_path when a
+    sample solution is open."""
+
+    from export_guards import export_echo_fields, validate_export_target
 
     bridge = _get_bridge()
     sln_path = bridge._call_sta(lambda: bridge._sln_path, timeout=5) or ""
@@ -354,13 +668,21 @@ def twincat_export_library(
         lambda: bridge._plcproj_file_path, timeout=5,
     ) or ""
 
+    plcproj_explicit = bool(plcproj_path and str(plcproj_path).strip())
     if not plcproj_path:
         plcproj_path = plcproj_from_bridge or _auto_detect_plcproj(sln_path)
 
     if not plcproj_path or not os.path.isfile(plcproj_path):
         return _json({
             "success": False,
+            "ok": False,
+            "error_code": "plcproj_not_found",
             "error": (
+                f"Cannot find .plcproj file. "
+                f"Searched from: {sln_path or 'cwd'}. "
+                f"Pass plcproj_path explicitly."
+            ),
+            "message": (
                 f"Cannot find .plcproj file. "
                 f"Searched from: {sln_path or 'cwd'}. "
                 f"Pass plcproj_path explicitly."
@@ -377,8 +699,22 @@ def twincat_export_library(
             repo = os.path.dirname(sln_path) if sln_path else os.getcwd()
         output_dir = os.path.join(repo, "Versions", version)
 
+    refused = validate_export_target(
+        plcproj_path=plcproj_path,
+        info=info,
+        output_dir=output_dir,
+        plcproj_from_bridge=plcproj_from_bridge,
+        plcproj_explicit=plcproj_explicit,
+        force=force,
+    )
+    if refused:
+        return _json(refused)
+
+    echo = export_echo_fields(
+        plcproj_path=plcproj_path, info=info, output_dir=output_dir,
+    )
     try:
-        return _json(
+        result = _as_dict(
             bridge.export_library(
                 output_dir, title, version,
                 library=library,
@@ -387,8 +723,12 @@ def twincat_export_library(
                 install_compiled_library=install_compiled_library,
             )
         )
+        result.update(echo)
+        return _json(result)
     except Exception as exc:
-        return _json({"success": False, "error": str(exc)})
+        err = {"success": False, "ok": False, "error": str(exc), "message": str(exc)}
+        err.update(echo)
+        return _json(err)
 
 
 # ================================================================
@@ -424,6 +764,922 @@ def twincat_close(force_quit: bool = False) -> str:
             _bridge.shutdown()
         _bridge = None
         return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
+#  Runtime / target (TE1000 COM — requires twincat_open)
+# ================================================================
+
+@mcp.tool()
+def twincat_get_target() -> str:
+    """Get the TwinCAT target AMS NetId (ITcSysManager2.GetTargetNetId).
+
+    Requires an open XAE session (twincat_open)."""
+    try:
+        return _json(_get_bridge().get_target_net_id())
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_set_target(net_id: str, confirm: bool = False) -> str:
+    """Set the TwinCAT target AMS NetId (ITcSysManager2.SetTargetNetId).
+
+    Requires confirm=true. Requires an open XAE session (twincat_open).
+    Example net_id: \"5.80.201.232.1.1\" or \"127.0.0.1.1.1\".
+
+    Safety: if net_id is not the running MCP Usermode Runtime, the result
+    includes warnings + user_action_required (non_umrt_target_control)."""
+    try:
+        raw = _as_dict(_get_bridge().set_target_net_id(net_id, confirm=confirm))
+        return _json(_attach_target_safety(
+            raw, operation="twincat_set_target", net_id=net_id,
+        ))
+    except Exception as exc:
+        return _json(_attach_target_safety(
+            {"success": False, "error": str(exc)},
+            operation="twincat_set_target",
+            net_id=net_id,
+        ))
+
+
+@mcp.tool()
+def twincat_activate(confirm: bool = False) -> str:
+    """Activate the TwinCAT configuration (ITcSysManager.ActivateConfiguration).
+
+    Same as \"Activate Configuration\" / Save To Registry in XAE. Writes the
+    boot project to the selected target. Does NOT start TwinCAT — call
+    twincat_start afterwards. Requires confirm=true and twincat_open.
+
+    Structured fields: status, activate_ok, boot_written, boot_ok,
+    build_outcome, licenses_ok, has_blocking_runtime_error. Use activate_ok
+    (not log tails). Trial-license user_action_required only when a license
+    error is detected. Disable I/O via twincat_io_set_disabled before UmRT
+    activate (prereq is remembered for the session).
+
+    Safety: non-UmRT targets get warnings + non_umrt_target_control
+    (real IPC / external system)."""
+    try:
+        raw = _get_bridge().activate_configuration(confirm=confirm)
+        return _json(_enrich_umrt_runtime_result(raw, operation="twincat_activate"))
+    except Exception as exc:
+        from user_actions import attach_user_actions, looks_like_license_error
+        data = {"success": False, "error": str(exc), "activate_ok": False,
+                "status": "failed", "licenses_ok": None}
+        if looks_like_license_error(str(exc)):
+            data = attach_user_actions(data, "umrt_trial_license")
+            data["licenses_ok"] = False
+            data["blocking_license_issue"] = True
+        return _json(_attach_target_safety(data, operation="twincat_activate"))
+
+
+@mcp.tool()
+def twincat_start(confirm: bool = False) -> str:
+    """Start or restart TwinCAT on the target (ITcSysManager.StartRestartTwinCAT).
+
+    If TwinCAT is stopped it starts; if already running it restarts.
+    TE1000 has no StopTwinCAT — use twincat_set_runtime_mode(mode=\"config\")
+    via ADS to enter Config mode. Requires confirm=true and twincat_open.
+
+    Structured fields: status, boot_ok, licenses_ok, has_blocking_runtime_error.
+    Trial-license user_action_required only when license errors are detected.
+
+    Safety: non-UmRT targets get warnings + non_umrt_target_control."""
+    try:
+        raw = _get_bridge().start_restart_twincat(confirm=confirm)
+        return _json(_enrich_umrt_runtime_result(raw, operation="twincat_start"))
+    except Exception as exc:
+        from user_actions import attach_user_actions, looks_like_license_error
+        data = {"success": False, "error": str(exc), "boot_ok": False,
+                "status": "failed", "licenses_ok": None}
+        if looks_like_license_error(str(exc)):
+            data = attach_user_actions(data, "umrt_trial_license")
+            data["licenses_ok"] = False
+            data["blocking_license_issue"] = True
+        return _json(_attach_target_safety(data, operation="twincat_start"))
+
+
+@mcp.tool()
+def twincat_task_list() -> str:
+    """List Real-Time tasks under TIRT (ITcSmTreeItem children).
+
+    Returns name, path_name, item_sub_type for each task.
+    Requires twincat_open."""
+    try:
+        return _json(_get_bridge().list_tasks())
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_task_info(task_path: str = "") -> str:
+    """Get detailed task info via ProduceXml (cycle time, priority, …).
+
+    task_path: full path (e.g. \"TIRT^PlcTask\") or bare task name.
+    Requires twincat_open."""
+    try:
+        return _json(_get_bridge().get_task_info(task_path))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_io_list() -> str:
+    """List I/O devices under TIID with Disabled state (ITcSmTreeItem).
+
+    Needed before Usermode Runtime activate: UmRT has no EtherCAT; leave
+    physical I/O disabled (InfoSys TC170x Limitations). Requires twincat_open."""
+    try:
+        return _json(_get_bridge().list_io_devices())
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_io_set_disabled(
+    path: str = "",
+    disabled: bool = True,
+    all_devices: bool = False,
+    confirm: bool = False,
+) -> str:
+    """Enable/disable I/O devices via ITcSmTreeItem.Disabled (SMDS_DISABLED=1).
+
+    Use before twincat_activate when targeting Usermode Runtime so SAFEOP
+    does not fail on missing EtherCAT/hardware (AdsError 1823).
+
+    path: full \"TIID^…\" or bare device name. Or set all_devices=true.
+    Requires confirm=true and twincat_open.
+    On success with all_devices=true, sets session prereq io_disabled_all."""
+    try:
+        data = _as_dict(_get_bridge().set_io_disabled(
+            path=path,
+            disabled=disabled,
+            all_devices=all_devices,
+            confirm=confirm,
+        ))
+        try:
+            data["prereqs"] = dict(_get_bridge()._ensure_prereqs())
+        except Exception:
+            pass
+        return _json(data)
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
+#  Usermode Runtime (TC170x — own MCP instance)
+# ================================================================
+
+_umrt_controller = None
+
+
+def _get_umrt():
+    global _umrt_controller
+    if _umrt_controller is None:
+        from twincat_umrt_controller import UmrtController
+        _umrt_controller = UmrtController()
+    return _umrt_controller
+
+
+def _umrt_instance_arg(instance: str = "") -> str:
+    """Empty instance → this MCP session's default UmRT name."""
+    if instance and str(instance).strip():
+        return str(instance).strip()
+    return _get_umrt().mcp_instance
+
+
+@mcp.tool()
+def twincat_umrt_status() -> str:
+    """Status of TwinCAT 3 Usermode Runtime (TC170x) instances.
+
+    Reports install paths, all ProgramData instances, running state,
+    PIDs, and AmsNetIds. Marks this MCP session's instance
+    (workspace-scoped name, or TWINCAT_UMRT_INSTANCE / pid mode).
+    Does not require XAE / twincat_open."""
+    try:
+        from twincat_umrt_controller import status_to_dict
+        return _json(status_to_dict(_get_umrt().status()))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_umrt_start(
+    instance: str = "",
+    confirm: bool = False,
+    window_mode: str = "minimized",
+) -> str:
+    """Start a TwinCAT Usermode Runtime instance (TC170x).
+
+    Default instance is session-scoped (UmRT_CursorMCP_<workspaceHash>),
+    created from UmRT_Template on first start. Override with instance= or
+    env TWINCAT_UMRT_INSTANCE. For one UmRT per MCP process set
+    TWINCAT_UMRT_SESSION_MODE=pid. Runs alongside UmRT_Default / other
+    sessions. Requires confirm=true. ADS tools then default to this NetId.
+
+    window_mode:
+      - minimized (default): Beckhoff Start.bat → minimized console window
+      - hidden: no console window (CREATE_NO_WINDOW); preferred for MCP.
+        Mode changes via twincat_start (COM), not console keys r/c/x.
+
+    Returns umrt_console_window info. I/O disable is a non-blocking
+    prerequisite reminder only when not yet satisfied in the MCP session.
+    Trial-license user_action_required is NOT attached on start — only when
+    activate/start later detect a license error (ask user in skill Step 0
+    if licenses are unknown)."""
+    try:
+        from twincat_umrt_controller import op_to_dict
+        from user_actions import attach_user_actions
+        from mcp_errors import confirm_refused
+
+        if not confirm:
+            return _json(confirm_refused(
+                "twincat_umrt_start",
+                example_args={
+                    "instance": instance or "",
+                    "window_mode": window_mode or "minimized",
+                    "confirm": True,
+                },
+            ))
+
+        data = op_to_dict(
+            _get_umrt().start(
+                instance=_umrt_instance_arg(instance),
+                confirm=confirm,
+                window_mode=window_mode or "minimized",
+            )
+        )
+        action_ids = ["umrt_console_window"]
+        io_needed = True
+        try:
+            if HAS_WIN32 and _get_bridge()._ensure_prereqs().get("io_disabled_all"):
+                io_needed = False
+        except Exception:
+            pass
+        if io_needed:
+            action_ids.append("umrt_io_disabled")
+        return _json(attach_user_actions(data, *action_ids))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_umrt_stop(
+    instance: str = "",
+    confirm: bool = False,
+) -> str:
+    """Stop a TwinCAT Usermode Runtime instance by process name match.
+
+    Empty instance stops this MCP session's default UmRT only — not the
+    user's UmRT_Default or other sessions. Requires confirm=true."""
+    try:
+        from twincat_umrt_controller import op_to_dict
+        from mcp_errors import confirm_refused
+
+        if not confirm:
+            return _json(confirm_refused(
+                "twincat_umrt_stop",
+                example_args={"instance": instance or "", "confirm": True},
+            ))
+        return _json(op_to_dict(
+            _get_umrt().stop(instance=_umrt_instance_arg(instance),
+                             confirm=confirm)
+        ))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
+#  ADS runtime / variables (pyads — XAE optional)
+# ================================================================
+
+def _resolve_ads_net_id(net_id: str = "") -> str:
+    """Prefer explicit net_id, else running MCP UmRT, else session, else local."""
+    if net_id and str(net_id).strip():
+        return str(net_id).strip()
+    try:
+        umrt_id = _get_umrt().get_mcp_ams_net_id_if_running()
+        if umrt_id:
+            return umrt_id
+    except Exception as exc:
+        log.debug("ADS net_id from UmRT failed: %s", exc)
+    try:
+        if HAS_WIN32:
+            bridge = _get_bridge()
+            if bridge._sys_man or bridge._dte:
+                tid = bridge.get_target_net_id()
+                if getattr(tid, "success", False) and tid.net_id:
+                    return tid.net_id
+    except Exception as exc:
+        log.debug("ADS net_id from session failed: %s", exc)
+    from twincat_ads_client import local_net_id
+    return local_net_id()
+
+
+@mcp.tool()
+def twincat_runtime_state(net_id: str = "", plc_port: int = 851) -> str:
+    """Read TwinCAT System + PLC ADS readiness.
+
+    Returns system ads_state (port 10000), plc_ads_state (plc_port, default
+    851), ready_for_ads, blocking_reasons, and optional COM IsTwinCATStarted.
+    ready_for_ads is true only when system and PLC are RUN and there is no
+    fresh blocking runtime error. net_id optional — defaults to MCP UmRT,
+    then session target, else local."""
+    from twincat_ads_client import AdsClient, ads_available
+    from readiness import compose_readiness
+
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    plc_port = int(plc_port or 851)
+    try:
+        with AdsClient(resolved, port=10000) as ads:
+            state = ads.read_state()
+        system_ads = str(state.get("ads_state") or "")
+        plc_ads = ""
+        plc_err = ""
+        try:
+            with AdsClient(resolved, port=plc_port) as plc:
+                plc_state = plc.read_state()
+            plc_ads = str(plc_state.get("ads_state") or "")
+            state["plc_device_state"] = plc_state.get("device_state")
+        except Exception as exc:
+            plc_err = str(exc)
+            state["plc_error"] = plc_err
+
+        com_started = None
+        blocking = None
+        try:
+            if HAS_WIN32:
+                st = _get_bridge().get_status()
+                com_started = getattr(st, "twincat_runtime_started", None)
+                try:
+                    msgs = _get_bridge().get_runtime_messages(since_last_activate=True)
+                    blocking = bool(getattr(msgs, "has_blocking_error", False))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        state["com_is_twincat_started"] = com_started
+        state["net_id"] = resolved
+        ready = compose_readiness(
+            system_ads_state=system_ads,
+            plc_ads_state=plc_ads,
+            plc_port=plc_port,
+            has_blocking_runtime_error=blocking,
+            net_id=resolved,
+        )
+        if plc_err and not plc_ads:
+            ready["blocking_reasons"].append("plc_ads_read_failed")
+            ready["ready_for_ads"] = False
+        state.update(ready)
+        return _json(state)
+    except Exception as exc:
+        return _json({"success": False, "net_id": resolved, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_set_runtime_mode(
+    mode: str = "config",
+    net_id: str = "",
+    confirm: bool = False,
+) -> str:
+    """Set TwinCAT runtime mode via ADS System Service WriteControl.
+
+    mode: \"run\" | \"config\" | \"stop\". This is how TwinCAT is stopped /
+    switched to Config (TE1000 has no StopTwinCAT).
+    Requires confirm=true. net_id optional.
+
+    Safety: warns when the resolved NetId is not the MCP Usermode Runtime."""
+    from twincat_ads_client import AdsClient, ads_available
+
+    if not confirm:
+        from mcp_errors import confirm_refused
+        return _json(confirm_refused(
+            "twincat_set_runtime_mode",
+            example_args={"mode": mode, "net_id": net_id, "confirm": True},
+        ))
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=10000) as ads:
+            result = ads.set_ads_state(mode)
+        result["net_id"] = resolved
+        return _json(_attach_target_safety(
+            result,
+            operation=f"twincat_set_runtime_mode({mode})",
+            net_id=resolved,
+        ))
+    except Exception as exc:
+        return _json(_attach_target_safety(
+            {"success": False, "net_id": resolved, "error": str(exc)},
+            operation=f"twincat_set_runtime_mode({mode})",
+            net_id=resolved,
+        ))
+
+
+@mcp.tool()
+def twincat_plc_start(
+    net_id: str = "",
+    port: int = 851,
+    confirm: bool = False,
+) -> str:
+    """Start the PLC runtime via ADS WriteControl (AdsState.RUN).
+
+    Default port 851 (first PLC runtime). Requires confirm=true.
+    Response includes ready_for_ads after the mode change.
+
+    Safety: warns when the resolved NetId is not the MCP Usermode Runtime."""
+    from twincat_ads_client import AdsClient, ads_available
+    from readiness import compose_readiness
+
+    if not confirm:
+        from mcp_errors import confirm_refused
+        return _json(confirm_refused(
+            "twincat_plc_start",
+            example_args={"net_id": net_id, "port": port, "confirm": True},
+        ))
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.set_ads_state("run")
+        result["net_id"] = resolved
+        result["port"] = port
+        result["plc_start_ok"] = bool(result.get("success", True))
+        sys_ads = ""
+        try:
+            with AdsClient(resolved, port=10000) as sys_ads_client:
+                sys_ads = str(sys_ads_client.read_state().get("ads_state") or "")
+        except Exception:
+            pass
+        plc_ads = str(result.get("ads_state") or "RUN")
+        result.update(compose_readiness(
+            system_ads_state=sys_ads,
+            plc_ads_state=plc_ads,
+            plc_port=port,
+            plc_start_ok=result["plc_start_ok"],
+            net_id=resolved,
+        ))
+        return _json(_attach_target_safety(
+            result, operation="twincat_plc_start", net_id=resolved,
+        ))
+    except Exception as exc:
+        return _json(_attach_target_safety(
+            {"success": False, "net_id": resolved, "port": port, "error": str(exc),
+             "plc_start_ok": False, "ready_for_ads": False},
+            operation="twincat_plc_start",
+            net_id=resolved,
+        ))
+
+
+@mcp.tool()
+def twincat_plc_stop(
+    net_id: str = "",
+    port: int = 851,
+    confirm: bool = False,
+) -> str:
+    """Stop the PLC runtime via ADS WriteControl (AdsState.STOP).
+
+    Default port 851. Requires confirm=true.
+
+    Safety: warns when the resolved NetId is not the MCP Usermode Runtime."""
+    from twincat_ads_client import AdsClient, ads_available
+
+    if not confirm:
+        from mcp_errors import confirm_refused
+        return _json(confirm_refused(
+            "twincat_plc_stop",
+            example_args={"net_id": net_id, "port": port, "confirm": True},
+        ))
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.set_ads_state("stop")
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(_attach_target_safety(
+            result, operation="twincat_plc_stop", net_id=resolved,
+        ))
+    except Exception as exc:
+        return _json(_attach_target_safety(
+            {"success": False, "net_id": resolved, "port": port, "error": str(exc)},
+            operation="twincat_plc_stop",
+            net_id=resolved,
+        ))
+
+
+@mcp.tool()
+def twincat_runtime_messages(
+    max_chars: int = 12000,
+    since_last_activate: bool = False,
+    since_timestamp: float = 0.0,
+) -> str:
+    """Read TwinCAT runtime / activate messages from the XAE Output window.
+
+    Returns TwinCAT + Build pane text, GetLastErrorMessages, classified
+    findings, error_count/warning_count, has_blocking_runtime_error, sources,
+    and history_incomplete. Prefer since_last_activate=true after
+    twincat_activate to avoid stale pagefaults. ADS Logger history is not
+    available (history_incomplete). Requires twincat_open."""
+    try:
+        return _json(_get_bridge().get_runtime_messages(
+            max_chars=max_chars,
+            since_last_activate=since_last_activate,
+            since_timestamp=since_timestamp,
+        ))
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_verify_library_on_target(
+    expected_version: str = "",
+    library_name: str = "",
+    library_plcproj_path: str = "",
+    sample_plcproj_path: str = "",
+    sample_reference_version: str = "",
+    search_root: str = "",
+) -> str:
+    """Compare exported library version vs sample reference and Boot/_Libraries.
+
+    Pass expected_version (or library_plcproj_path to read ProjectVersion).
+    Optionally sample_reference_version / sample_plcproj_path and search_root
+    (solution folder). On mismatch returns next_actions:
+    refresh_references → rebuild → activate. If _Libraries is not found,
+    verify_incomplete=true (not a fake PASS)."""
+    from library_verify import verify_library_versions
+
+    expected = (expected_version or "").strip()
+    lib_name = (library_name or "").strip()
+    if library_plcproj_path and os.path.isfile(library_plcproj_path):
+        meta = _read_plcproj_meta(library_plcproj_path)
+        if not expected:
+            expected = meta.get("version") or ""
+        if not lib_name:
+            lib_name = meta.get("title") or meta.get("name") or ""
+
+    roots: list[str] = []
+    if search_root:
+        roots.append(search_root)
+    if sample_plcproj_path:
+        roots.append(sample_plcproj_path)
+    try:
+        if HAS_WIN32:
+            sln = _get_bridge()._call_sta(
+                lambda: _get_bridge()._sln_path, timeout=5,
+            ) or ""
+            if sln:
+                roots.append(sln)
+    except Exception:
+        pass
+
+    return _json(verify_library_versions(
+        expected_version=expected,
+        library_name=lib_name,
+        sample_plcproj_path=sample_plcproj_path,
+        sample_reference_version=sample_reference_version,
+        search_roots=roots,
+    ))
+
+
+@mcp.tool()
+def twincat_umrt_e2e(
+    sln_path: str,
+    xae_version: str = "4026",
+    window_mode: str = "hidden",
+    plc_port: int = 851,
+    symbol_prefix: str = "",
+    read_symbols: str = "",
+    write_symbol: str = "",
+    write_value: str = "",
+    write_plc_type: str = "",
+    skip_write: bool = False,
+    confirm: bool = False,
+) -> str:
+    """Run the full UmRT systemtest chain (same steps as twincat3-umrt-systemtest).
+
+    Requires confirm=true. Orchestrates: UmRT start → open → I/O disable →
+    set target → activate → start → runtime_messages → sys/PLC RUN →
+    ADS symbols + read_list (+ optional write). Prefer this over 12 separate
+    tool calls when running an online test. Uses live TwinCAT on this host."""
+    from mcp_errors import confirm_refused
+
+    if not confirm:
+        return _json(confirm_refused(
+            "twincat_umrt_e2e",
+            example_args={
+                "sln_path": sln_path,
+                "xae_version": xae_version or "4026",
+                "confirm": True,
+            },
+        ))
+    if not sln_path or not os.path.isfile(sln_path):
+        return _json({
+            "success": False,
+            "ok": False,
+            "error_code": "sln_not_found",
+            "error": f"Solution not found: {sln_path}",
+            "message": f"Solution not found: {sln_path}",
+        })
+
+    try:
+        from systemtest.umrt_chain import (
+            SystemtestConfig,
+            build_live_backends,
+            run_umrt_systemtest,
+        )
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "error": f"umrt_chain import failed: {exc}",
+        })
+
+    reads: list[str] = []
+    if read_symbols and str(read_symbols).strip():
+        try:
+            parsed = json.loads(read_symbols)
+            if isinstance(parsed, list):
+                reads = [str(x) for x in parsed]
+            else:
+                reads = [s.strip() for s in str(read_symbols).split(",") if s.strip()]
+        except json.JSONDecodeError:
+            reads = [s.strip() for s in str(read_symbols).split(",") if s.strip()]
+
+    config = SystemtestConfig(
+        sln_path=sln_path,
+        xae_version=xae_version or "4026",
+        window_mode=window_mode or "hidden",
+        plc_port=int(plc_port or 851),
+        symbol_prefix=symbol_prefix or "",
+        read_symbols=reads,
+        write_symbol=write_symbol or "",
+        write_value=write_value or "",
+        write_plc_type=write_plc_type or "",
+        skip_write=bool(skip_write),
+    )
+    try:
+        report = run_umrt_systemtest(config, build_live_backends())
+        return _json({
+            "success": bool(report.passed),
+            "ok": bool(report.passed),
+            "passed": bool(report.passed),
+            "net_id": report.net_id,
+            "ask_user": list(report.ask_user or []),
+            "summary_lines": list(report.summary_lines or []),
+            "checklist": report.format_checklist(),
+            "steps": [
+                {
+                    "name": s.name,
+                    "passed": s.passed,
+                    "detail": s.detail,
+                }
+                for s in report.steps
+            ],
+            "message": "UmRT E2E PASS" if report.passed else "UmRT E2E FAIL",
+        })
+    except Exception as exc:
+        return _json({"success": False, "ok": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_ads_symbols(
+    prefix: str = "",
+    name_contains: str = "",
+    type_contains: str = "",
+    regex: str = "",
+    max_symbols: int = 500,
+    net_id: str = "",
+    port: int = 851,
+) -> str:
+    """List top-level ADS symbols on the PLC (filtered).
+
+    Filters: prefix (e.g. \"P_Sample_Room.\"), name_contains, type_contains
+    (e.g. \"FB_EB_BA\"), regex. max_symbols default 500 (cap 5000).
+    Nested/private paths are often missing here but still R/W via
+    twincat_ads_read/write with the full instance path (incl. members of
+    library FBs whose type has {attribute 'hide'}; not single-var hide).
+    PLC must be RUN (twincat_plc_start if ADSSTATE_INVALID)."""
+    from twincat_ads_client import AdsClient, ads_available
+
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.list_symbols(
+                prefix=prefix,
+                name_contains=name_contains,
+                type_contains=type_contains,
+                regex=regex,
+                max_symbols=max_symbols,
+            )
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(result)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "net_id": resolved,
+            "port": port,
+            "error": str(exc),
+        })
+
+
+@mcp.tool()
+def twincat_ads_read(
+    symbol: str,
+    net_id: str = "",
+    port: int = 851,
+) -> str:
+    """Read a PLC variable by full ADS symbol path.
+
+    Examples: \"MAIN.bEnable\", \"P_Sample_Room.fbRoomControl._bGateOpen\",
+    \"P_Sample_Room.fbDaliLight1._bValidLightControl\" (member of hide base FB).
+    Nested/private paths work even if absent from twincat_ads_symbols.
+    Single-variable {attribute 'hide'} / hide PROPERTY → not found.
+    For many symbols at once use twincat_ads_read_list. Default port 851."""
+    from twincat_ads_client import AdsClient, ads_available
+
+    if not symbol or not str(symbol).strip():
+        return _json({"success": False, "error": "symbol is empty"})
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.read_by_name(symbol.strip())
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(result)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "symbol": symbol,
+            "net_id": resolved,
+            "port": port,
+            "error": str(exc),
+        })
+
+
+@mcp.tool()
+def twincat_ads_read_list(
+    symbols: str,
+    net_id: str = "",
+    port: int = 851,
+    ads_sub_commands: int = 500,
+) -> str:
+    """Read many PLC variables in one ADS Sum-Command batch.
+
+    symbols: JSON array '[\"MAIN.bEnable\", \"P_Sample_Room.…\"]' or
+    newline/comma-separated paths. Uses pyads read_list_by_name (chunked by
+    ads_sub_commands, default/max 500). Returns values map path→value.
+    Prefer this over many twincat_ads_read calls for large lists."""
+    from twincat_ads_client import AdsClient, ads_available, parse_symbol_list
+
+    names = parse_symbol_list(symbols)
+    if not names:
+        return _json({"success": False, "error": "symbols list is empty"})
+    if len(names) > 2000:
+        return _json({
+            "success": False,
+            "error": f"Too many symbols ({len(names)}); max 2000 per call",
+        })
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.read_list_by_name(
+                names, ads_sub_commands=ads_sub_commands,
+            )
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(result)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "net_id": resolved,
+            "port": port,
+            "error": str(exc),
+        })
+
+
+@mcp.tool()
+def twincat_ads_write(
+    symbol: str,
+    value: str,
+    plc_type: str = "",
+    net_id: str = "",
+    port: int = 851,
+    confirm: bool = False,
+) -> str:
+    """Write a PLC variable by full ADS symbol path.
+
+    Same path rules as twincat_ads_read (nested/private OK; type-level hide
+    OK via instance path; single-var hide not accessible).
+    value is a string, converted via plc_type when given
+    (BOOL, INT, DINT, UINT, UDINT, REAL, LREAL, STRING, BYTE, WORD, DWORD)
+    or inferred. For many symbols use twincat_ads_write_list.
+    Requires confirm=true."""
+    from twincat_ads_client import AdsClient, ads_available
+    from mcp_errors import confirm_refused
+
+    if not confirm:
+        return _json(confirm_refused(
+            "twincat_ads_write",
+            example_args={
+                "symbol": symbol,
+                "value": value,
+                "plc_type": plc_type,
+                "net_id": net_id,
+                "port": port,
+                "confirm": True,
+            },
+        ))
+    if not symbol or not str(symbol).strip():
+        return _json({"success": False, "error": "symbol is empty"})
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.write_by_name(
+                symbol.strip(), value, plc_type=plc_type or None,
+            )
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(result)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "symbol": symbol,
+            "net_id": resolved,
+            "port": port,
+            "error": str(exc),
+        })
+
+
+@mcp.tool()
+def twincat_ads_write_list(
+    values: str,
+    net_id: str = "",
+    port: int = 851,
+    ads_sub_commands: int = 500,
+    confirm: bool = False,
+) -> str:
+    """Write many PLC variables in one ADS Sum-Command batch.
+
+    values: JSON object '{\"MAIN.bEnable\": true, \"P_Sample_Room.…._nX\": 2}'.
+    Uses pyads write_list_by_name (chunked). Requires confirm=true."""
+    from twincat_ads_client import (
+        AdsClient, ads_available, parse_symbol_value_map,
+    )
+    from mcp_errors import confirm_refused
+
+    if not confirm:
+        return _json(confirm_refused(
+            "twincat_ads_write_list",
+            example_args={
+                "values": values,
+                "net_id": net_id,
+                "port": port,
+                "confirm": True,
+            },
+        ))
+    try:
+        payload = parse_symbol_value_map(values)
+    except Exception as exc:
+        return _json({"success": False, "error": f"Invalid values JSON: {exc}"})
+    if not payload:
+        return _json({"success": False, "error": "values object is empty"})
+    if len(payload) > 2000:
+        return _json({
+            "success": False,
+            "error": f"Too many symbols ({len(payload)}); max 2000 per call",
+        })
+    if not ads_available():
+        return _json({"success": False, "error": "pyads not installed. pip install pyads"})
+    resolved = _resolve_ads_net_id(net_id)
+    try:
+        with AdsClient(resolved, port=port) as ads:
+            result = ads.write_list_by_name(
+                payload, ads_sub_commands=ads_sub_commands,
+            )
+        result["net_id"] = resolved
+        result["port"] = port
+        return _json(result)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "net_id": resolved,
+            "port": port,
+            "error": str(exc),
+        })
 
 
 # ================================================================
@@ -1131,7 +2387,11 @@ def _read_plcproj_meta(plcproj_path: str) -> dict:
         return {}
     try:
         info = read_project_info(plcproj_path)
-        return {k: info[k] for k in ("title", "version", "company", "name")}
+        keys = (
+            "title", "version", "company", "name", "released",
+            "project_category", "is_library_project", "plcproj_path",
+        )
+        return {k: info[k] for k in keys if k in info}
     except Exception:
         return {}
 

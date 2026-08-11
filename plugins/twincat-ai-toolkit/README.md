@@ -126,19 +126,19 @@ pywin32>=306
 
 **Fix (applied):** The `.mcp.json` uses a Python bootstrap (`python -c "..."`) that locates `server.py` in the plugin cache via `~/.cursor/plugins/cache/elektrobeckhoff-cursor-plugins/twincat-ai-toolkit/*/...` using `glob` and `runpy.run_path`. This is fully self-contained and does not rely on any Cursor environment variables (`cwd`, `CURSOR_PLUGIN_ROOT`) that are not available for MCP server processes.
 
-**Fallback:** Add the server manually to `~/.cursor/mcp.json` with an absolute path:
+**Fallback (local / Ultra):** Add a **dev** server to `~/.cursor/mcp.json` with an absolute path to the **repo** `server.py`. Use key `mcp-twincat-local` so Cursor exposes it as `user-mcp-twincat-local` (distinct from the plugin server `plugin-twincat-ai-toolkit-mcp-twincat`). Use **one** server per turn.
 
 ```json
 {
   "mcpServers": {
-    "mcp-twincat": {
+    "mcp-twincat-local": {
       "command": "python",
-      "args": ["C:/Users/<you>/.cursor/plugins/cache/elektrobeckhoff-cursor-plugins/twincat-ai-toolkit/<hash>/mcp-servers/mcp-twincat/server.py"]
+      "args": ["C:/Users/<you>/Documents/GitHub/ElektroBeckhoff/elektrobeckhoff-cursor-plugins/plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat/server.py"]
     }
   }
 }
 ```
 
-Replace `<you>` and `<hash>` with your username and the commit hash in `%USERPROFILE%\.cursor\plugins\cache\`.
+Replace the path with your clone. Discover tools via `GetMcpTools` — do not read tool JSON files.
 
 

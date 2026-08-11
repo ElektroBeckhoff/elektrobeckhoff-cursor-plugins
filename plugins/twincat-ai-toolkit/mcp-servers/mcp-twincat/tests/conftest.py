@@ -4,7 +4,10 @@ from pathlib import Path
 
 _root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_root))
-for _subdir in ("migrator", "automation_interface", "plcproj", "infosys_mshc"):
+for _subdir in (
+    "migrator", "automation_interface", "plcproj", "infosys_mshc", "ads", "umrt",
+    "systemtest",
+):
     _p = str(_root / _subdir)
     if _p not in sys.path:
         sys.path.insert(0, _p)

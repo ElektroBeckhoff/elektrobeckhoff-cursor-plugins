@@ -5,20 +5,31 @@ alwaysApply: false
 
 # TwinCAT MCP Build Automation
 
+## Tool discovery (canonical)
+
+Use **`GetMcpTools(server, toolName)`** before each call. Do not discover
+schemas by reading `mcps/**/tools/*.json`. Server IDs: see
+`twincat3-mcp-runtime` (team plugin vs local `user-mcp-twincat-local`).
+
 ## Available MCP Tools
 
 ### Requires TcXaeShell (XAE)
 
 | Tool | Purpose |
 |------|---------|
-| `twincat_status` | XAE install/running, `instances[]` (incl. `dte_busy`), MCP session, `blocking_dialogs`, SilentMode, SysManager errors |
-| `twincat_open` | Open / attach solution; locate PLC project |
+| `twincat_status` | XAE install/running, `instances[]`, MCP session, `prereqs`, dialogs |
+| `twincat_open` | Open / attach; returns `pin_honored` / `attached_xae_version` |
 | `twincat_check_all_objects` | Compile ALL objects — includes `errors[]`, `warnings[]`, `infos[]` |
 | `twincat_build` | Incremental build (`full_rebuild=true` for RebuildSolution) |
 | `twincat_get_output_log` | Re-read build pane only — not needed after check/build |
 | `twincat_reload` | Close+reopen solution — **only** after `.plcproj` was changed |
-| `twincat_export_library` | Export `.library` / `.compiled-library` (needs prior `twincat_open`) |
+| `twincat_export_library` | Export library; refuses `0.0.0.0` / non-library unless `force`; always echoes `resolved_plcproj_path` / `project_version` / `output_dir`. Pass explicit `plcproj_path` when a sample is open. No `confirm` param. |
 | `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
+| `twincat_stweep_status` | STweep install + Formatcode commands (+ format_progress snapshot) |
+| `twincat_format_code` | STweep Format code (file/folder; project needs `confirm`; `wait=false` for long jobs) |
+| `twincat_format_progress` | Live format job poll while formatting |
+
+STweep details: rule `twincat3-mcp-stweep` / skill `twincat3-stweep-format`.
 
 ### No XAE needed
 
@@ -45,7 +56,7 @@ Detailed workflow: skill `twincat3-validate`.
 - **`xae_version`** (optional): `"4024"`/`"15.0"` or `"4026"`/`"17.0"`. Use only when the user asks or a specific shell is required.
   - Empty: attach to matching open solution; if creating new, prefer an already-running shell version, else newest registered.
   - If the solution is **already open** in another shell version, attach to that instance (no duplicate) even when `xae_version` differs.
-- Check response: `success`, `created_new_instance`, `xae_version`, `xae_prog_id`, `solution_path`. Unexpected `created_new_instance=true` when the project was already open → report, do not ignore.
+- Check response: `success`, `created_new_instance`, `xae_version`, `attached_xae_version`, `pin_honored`, `pin_ignored_reason`, `xae_prog_id`, `solution_path`. Unexpected `created_new_instance=true` when the project was already open → report, do not ignore.
 - Content edits (`.TcPOU`/`.TcDUT`/`.TcGVL`): **no** reload. Reload **only** if `.plcproj` changed: `twincat_open` (if needed) → `twincat_reload` → check.
 - Libraries → `twincat_check_all_objects`. Apps/boot → `twincat_build`.
 

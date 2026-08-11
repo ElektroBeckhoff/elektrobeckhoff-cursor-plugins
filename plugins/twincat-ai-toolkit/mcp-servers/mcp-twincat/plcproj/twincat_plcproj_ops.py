@@ -902,11 +902,36 @@ def sync_plcproj(cfg: PlcProjConfig) -> SyncReport:
 #  Project info
 # ================================================================
 
+def _infer_is_library_project(
+    *,
+    project_category: str,
+    plcproj_path: str,
+    title: str,
+    name: str,
+) -> Optional[bool]:
+    """True/False when confident; None when unknown."""
+    cat = (project_category or "").lower()
+    path_l = (plcproj_path or "").replace("\\", "/").lower()
+    title_l = (title or "").lower()
+    name_l = (name or "").lower()
+
+    if "library" in cat:
+        return True
+    if cat and ("plc project" in cat or "application" in cat) and "library" not in cat:
+        return False
+    if "/samples/" in path_l or path_l.endswith("/samples") or "_sample" in path_l:
+        return False
+    if "sample" in title_l or "sample" in name_l:
+        return False
+    return None
+
+
 def read_project_info(plcproj_path: str) -> Dict[str, Any]:
     """Read TwinCAT PLC project metadata from .plcproj XML.
 
     Returns a dict with keys: title, version, company, name, released,
-    plcproj_path.  Raises FileNotFoundError or ET.ParseError on failure.
+    project_category, is_library_project, plcproj_path.
+    Raises FileNotFoundError or ET.ParseError on failure.
     Does NOT require a running TcXaeShell instance.
     """
     p = Path(plcproj_path).resolve()
@@ -920,12 +945,24 @@ def read_project_info(plcproj_path: str) -> Dict[str, Any]:
         el = tree.getroot().find(xpath, ns)
         return el.text.strip() if el is not None and el.text else ""
 
+    title = _txt(".//ms:Title") or _txt(".//ms:Name")
+    name = _txt(".//ms:Name")
+    category = _txt(".//ms:ProjectCategory")
+    is_lib = _infer_is_library_project(
+        project_category=category,
+        plcproj_path=str(p),
+        title=title,
+        name=name,
+    )
+
     return {
-        "title":        _txt(".//ms:Title") or _txt(".//ms:Name"),
+        "title":        title,
         "version":      _txt(".//ms:ProjectVersion") or "0.0.0.0",
         "company":      _txt(".//ms:Company"),
-        "name":         _txt(".//ms:Name"),
+        "name":         name,
         "released":     _txt(".//ms:Released"),
+        "project_category": category,
+        "is_library_project": is_lib,
         "plcproj_path": str(p),
     }
 

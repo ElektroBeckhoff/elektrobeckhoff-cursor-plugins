@@ -4,7 +4,7 @@
       "command": "python",
       "args": [
         "-c",
-        "import os,sys,glob,runpy;c=os.path.join(os.path.expanduser('~'),'.cursor','plugins','cache','elektrobeckhoff-cursor-plugins','twincat-ai-toolkit');v=sorted(glob.glob(os.path.join(c,'*')),key=os.path.getmtime,reverse=True);d=os.path.join(v[0],'mcp-servers','mcp-twincat') if v else '';s=os.path.join(d,'server.py');sys.path.insert(0,d);runpy.run_path(s,run_name='__main__') if os.path.isfile(s) else sys.exit('server.py not found in plugin cache')"
+        "import os,sys,glob,runpy;s=os.environ.get('TWINCAT_MCP_SERVER','').strip();d='';\nif not s:\n local=os.path.join(os.path.expanduser('~'),'.cursor','plugins','local','twincat-ai-toolkit','mcp-servers','mcp-twincat','server.py')\n if os.path.isfile(local):\n  s=local;d=os.path.dirname(s)\n else:\n  c=os.path.join(os.path.expanduser('~'),'.cursor','plugins','cache','elektrobeckhoff-cursor-plugins','twincat-ai-toolkit');v=sorted([p for p in glob.glob(os.path.join(c,'*')) if os.path.isdir(p)],key=os.path.getmtime,reverse=True);d=os.path.join(v[0],'mcp-servers','mcp-twincat') if v else '';s=os.path.join(d,'server.py') if d else ''\nelse:\n d=os.path.dirname(s)\nif d: sys.path.insert(0,d)\nrunpy.run_path(s,run_name='__main__') if s and os.path.isfile(s) else sys.exit('server.py not found (local plugin, TWINCAT_MCP_SERVER, or marketplace cache)')"
       ],
       "env": {}
     }
