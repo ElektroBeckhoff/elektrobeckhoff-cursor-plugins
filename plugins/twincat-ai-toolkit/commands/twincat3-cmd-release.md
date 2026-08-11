@@ -22,5 +22,6 @@ Optional (only if user asks to commit afterward):
 
 1. Follow the release skill: version in `.plcproj` + `Global_Version.TcGVL` → validate 0 errors → export → changelog.
 2. Open / validate with **`xae_version="4024"`** by default (`twincat_open(..., xae_version="4024")`). Use **`4026` only if the user explicitly requests it**.
-3. Confirm version with the user if unclear.
-4. Never push. Commits only on request via `/twincat3-cmd-commit` (`release:` / `docs:` split).
+3. Export with **`twincat_export_library(library=true, compiled_library=false)`** — only `.library` (faster). Add `.compiled-library` only if the user explicitly asks.
+4. Confirm version with the user if unclear.
+5. Never push. Commits only on request via `/twincat3-cmd-commit` (`release:` / `docs:` split).

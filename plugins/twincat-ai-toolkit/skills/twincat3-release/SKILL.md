@@ -98,14 +98,14 @@ Requires an open XAE session (`twincat_open` already done). Title/version are re
 `twincat_export_library` runs CheckAllObjects again and fails if any errors remain.
 
 ```
-twincat_export_library()
+twincat_export_library(library=true, compiled_library=false)
 ```
 
 Optional: `plcproj_path="<path>"` if auto-detect fails; `output_dir` defaults to `<git_repo>/Versions/<ProjectVersion>/`.
 
-Defaults: export both `.library` and `.compiled-library`; install only `.library` into the local TwinCAT repo (`install_compiled_library=false`). Optional flags: `library`, `compiled_library`, `install_library`, `install_compiled_library`.
+**Default for speed:** export only `.library` (`compiled_library=false`); install `.library` into the local TwinCAT repo. Skip `.compiled-library` unless the user explicitly asks for it (`compiled_library=true`). Optional flags: `library`, `compiled_library`, `install_library`, `install_compiled_library`.
 
-Verify the response shows both files with non-zero sizes.
+Verify the response shows `.library` with non-zero size (and `.compiled-library` only if requested).
 
 ## Step 6: Create Changelog
 
@@ -140,7 +140,7 @@ Before finishing the release:
 - [ ] Version bumped in `.plcproj` AND `Global_Version.TcGVL`
 - [ ] Both versions match
 - [ ] `twincat_check_all_objects` reports 0 errors
-- [ ] `.library` and `.compiled-library` exported to `Versions/<version>/`
+- [ ] `.library` exported to `Versions/<version>/` (`.compiled-library` only if user asked)
 - [ ] Changelog created in `Versions/<version>/changelog-<version>.md`
 - [ ] Breaking changes documented with `[!CAUTION]` blocks
 - [ ] Did **not** edit `README.md` download section or `Versions/release_dates.txt` (GitHub Actions)
