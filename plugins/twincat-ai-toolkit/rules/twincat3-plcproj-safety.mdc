@@ -1,5 +1,6 @@
 ---
 description: Safety rules for PlcProject sync operations. Enforces verify-first workflow, backup requirements, and optional XAE validate only when the user asks.
+alwaysApply: false
 ---
 
 # TwinCAT PlcProject Sync Safety

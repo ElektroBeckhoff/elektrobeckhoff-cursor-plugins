@@ -1,32 +1,28 @@
 ---
-description: Logging conventions using F_IoT_Utilities_MessageLog from Tc3_IoT_Utilities. Edge-detected state logging, log level filtering, instance-path setup.
+description: Logging rules for F_IoT_Utilities_MessageLog. Edge-detect only, Param GVL level, instance-path, both sArg1/sArg2.
 globs: "**/*.TcPOU,**/*.TcGVL"
 alwaysApply: false
 ---
 
 # Logging with Tc3_IoT_Utilities
 
-> Patterns, examples, and level guide → skill `twincat3-logging`
-
 ## Mandatory Rules
 
-1. **Never log every cycle** — always edge-detect state changes with `_bXxxMem`
-2. **Always use `Param_[Lib].cnMessageLog`** as `eMode` — never hardcode a level
-3. **Always pass `_sPath`** — never empty string or hardcoded path
+1. **Never log every cycle** — edge-detect with `_bXxxMem`
+2. **`eMode` from Param GVL** — `Param_[Lib].cnMessageLog` (never hardcode level)
+3. **Always pass `_sPath`** — never empty or hardcoded path
 4. **Both `sArg1` and `sArg2` required** — use `''` when unused
-5. **Explicit type conversions only** — `UINT_TO_STRING()`, `TO_STRING()`, `DWORD_TO_HEXSTR()`
-6. **Use `CONCAT()`** when >2 format args needed, or `F_IoT_Utilities_FormatString_N` (N=2..8)
+5. **Explicit conversions only** — `UINT_TO_STRING()`, `TO_STRING()`, `DWORD_TO_HEXSTR()`
+6. **>2 format args** — `CONCAT()` or `F_IoT_Utilities_FormatString_N` (N=2..8)
 
-## Required Variables Per FB
+## Required per FB / library
 
-```iecst
-{attribute 'instance-path'}
-{attribute 'noinit'}
-_sPath : T_MaxString;
-```
+- FB: `{attribute 'instance-path'}` + `{attribute 'noinit'}` → `_sPath : T_MaxString`
+- Param GVL: log level constant (`cnMessageLog` / `ceMessageLog`)
 
-## Required Per Library (Param GVL)
+## Examples
 
-```iecst
-ceMessageLog : E_IoT_Utilities_MessageLog := E_IoT_Utilities_MessageLog.Debug;
-```
+Read when implementing (not auto-loaded with this rule):
+
+- Skill workflow: `skills/twincat3-logging/SKILL.md`
+- Patterns (edge-detect, levels, FormatString): `skills/twincat3-logging/logging-patterns.md`

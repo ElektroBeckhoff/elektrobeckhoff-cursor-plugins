@@ -5,53 +5,45 @@ alwaysApply: false
 
 # Version Management
 
+## Who chooses the version
+
+| Entry point | Who picks the number |
+|-------------|----------------------|
+| `/twincat3-cmd-release` / skill `twincat3-release` | **User** — ask for exact `MAJOR.MINOR.BUILD.REVISION`; do not auto-bump |
+| `/twincat3-cmd-new-version` / skill `twincat3-new-version` | **Rule-based auto** — classify changes, apply bump table below; ask only if ambiguous; honor explicit user override |
+
+Agents must **not** invent a version outside this table. Show current via
+`twincat_plcproj_info` when helpful.
+
 ## Version Format
 
 `MAJOR.MINOR.BUILD.REVISION` — e.g. `0.0.0.1`, `1.0.0.0`, `1.2.3.45`
 
-| Part | When to increment |
-|------|------------------|
-| MAJOR | Breaking change / incompatible API |
-| MINOR | New feature, backwards-compatible |
-| BUILD | Bug fix |
-| REVISION | Internal/patch |
+### Bump table (for humans and for `/twincat3-cmd-new-version`)
 
-## plcproj Version
+| Change scope (since last released version / relevant commits) | Increment | Resets |
+|---------------------------------------------------------------|-----------|--------|
+| Breaking / incompatible API | **MAJOR** +1 | MINOR, BUILD, REVISION → 0 |
+| New feature, backwards-compatible | **MINOR** +1 | BUILD, REVISION → 0 |
+| Bug fix | **BUILD** +1 | REVISION → 0 |
+| Internal / patch only | **REVISION** +1 | — |
 
-Set in `.plcproj` `<PropertyGroup>`:
+Prefer the **dominant** user-facing change when classifying. Mixed / unclear → ask once.
 
-```xml
-<ProjectVersion>0.0.0.1</ProjectVersion>
-```
+## Where versions live
 
-## Global_Version GVL
+| Location | What |
+|----------|------|
+| `.plcproj` `<ProjectVersion>` | Engineering project version |
+| `GVLs/Global_Version.TcGVL` | `stLibVersion : ST_LibVersion` (`Tc2_System`) |
+| `Versions/<ver>/` | `.library` + `.compiled-library` + `changelog-<ver>.md` |
 
-Create `GVLs/Global_Version.TcGVL` with `ST_LibVersion` from `Tc2_System`:
+Both `.plcproj` and `stLibVersion` **must match**. XML/ST samples and folder
+tree → `rules/examples/twincat3-versioning.md`.
 
-```iecst
-{attribute 'TcGenerated'}
-VAR_GLOBAL CONSTANT
-    stLibVersion : ST_LibVersion := (
-        iMajor    := 0,
-        iMinor    := 0,
-        iBuild    := 0,
-        iRevision := 1,
-        sVersion  := '0.0.0.1'
-    );
-END_VAR
-```
-
-`ST_LibVersion` is defined in `Tc2_System`. Reference it for runtime version queries.
-
-## Project Folder Convention
-
-```
-Versions/
-  0.0.0.1/
-    changelog-0.0.0.1.md
-  1.0.0.0/
-    changelog-1.0.0.0.md
-```
+On **release** / **new-version**, always ship both `.library` and
+`.compiled-library` (skills `twincat3-release` / `twincat3-new-version`). The
+online-test shortcut (`.library` only) is not a release.
 
 ## CI-managed files (do not edit on release)
 

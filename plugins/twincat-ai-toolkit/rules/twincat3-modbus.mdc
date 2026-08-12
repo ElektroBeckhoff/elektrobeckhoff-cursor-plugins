@@ -1,111 +1,49 @@
 ---
-description: Unified Modbus development rules for TCP (Tc2_ModbusSrv) and RTU (Tc3_ModbusRtuEB). Shared state machine architecture, step-pair pattern, error handling, timing.
+description: Unified Modbus TCP/RTU rules — dual state machines, step-pair, busy guard, buffers, word order, sentinels.
 globs: "**/*.TcPOU,**/*.TcDUT"
 alwaysApply: false
 ---
 
 # Unified Modbus Development Rules (TCP + RTU)
 
-> For implementation patterns, templates, FB structure, MAIN wiring, and protocol-specific details, use the `twincat3-modbus` skill.
+Implementation templates, MAIN wiring, helpers → skill `twincat3-modbus`.
 
 ## Architecture
 
-Every Modbus device FB follows this architecture regardless of transport:
-
-```
-FB_[Device]
-├── VAR_INPUT:  Transport config, bReadEnable, bWriteEnable, tReadInterval, stControl
-├── VAR_OUTPUT: stData, bError, bBusy, Read diagnostics, Write diagnostics
-├── VAR:        Transport FB instances, _nReadStep, _nWriteStep, data buffer, _nReadNextStep
-├── VAR CONSTANT: REG_*, READ_DELAY, WRITE_DELAY
-├── Interval Timer (self-resetting TON)
-├── Read State Machine  (CASE _nReadStep OF ... END_CASE)
-├── Write State Machine (CASE _nWriteStep OF ... END_CASE)
-└── FB Calls (outside CASE, once per cycle, at the bottom)
-```
+Every device FB: transport config + enable inputs; `stData` / diagnostics outs; dual CASE machines (`_nReadStep` / `_nWriteStep`); interval TON; communication FB calls **once per cycle after all CASE blocks**.
 
 ## Mandatory Rules
 
-### Step-Pair Pattern
-
-Every register read uses a step pair -- odd step triggers, even step waits and parses. Never read results in the same step that set `bExecute`. Separating trigger and result into distinct cycles guarantees the FB has at least one cycle to process the request.
-
-### Busy Guard
-
-Always wrap trigger steps in `IF NOT bReadBusy THEN`. Prevents enqueueing while previous request is in flight. Essential for RTU FIFO; defensive best practice for TCP.
-
-### Reserved Step Numbers
-
-| Range | Purpose |
-|-------|---------|
-| 0 | Idle -- wait for interval timer |
-| 1-29 | Global read steps (device-wide data) |
-| 30 | Loop entry (multi-device: calculate base address) |
-| 50 | Loop control (advance to next sub-device or complete) |
-| 90 | Success handler |
-| 100 | Error handler |
-| 200 | Shared delay step |
-
-Write state machine: same convention with `_nWriteStep`. Write data steps typically start at 10.
-
-### Execute Flag Pattern
-
-Set `_bReadExecute` inside CASE step. Call communication FB once after all CASE blocks. Clear flag unconditionally after call. Guarantees exactly one rising edge per request.
-
-### Interval Timer
-
-Self-resetting TON with minimum T#100MS enforcement. Prevents retriggering during active read cycle.
-
-### Error Counter Pattern
-
-Two counters: consecutive (resets on success) and total (never resets). Capture error address and error ID on failure. `_nReadNextStep` is set in the even (wait) step before jumping to 90/100, NOT in step 90 itself.
-
-### Dual State Machine
-
-Read and write run as independent CASE state machines in the same FB cycle. Each has own step variable, delay timer, next-step variable, and error handling. Write must not block reads.
-
-### Register Constants Inside FB
-
-Device-specific register addresses, timing, and limits are `VAR CONSTANT` inside the FB. Never in a GVL. Keeps device knowledge self-contained.
-
-### Data Struct Design
-
-One `ST_[Device]_Data` struct per device. Document each field with unit `[V]`, gain, and register offset in a comment.
-
-### Register Gap Handling
-
-Never read across reserved/non-existent register addresses. Split into separate step pairs.
-
-### 32-Bit Word Order (Big-Endian)
-
-First register (lower address) = HIGH word. Always verify against device datasheet. Swapping HIGH/LOW produces values off by factor 65536.
-
-### Sentinel Values
-
-Helper functions check for "not-implemented" sentinels (0xFFFF, 0x8000, 0xFFFFFFFF, 0x80000000) and substitute 0 with `bValid := FALSE`.
-
-### IEEE 754 FLOAT32
-
-Use `POINTER TO REAL` for bit-reinterpretation. Never `DWORD_TO_REAL` (value conversion, not bit cast -- always wrong for IEEE 754).
-
-### Signed Write Values
-
-Convert via `REAL_TO_INT` then `INT_TO_WORD`. Never `REAL_TO_WORD` (clips negatives to 0).
-
-### Write Change Detection
-
-Store last-written values in a memory struct. Only trigger write when input changed or explicit trigger set.
-
-### Data Buffer Sizing
-
-TCP: `ARRAY[0..N] OF WORD` (0-based). Size must be >= the largest single query (nQuantity). Max 125 registers per read.
-RTU: `ARRAY[1..N] OF BYTE` (1-based). Size must be >= `nQuantity * 2` bytes. Max ~20 registers per read.
+1. **Step-pair** — Odd step triggers, even step waits/parses. Never read results in the trigger step.
+2. **Busy guard** — Trigger steps wrapped in `IF NOT bReadBusy THEN` (essential for RTU FIFO).
+3. **Reserved steps** — 0 idle; 1–29 global read; 30 loop entry; 50 loop control; 90 success; 100 error; 200 shared delay. Write machine same convention (`_nWriteStep`; write data often from 10).
+4. **Execute flag** — Set inside CASE; call FB once after CASE; clear flag unconditionally after call.
+5. **Interval TON** — Self-resetting; minimum `T#100MS`.
+6. **Error counters** — Consecutive (reset on success) + total (never). Set `_nReadNextStep` in wait step before 90/100.
+7. **Dual machines** — Read and write independent; write must not block reads.
+8. **Register constants** — `VAR CONSTANT` inside FB, never GVL.
+9. **Data struct** — One `ST_[Device]_Data`; document unit/gain/offset in comments.
+10. **Gaps** — Never read across reserved addresses; split step pairs.
+11. **32-bit BE** — Lower address = HIGH word (verify datasheet).
+12. **Sentinels** — Treat 0xFFFF / 0x8000 / 0xFFFFFFFF / 0x80000000 as invalid → 0 + `bValid := FALSE`.
+13. **IEEE 754** — `POINTER TO REAL` bit cast; never `DWORD_TO_REAL`.
+14. **Signed write** — `REAL_TO_INT` then `INT_TO_WORD`; never `REAL_TO_WORD`.
+15. **Write change detect** — Memory struct; write only on change or explicit trigger.
+16. **Buffers** — TCP: `ARRAY[0..N] OF WORD`, ≥ largest `nQuantity`, max 125 regs. RTU: `ARRAY[1..N] OF BYTE`, ≥ `nQuantity * 2`, ~20 regs/read.
 
 ## Coding Principles
 
-1. One FB per device type -- all device knowledge encapsulated inside the FB
-2. Identical state machine skeleton -- control flow (0 -> steps -> 90/100 -> 200 -> next) never changes
-3. No blocking constructs -- never use WHILE, REPEAT, or spin-loops
-4. One FB call per cycle -- communication FBs called once, after all CASE blocks
-5. Minimal variable scope -- buffers and steps private (`_`), only `stData` and diagnostics exposed
-6. Transport layer is the only variable -- when porting TCP to RTU, only VAR_INPUT, FB type, buffer type, and conversion functions change
+1. One FB per device type
+2. Identical skeleton: `0 → steps → 90/100 → 200 → next`
+3. No blocking (`WHILE` / `REPEAT` / spin)
+4. One communication FB call per cycle (after CASE)
+5. Private buffers/steps (`_`); expose `stData` + diagnostics
+6. Transport is the only variable when porting TCP ↔ RTU
+
+## Examples
+
+Read when implementing (not auto-loaded with this rule):
+
+- Skill workflow: `skills/twincat3-modbus/SKILL.md`
+- TCP ST templates: `skills/twincat3-modbus/modbus-tcp-patterns.md`
+- RTU ST templates: `skills/twincat3-modbus/modbus-rtu-patterns.md`

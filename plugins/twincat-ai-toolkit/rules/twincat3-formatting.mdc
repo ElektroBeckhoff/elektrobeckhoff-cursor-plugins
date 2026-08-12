@@ -1,204 +1,31 @@
 ---
-description: TwinCAT3 Structured Text formatting. Indentation, alignment, blank lines, control flow, declarations.
+description: TwinCAT3 ST formatting — indent, alignment, blank lines, control flow, declarations. Examples in skill references.
 globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL"
 alwaysApply: false
 ---
 
 # Formatting Standards
 
-## Indentation
+Full examples: `skills/twincat3-code-style/references/formatting-rules.md` (Read when formatting or reviewing layout).
 
-- **4 spaces**, never tabs
-- Continuation lines: +4 spaces from start
+## Principles
 
-## Control Flow
+| Topic | Rule |
+|-------|------|
+| Indent | 4 spaces, never tabs; continuation +4 from statement start |
+| IF / FOR | `THEN` / `DO` on same line as keyword |
+| ELSIF / ELSE / END_* | Column 0 |
+| Single-line IF | Never — body always next line |
+| CASE | Cases +4; multi-line body aligned; `ELSE` column 0 |
+| STRUCT | `STRUCT` on own line after `:`; members +4; `END_STRUCT`/`END_TYPE` column 0 |
+| Declarations | Align `:`, `:=`, `(* *)` within each VAR block |
+| VAR order | INPUT → OUTPUT → IN_OUT → VAR → CONSTANT; group with `(* section *)` |
+| Calls | ≤4 params one line; >4 multiline aligned `:=` / `=>` |
+| Arrays | ≤30 elements one line; else multiline |
+| Enums | ≤5 members one line; else one per line |
+| Line length | Wrap at 200; wrap **after** binary operators |
+| Assignments | Align `:=` in related groups |
+| Blank lines | 1 before/after IF/CASE/FOR/WHILE; 0 between END_VAR and first stmt; max 1 consecutive |
+| Spaces | Around operators and `:`; after commas; none before `.`/`[`/`(` |
 
-`THEN` stays on same line as `IF`/`ELSIF`. `DO` stays on same line as `FOR`/`WHILE`:
-
-```iecst
-IF bEnable THEN
-    nValue := 1;
-ELSIF bFallback THEN
-    nValue := 2;
-ELSE
-    nValue := 0;
-END_IF
-
-FOR nIdx := 1 TO 3 DO
-    arrValues[nIdx] := 0;
-END_FOR
-```
-
-**No single-line IF ever** — body always on next line:
-
-```iecst
-(* correct *)
-IF bError THEN
-    RETURN;
-END_IF
-
-(* wrong — never single-line IF *)
-IF bError THEN RETURN; END_IF
-```
-
-## CASE Statement
-
-```iecst
-CASE nState OF
-    0: nValue := 0;
-    1: nValue := 1;
-       bDone  := TRUE;
-    2: A_HandleError();
-ELSE
-    nValue := -1;
-END_CASE
-```
-
-Cases indented 4 spaces. Multi-line case body aligned under first statement. `ELSE` at column 0.
-
-## STRUCT / TYPE
-
-STRUCT always on its own line after `:`, not indented:
-
-```iecst
-TYPE ST_EMS_Example :
-STRUCT
-    fCurrent : REAL := 0.0;  (* [A] Phase current *)
-    bEnable  : BOOL;         (* Enable flag *)
-END_STRUCT
-END_TYPE
-```
-
-Members indented 4 spaces inside STRUCT. `END_STRUCT` and `END_TYPE` at column 0.
-
-## Declarations — Column Alignment
-
-Align `:`, `:=`, and `(* *)` comments in columns within each VAR block:
-
-```iecst
-VAR_INPUT
-    bEnable       : BOOL;
-    fSetpoint     : REAL := 0.0;
-    tTimeout      : TIME := T#5S;
-    stMeasurement : ST_EMS_Grid_Measurement;
-END_VAR
-VAR
-    _nStep        : INT;
-    _bInitialized : BOOL;
-    _fbTonDelay   : TON;
-END_VAR
-```
-
-## VAR Block Order
-
-1. `VAR_INPUT` — inputs
-2. `VAR_OUTPUT` — outputs
-3. `VAR_IN_OUT` — references
-4. `VAR` — private state (group with `(* comment *)` sections)
-5. `VAR CONSTANT` — constants
-
-Group internal VARs logically:
-
-```iecst
-VAR
-    (* edge triggers *)
-    _posEdgePlugged : R_TRIG;
-    _negEdgeDone    : F_TRIG;
-
-    (* timers *)
-    _fbTonTest      : TON;
-    _fbTonFailsafe  : TON;
-
-    (* state *)
-    _nStep          : INT;
-    _bActive        : BOOL;
-END_VAR
-```
-
-## Function Calls
-
-**≤4 params** → single line. **>4 params** → multiline with aligned `:=` / `=>`:
-
-```iecst
-fbTimer(IN := TRUE, PT := T#5S, Q =>);
-fbRead(sIP := sIPAddr, nPort := 502, nUnit := 1, bExec := TRUE);
-
-fbPid(
-    bEnable       := TRUE,
-    rW            := fSetpoint,
-    rX            := fActual,
-    rKp           := _stParam.fKp,
-    tTi           := _stParam.tTi,
-    rY            => _fOutput);
-```
-
-## Array / Enum Initializers
-
-- **Array:** ≤30 elements on one line, >30 → multiline
-- **Enum:** ≤5 members on one line, >5 → multiline (one per line)
-
-```iecst
-(* 5 enum members — single line OK *)
-TYPE E_Mode : ( IDLE := 0, AUTO := 1, MANUAL := 2, ERROR := 99 ) := IDLE; END_TYPE
-
-(* >5 — multiline *)
-TYPE E_State :
-(
-    IDLE      := 0,
-    STARTING  := 1,
-    RUNNING   := 2,
-    STOPPING  := 3,
-    ERROR     := 99
-) := IDLE;
-END_TYPE
-```
-
-## Long Line Wrapping
-
-Wrap at **200 characters**. Wrap **after** binary operators (not before):
-
-```iecst
-(* correct — wrap after operator *)
-nResult := nValue1 + nValue2 +
-           nValue3 + nValue4;
-
-(* wrong — wrap before operator *)
-nResult := nValue1
-           + nValue2 + nValue3;
-```
-
-## Assignment Alignment
-
-Align `:=` in related assignment groups:
-
-```iecst
-_fMaxPower_L1 := 0;
-_fMaxPower_L2 := 0;
-_fMaxPower_L3 := 0;
-_bStartTest   := TRUE;
-_bCheckDone   := FALSE;
-```
-
-## Blank Lines
-
-- **1 blank line** before/after `IF`/`CASE`/`FOR`/`WHILE` blocks
-- **0 blank lines** between `END_VAR` and first statement
-- **1 blank line** between logical groups inside a block
-- **Max 1** consecutive blank line
-
-## Spaces
-
-- Around operators: `:=`, `+`, `-`, `*`, `/`, `=`, `<>`, `AND`, `OR`
-- After commas: `CONCAT(s1, s2)`
-- Around `:` in declarations: `nValue : INT`
-- **No** space before `.` / `[` / `(`
-- **No** space after `(` or before `)`
-
-## Comments
-
-See `twincat3-comments.mdc` for full rules. Summary:
-- Use only `(* *)` comment syntax — never `//`
-- VAR_INPUT / VAR_OUTPUT: every variable gets `(* [unit] Purpose *)`
-- VAR sections: group with `(* section name *)`
-- Code blocks: separate with `(* --- purpose --- *)`
-- FB header: `(* purpose *)` comment before FUNCTION_BLOCK
+Comments: `twincat3-comments.mdc` (only `(* *)`).

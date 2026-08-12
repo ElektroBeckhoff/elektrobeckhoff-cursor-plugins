@@ -1,10 +1,11 @@
 ---
 description: Safety rules for CFC-to-ST migration. Enforces preview-first workflow, backup requirements, and TODO reporting.
+alwaysApply: false
 ---
 
 # TwinCAT CFC Migrator Safety
 
-> All general migration safety rules are defined in `twincat3-migration-safety.mdc`. This file adds CFC-specific notes only.
+> All general migration safety rules are defined in `rules/twincat3-migration-safety.mdc`. This file adds CFC-specific notes only.
 
 ## CFC-Specific Notes
 

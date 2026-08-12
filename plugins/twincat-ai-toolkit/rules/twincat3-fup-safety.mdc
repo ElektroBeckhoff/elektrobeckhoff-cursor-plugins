@@ -1,10 +1,11 @@
 ---
 description: Safety rules for FBD/FUP-to-ST migration. Enforces preview-first workflow, backup requirements, and TODO reporting.
+alwaysApply: false
 ---
 
 # TwinCAT FBD/FUP Migrator Safety
 
-> All general migration safety rules are defined in `twincat3-migration-safety.mdc`. This file adds FBD-specific notes only.
+> All general migration safety rules are defined in `rules/twincat3-migration-safety.mdc`. This file adds FBD-specific notes only.
 
 ## FBD-Specific Notes
 

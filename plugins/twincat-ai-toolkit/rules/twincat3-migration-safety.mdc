@@ -1,5 +1,6 @@
 ---
 description: Safety rules for FBD/FUP and CFC to ST migration. Enforces preview-first workflow, backup requirements, TODO reporting, and post-migration checks. XAE compile only when the user explicitly asks. Applies to twincat_fup_migrate, twincat_cfc_migrate, and twincat_migrate.
+alwaysApply: false
 ---
 
 # TwinCAT Migration Safety Rules
