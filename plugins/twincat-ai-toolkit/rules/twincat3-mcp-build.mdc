@@ -23,13 +23,24 @@ schemas by reading `mcps/**/tools/*.json`. Server IDs: see
 | `twincat_build` | Incremental build (`full_rebuild=true` for RebuildSolution) |
 | `twincat_get_output_log` | Re-read build pane only — not needed after check/build |
 | `twincat_reload` | Close+reopen solution — **only** after `.plcproj` was changed |
-| `twincat_export_library` | Export library; refuses `0.0.0.0` / non-library unless `force`; always echoes `resolved_plcproj_path` / `project_version` / `output_dir`. Pass explicit `plcproj_path` when a sample is open. No `confirm` param. |
+| `twincat_export_library` | Export library; refuses `0.0.0.0` / non-library unless `force`; echoes `resolved_plcproj_path` / `project_version` / `output_dir`. Prefer `wait=false` + poll `twincat_export_progress` (Cursor idle-timeout `-32001` on long blocking exports). |
+| `twincat_export_progress` | Live export poll (`running`, `phase`, `percent`, final `result{}`) |
 | `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
 | `twincat_stweep_status` | STweep install + Formatcode commands (+ format_progress snapshot) |
 | `twincat_format_code` | STweep Format code (file/folder; project needs `confirm`; `wait=false` for long jobs) |
 | `twincat_format_progress` | Live format job poll while formatting |
+| `twincat_format_cancel` | Abort multi-file format between files (`phase=canceled`) |
 
 STweep details: rule `twincat3-mcp-stweep` / skill `twincat3-stweep-format`.
+
+### Export scope: release / new-version vs online-test
+
+| Context | `.library` | `.compiled-library` |
+|---------|------------|---------------------|
+| **Ship gate / release** (`/twincat3-cmd-new-version`, `/twincat3-cmd-release`; skills `twincat3-new-version`, `twincat3-release`) | **required** | **required** |
+| **Online / UmRT live diagnose** (`/twincat3-cmd-online-test`, skill `twincat3-umrt-systemtest`) | required (if export needed) | **skip** (`compiled_library=false`) — time saver only |
+
+Never skip `.compiled-library` on a ship gate / release just to save time.
 
 ### No XAE needed
 

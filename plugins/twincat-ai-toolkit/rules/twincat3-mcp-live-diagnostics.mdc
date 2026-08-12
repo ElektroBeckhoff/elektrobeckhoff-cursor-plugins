@@ -1,0 +1,68 @@
+---
+description: >-
+  Live ADS diagnostics via MCP (symbols, read/write, batch). When to escalate
+  to Python pyads scripts for timed / multi-step debug.
+alwaysApply: false
+---
+
+# TwinCAT MCP Live Diagnostics (ADS)
+
+Use when the PLC is already online (UmRT or target) and you need to **inspect or
+stimulate** variables — not for bringing the runtime up (that is
+`/twincat3-cmd-online-test` / `twincat3-umrt-systemtest`).
+
+Full workflow: skill `twincat3-live-diagnostics` /
+command `/twincat3-cmd-live-diagnostics`.
+
+## Prerequisites
+
+1. Target is RUN and `ready_for_ads` (from `twincat_runtime_state` /
+   `twincat_plc_start`).
+2. Prefer MCP UmRT NetId (from `twincat_umrt_status`) unless the user names an IPC.
+3. Discover tools via `GetMcpTools` on **one** server:
+   `user-mcp-twincat-local` or `plugin-twincat-ai-toolkit-mcp-twincat`.
+
+## MCP ADS tool map
+
+| Tool | Use |
+|------|-----|
+| `twincat_runtime_state` | Gate: `ready_for_ads` before any R/W |
+| `twincat_plc_start` / `twincat_plc_stop` | PLC port 851 (`confirm=true`) |
+| `twincat_ads_symbols` | Discover top-level symbols (prefix / contains / type / regex) |
+| `twincat_ads_read` | Single path read |
+| `twincat_ads_write` | Single path write (`confirm=true`) |
+| `twincat_ads_read_list` | Batch read (prefer for many paths) |
+| `twincat_ads_write_list` | Batch write (`confirm=true`) |
+
+Related runtime tools (setup / diagnose, not primary for live R/W):
+`twincat_runtime_messages`, `twincat_umrt_status`, `twincat_get_target`.
+
+## Path rules (short)
+
+- Use **full instance paths**: `P_Sample.fbDevice._bFlag`
+- Nested / private `_` members: OK by full path
+- Prefer `twincat_ads_read_list` / `write_list` over many single calls
+- Single-variable `{attribute 'hide'}` → ADS 1808 (not readable)
+- Type-level `hide` on a library FB: instance path of a concrete FB still works
+- Writes always need `confirm=true`
+
+## When to leave MCP → Python pyads
+
+Stay on MCP for: spot checks, a handful of reads/writes, quick smoke.
+
+Escalate to a **local Python + pyads** script when you need:
+
+- Polling / `wait_until` with timeouts and mid-fade samples
+- Multi-step scenarios (prio handoff, fade windows, calibration sequences)
+- Background runtime watchdog (abort if PLC leaves RUN / pagefault)
+- Suite progress + markdown reports
+- Parallel timing that is awkward as many MCP round-trips
+
+See skill `twincat3-live-diagnostics` + `skills/twincat3-live-diagnostics/pyads-patterns.md`
+(inline patterns only — no external sample-repo paths).
+
+## Safety
+
+- Non-UmRT / real IPC → warn and get user OK before writes
+- Do not loop activate on license / page_fault — stop and ask
+- UmRT timers run slow in wall-clock time — do not treat TON drift alone as FAIL

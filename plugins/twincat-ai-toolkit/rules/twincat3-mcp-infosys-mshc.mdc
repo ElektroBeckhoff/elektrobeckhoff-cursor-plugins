@@ -14,42 +14,15 @@ alwaysApply: false
 
 ## How to Search
 
-### Known type name → default (auto mode)
+Tool-call shapes, modes (`auto` / `fulltext` / `symbol` / `title`), phrase/prefix examples, and `twincat_infosys_mshc_read` usage → skill `twincat3-infosys-mshc` (`skills/twincat3-infosys-mshc/SKILL.md`).
 
-```
-twincat_infosys_mshc_search(query="FB_IotMqttClient")
-```
-
-`auto_read=true` (default) includes full page content on exact match. One call is enough.
-
-### Unknown name, know the concept → fulltext mode (BM25)
-
-```
-twincat_infosys_mshc_search(query="read Modbus input registers", mode="fulltext")
-twincat_infosys_mshc_search(query="send email SMTP", mode="fulltext")
-twincat_infosys_mshc_search(query="PID controller", mode="fulltext")
-```
-
-FTS5 BM25 ranking finds pages containing ALL query words regardless of order.
-
-### Partial name → prefix search
-
-```
-twincat_infosys_mshc_search(query="FB_Json*", mode="fulltext")
-twincat_infosys_mshc_search(query="FB_MB*", mode="fulltext")
-```
-
-### Exact phrase → quote the phrase
-
-```
-twincat_infosys_mshc_search(query="\"input registers\"", mode="fulltext")
-```
-
-### Only typed symbols (no articles) → symbol mode
-
-```
-twincat_infosys_mshc_search(query="MQTT", mode="symbol")
-```
+| Situation | Mode / approach |
+|-----------|-----------------|
+| Known type name | default `auto` (`auto_read=true` → one call often enough) |
+| Concept known, name unknown | `fulltext` (BM25; all query words) |
+| Partial name | prefix in fulltext (e.g. `FB_Json*`) |
+| Exact phrase | quote the phrase in fulltext |
+| Only typed symbols (no articles) | `symbol` |
 
 ## Search Strategy for Unknown Types
 

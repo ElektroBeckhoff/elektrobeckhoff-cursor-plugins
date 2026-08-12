@@ -17,7 +17,8 @@ Task Progress:
 - [ ] Step 2: twincat_stweep_status — installed + commands_loaded (no UI)
 - [ ] Step 3: twincat_format_code (file/folder; project needs confirm=true)
 - [ ] Step 4: Many files → wait=false + poll twincat_format_progress
-- [ ] Step 5: On unlicensed fail-fast → stop; else report files_formatted
+- [ ] Step 5: To abort → twincat_format_cancel (stops between files)
+- [ ] Step 6: On unlicensed fail-fast → stop; else report files_formatted
 ```
 
 ## Step 1: Open the same XAE session
@@ -79,7 +80,24 @@ twincat_format_code(path="", confirm=true, wait=false, timeout_seconds=1800)
 # or path="<....plcproj>" / project root folder, confirm=true
 ```
 
-Implementation note: opens each object and runs editor Formatcode (SE `Select` is broken on TcXaeShell PlatformUI marshaler). Folder command names: `PlcFolder.Formatcode` (EN/4024) / `SPSOrdner.Formatcode` (DE/4026).
+**How it differs from the XAE UI**
+
+| UI (right-click folder in Solution Explorer) | MCP today |
+|-----------------------------------------------|-----------|
+| One `PlcFolder` / `SPSOrdner.Formatcode` on the selected folder | Walks `.TcPOU`/`.TcGVL`/`.TcDUT`/`.TcIO`, `OpenFile` + editor Formatcode per file, then closes the tab |
+| No flood of editor tabs | Was leaving tabs open — now closes after each file |
+
+Reason: `UIHierarchyItem.Select` is broken on TcXaeShell
+(`UIHierarchyItemMarshaler.Select` not found), so automation cannot select
+the SE folder the way the UI does. Command names still exist:
+`PlcFolder.Formatcode` (EN/4024) / `SPSOrdner.Formatcode` (DE/4026).
+
+**Cancel:** `twincat_format_cancel()` while a job runs → stops after the
+current file (`phase=canceled`). Prefer `wait=false` so the agent can cancel.
+
+**Settle/save:** After Formatcode, MCP holds the Document ref and saves on
+first dirty (+~150 ms) — not a long fixed wait. Saving too late often misses
+the buffer (ActiveDocument goes away).
 
 Do **not** use STweep.CLI.
 

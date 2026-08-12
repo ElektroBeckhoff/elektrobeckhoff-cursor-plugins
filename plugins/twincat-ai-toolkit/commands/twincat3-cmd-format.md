@@ -22,6 +22,8 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 4. Format **file or folder** with `twincat_format_code(path=...)`.
 5. Whole **project** only if the user explicitly confirms → `confirm=true`.
 6. Many files: `wait=false`, raise `timeout_seconds`, poll `twincat_format_progress` until `running=false`.
-7. License: fail-fast on first Formatcode error — abort remaining files; do not open the License wizard unless the user asks (`probe_license=true`).
-8. Never use STweep.CLI. Never print license activation keys.
-9. On unlicensed / not installed: stop and report — do not retry-loop format.
+7. To abort: `twincat_format_cancel` (stops between files). Prefer `wait=false` so cancel is possible from the agent.
+8. Expect per-file OpenFile + editor Formatcode (not UI folder Formatcode) — SE `Select` is broken in automation.
+9. License: fail-fast on first Formatcode error — abort remaining files; do not open the License wizard unless the user asks (`probe_license=true`).
+10. Never use STweep.CLI. Never print license activation keys.
+11. On unlicensed / not installed: stop and report — do not retry-loop format.

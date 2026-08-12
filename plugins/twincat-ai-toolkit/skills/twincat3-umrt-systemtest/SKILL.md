@@ -5,7 +5,8 @@ description: >-
   open solution, disable I/O, activate/start, diagnose runtime messages
   (pagefault/license/SAFEOP), PLC RUN, ADS symbol list and batch read/write
   verification. Use when the user asks for UmRT systemtest, runtime E2E,
-  ADS diagnose, /twincat3-cmd-online-test, or to verify activate + ADS R/W.
+  ADS smoke, /twincat3-cmd-online-test, or to verify activate + ADS R/W.
+  For interactive live ADS after ready_for_ads, use twincat3-live-diagnostics.
 ---
 
 # TwinCAT Usermode Runtime System Test
@@ -55,6 +56,21 @@ python mcp-servers/mcp-twincat/systemtest/umrt_chain.py --sln "<path.sln>" --xae
 | Sample or app `.sln` | Prefer full path to `.sln` |
 
 Read also: `rules/twincat3-mcp-runtime.mdc`.
+
+### Library export during online-test (time saver)
+
+If the live diagnose needs a fresh library export/install before activate,
+export **only** `.library` — skip `.compiled-library` to save time:
+
+```
+twincat_export_library(library=true, compiled_library=false, wait=false, timeout_seconds=1800)
+# poll twincat_export_progress until running=false
+```
+
+This shortcut applies **only** to `/twincat3-cmd-online-test` / this skill.
+For `/twincat3-cmd-new-version`, `/twincat3-cmd-release`, or any library update,
+always export **both** `.library` and `.compiled-library` (skills
+`twincat3-new-version` / `twincat3-release`, rule `twincat3-mcp-build`).
 
 ### Timing on UmRT (TON / TOF / TIME) — by design
 
@@ -223,4 +239,6 @@ Overall **PASS** only if all required steps PASS (write may PASS with note if PL
 
 - Rule: `twincat3-mcp-runtime`
 - Command: `/twincat3-cmd-online-test`
+- After `ready_for_ads`: interactive ADS / timed Python →
+  `/twincat3-cmd-live-diagnostics` (skill `twincat3-live-diagnostics`)
 - Helper: `mcp-servers/mcp-twincat/systemtest/umrt_chain.py`

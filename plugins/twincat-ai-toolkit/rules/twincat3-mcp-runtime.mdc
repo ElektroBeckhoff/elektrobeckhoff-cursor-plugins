@@ -13,6 +13,10 @@ diagnosing fatal/license/SAFEOP messages, or reading/writing PLC variables via A
 Detailed E2E checklist: skill `twincat3-umrt-systemtest` /
 command `/twincat3-cmd-online-test`.
 
+Live ADS inspect/stimulate after the PLC is ready: skill
+`twincat3-live-diagnostics` / `/twincat3-cmd-live-diagnostics`
+(+ rule `twincat3-mcp-live-diagnostics`).
+
 ## Tool discovery (canonical)
 
 Before calling any TwinCAT MCP tool: use **`GetMcpTools(server, toolName)`**
@@ -43,8 +47,10 @@ Response fields: `requested_xae_version`, `attached_xae_version`,
 `pin_honored`, `pin_ignored_reason`, `created_new_instance`,
 `attached_instance_id`, `open_solutions[]`.
 
-Typical DeskCal flow: export library on **4024**, UmRT sample on **4026** —
+Typical DeskCal flow: export on **4024**, UmRT sample on **4026** —
 close/switch solution between steps; do not assume one shell does both.
+For online-test only, `.library` alone is enough; for a real library release,
+export **both** `.library` and `.compiled-library` (see `twincat3-mcp-build`).
 
 ## Tool map
 

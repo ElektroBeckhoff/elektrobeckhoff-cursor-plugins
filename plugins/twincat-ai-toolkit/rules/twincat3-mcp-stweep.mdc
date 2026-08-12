@@ -18,6 +18,7 @@ or `/twincat3-cmd-format`. Detailed workflow: skill `twincat3-stweep-format`.
 | `twincat_stweep_status` | Install + DTE commands; includes `format_progress` snapshot |
 | `twincat_format_code` | Format file/folder/project via XAE Formatcode (not CLI) |
 | `twincat_format_progress` | Live job poll (`running`, `percent`, `current_file`) — no STA |
+| `twincat_format_cancel` | Abort multi-file job between files (`phase=canceled`) |
 
 Same `_get_bridge()` / DTE as `twincat_check_all_objects` / `twincat_build`.
 
@@ -34,6 +35,8 @@ If format returns `method=unlicensed` / `license_ok=false`: stop and tell the us
 ## Long-running format
 
 - Prefer `wait=false` + poll `twincat_format_progress` for folders/projects (raise `timeout_seconds`).
+- Abort with `twincat_format_cancel` (stops after the current file — not mid-Formatcode).
+- MCP walks files with `OpenFile` + editor Formatcode (SE folder Select is broken on TcXaeShell); closes each tab after format. Not the same as UI right-click on a folder.
 - MCP progress is **file-count** based; STweep may show its own XAE loading UI (not auto-dismissed).
 - Do not use `twincat_stweep_status` as the live poll — it uses STA and can block behind format.
 
@@ -46,6 +49,9 @@ If format returns `method=unlicensed` / `license_ok=false`: stop and tell the us
 | Empty / `.plcproj` / project root | **`confirm=true` required** |
 
 Never call STweep.CLI (separate license, not in team license).
+
+After Formatcode, MCP saves on first buffer-dirty (+~150 ms) via a held
+Document ref — not a long fixed settle wait (late Save often misses the buffer).
 
 ## Do not
 
