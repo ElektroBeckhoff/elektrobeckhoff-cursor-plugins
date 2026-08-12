@@ -11,10 +11,10 @@ Ask/confirm: **TCP or RTU**, device name, register map, connection params (IP/Un
 
 Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **Read**:
 
-1. `skills/twincat3-modbus/SKILL.md`
-2. `rules/twincat3-modbus.mdc`
+1. `rules/twincat3-modbus.mdc`
+2. `skills/twincat3-modbus/SKILL.md`
 3. `rules/twincat3-naming.mdc`
-4. `rules/twincat3-xml.mdc`
+4. `rules/twincat3-xml.mdc` (+ `rules/examples/twincat3-xml.md` if scaffolding)
 5. `rules/twincat3-core.mdc`
 
 Then protocol file:

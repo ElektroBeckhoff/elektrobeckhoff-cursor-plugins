@@ -12,8 +12,8 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 1. `skills/twincat3-new-library/SKILL.md`
 2. `rules/twincat3-naming.mdc`
 3. `rules/twincat3-versioning.mdc`
-4. `rules/twincat3-xml.mdc`
-5. `rules/twincat3-plcproj.mdc`
+4. `rules/twincat3-xml.mdc` + `rules/examples/twincat3-xml.md`
+5. `rules/twincat3-plcproj.mdc` + `rules/examples/twincat3-plcproj.md`
 6. `rules/twincat3-core.mdc`
 
 ## Do

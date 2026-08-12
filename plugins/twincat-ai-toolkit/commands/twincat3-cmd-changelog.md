@@ -10,11 +10,12 @@ description: Write Versions/<ver>/changelog-<ver>.md for a TwinCAT3 library rele
 Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **Read**:
 
 1. `skills/twincat3-changelog/SKILL.md`
-2. `rules/twincat3-versioning.mdc`
+2. `skills/twincat3-changelog/examples.md` (templates + samples)
+3. `rules/twincat3-versioning.mdc`
 
 ## Do
 
-1. Follow the changelog skill completely (git log since previous release â†’ user-facing sections).
-2. Write `Versions/<ver>/changelog-<ver>.md` only â€” no unrelated edits.
+1. Follow the changelog skill completely (git log since previous release → user-facing sections).
+2. Write `Versions/<ver>/changelog-<ver>.md` only — no unrelated edits.
 3. Do **not** commit here. If the user wants commits: `/twincat3-cmd-commit`.
 4. Never push.

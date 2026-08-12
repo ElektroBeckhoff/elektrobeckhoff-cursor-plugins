@@ -9,11 +9,11 @@ description: Create or extend an HTTP(S) REST client FB (Execute, state machine,
 
 Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **Read**:
 
-1. `skills/twincat3-http/SKILL.md`
-2. `skills/twincat3-http/http-patterns.md`
-3. `rules/twincat3-http.mdc`
+1. `rules/twincat3-http.mdc`
+2. `skills/twincat3-http/SKILL.md`
+3. `skills/twincat3-http/http-patterns.md`
 4. `rules/twincat3-naming.mdc`
-5. `rules/twincat3-xml.mdc`
+5. `rules/twincat3-xml.mdc` (+ `rules/examples/twincat3-xml.md` if scaffolding)
 6. `rules/twincat3-core.mdc`
 
 If JSON body/response parsing is needed, also Read:

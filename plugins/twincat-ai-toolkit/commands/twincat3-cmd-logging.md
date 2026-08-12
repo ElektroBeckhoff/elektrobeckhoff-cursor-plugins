@@ -9,9 +9,9 @@ description: Add structured logging with F_IoT_Utilities_MessageLog (levels, edg
 
 Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **Read**:
 
-1. `skills/twincat3-logging/SKILL.md`
-2. `skills/twincat3-logging/logging-patterns.md`
-3. `rules/twincat3-logging.mdc`
+1. `rules/twincat3-logging.mdc`
+2. `skills/twincat3-logging/SKILL.md`
+3. `skills/twincat3-logging/logging-patterns.md`
 4. `rules/twincat3-naming.mdc`
 5. `rules/twincat3-core.mdc`
 
