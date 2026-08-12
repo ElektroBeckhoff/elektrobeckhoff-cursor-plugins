@@ -1,6 +1,95 @@
-# Changelog Examples
+# Changelog Examples + Templates
 
 Slim-first, user-facing. Commit links use the repo’s real `origin` base URL.
+Workflow / rules: skill `twincat3-changelog` / `SKILL.md`.
+
+---
+
+## Templates (copy-paste)
+
+### Default (slim-first)
+
+```markdown
+# Changelog — <LibraryName> X.X.X.X
+
+## Highlights
+
+- **Short impact title** — one sentence for the app developer. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+- **Second impact** — … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
+
+## Fixed
+
+**`FB_Example`**
+- Before → after (user-visible). ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+
+## Added
+
+**`FB_Example`**
+- New `bEnable : BOOL` – … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
+```
+
+### Full (breaking / major only)
+
+```markdown
+# Changelog — <LibraryName> X.X.X.X
+
+## Highlights
+
+- **Impact 1** — … ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+- **Impact 2** — … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
+
+## Changed
+
+**`FB_Example` inputs**
+
+> [!CAUTION]
+> **BREAKING CHANGE:** What broke and what the user must update.
+
+- `nOld` → `nNew` ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+
+## Fixed
+
+**`FB_Example`**
+- Before → after ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
+
+## Migration
+
+1. Concrete upgrade step
+2. …
+```
+
+### Entry patterns
+
+**Fix**
+
+```markdown
+**`FB_Example`**
+- Wrong color recall in RGB scenes → recalls the saved color mode. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+```
+
+**New API**
+
+```markdown
+**`FB_Example`**
+- New inputs: `bSmartOpt : BOOL`, `fOffset : REAL` [°C]. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
+```
+
+**Breaking**
+
+```markdown
+> [!CAUTION]
+> **BREAKING CHANGE:** Description and required action.
+```
+
+Always add **Migration** when the user must rewire / rename / add a dependency.
+
+**Multiple commits → one theme**
+
+```markdown
+- **Token refresh reliability** — expired tokens trigger a full login; client no longer hangs. ([compare](https://github.com/<Org>/<Repo>/compare/abc1234...def5678))
+```
+
+Or list 2–3 short SHAs after the sentence: ([`abc1234`](…/commit/abc1234), [`def5678`](…/commit/def5678))
 
 ---
 
@@ -81,19 +170,19 @@ fbThermostat[1].fHeatingOffset     := 2.0;
 ## Example 4: Several commits → one highlight (compare link)
 
 ```markdown
-# Changelog — Tc3_EB_BA 1.5.5.0
+# Changelog — Tc3_ExampleLib 1.5.5.0
 
 ## Highlights
 
-- **Room facade brightness** — RoomControl uses blind facade NESW bits to pick weather kLux. ([compare](https://github.com/ElektroBeckhoff/Tc3_EB_BA/compare/1.5.4.0...1.5.5.0))
-- **Milder Daylight PI defaults** — `fKp := 0.02`, `tTi := T#45S`. ([`8084d4a`](https://github.com/ElektroBeckhoff/Tc3_EB_BA/commit/8084d4a))
+- **Facade brightness pick** — controller uses facade bits to select weather kLux. ([compare](https://github.com/<Org>/<Repo>/compare/1.5.4.0...1.5.5.0))
+- **Milder Daylight PI defaults** — `fKp := 0.02`, `tTi := T#45S`. ([`8084d4a`](https://github.com/<Org>/<Repo>/commit/8084d4a))
 
 ## Changed
 
-**`I_EB_BA_RoomFeedbackCollector.AddBlindFeedback`**
+**`I_Lib_FeedbackCollector.AddBlindFeedback`**
 
 > [!CAUTION]
-> **BREAKING CHANGE:** `AddBlindFeedback` now requires `eFacade : E_EB_BA_Facade`.
+> **BREAKING CHANGE:** `AddBlindFeedback` now requires `eFacade : E_Lib_Facade`.
 
 ## Migration
 

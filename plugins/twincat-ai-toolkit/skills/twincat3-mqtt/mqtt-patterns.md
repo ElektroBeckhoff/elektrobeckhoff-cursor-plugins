@@ -1,5 +1,7 @@
 # MQTT Patterns (Tc3_IotBase)
 
+Examples SoT for MQTT ST samples. Principles: `rules/twincat3-mqtt.mdc`. Workflow: `SKILL.md`.
+
 ## Complete MQTT Device FB Template
 
 ```iecst

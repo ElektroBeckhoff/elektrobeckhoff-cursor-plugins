@@ -14,6 +14,8 @@ Not for implementation internals (tickets, watchdogs, refactors, style noise).
 
 **Default = slim.** Use the full template only for breaking / major API surface changes.
 
+**Templates + filled examples:** [examples.md](examples.md) — **Read** before writing.
+
 ## File location
 
 ```
@@ -45,132 +47,25 @@ git log --format="%h %H %s" <prev>..HEAD
 | `git@github.com:Org/Repo.git` | `https://github.com/Org/Repo` |
 | `https://github.com/Org/Repo` | unchanged |
 
-5. Commit link for a SHA (prefer short 7+ hex in link text, full or short SHA in URL):
-
-```
-https://github.com/<Org>/<Repo>/commit/<sha>
-```
-
-Example: [`8084d4a`](https://github.com/ElektroBeckhoff/Tc3_EB_BA/commit/8084d4a)
-
-Optional range for the whole release:
-
-```
-https://github.com/<Org>/<Repo>/compare/<prev-tag-or-sha>...<head-sha>
-```
-
+5. Commit link: `https://github.com/<Org>/<Repo>/commit/<sha>`  
+   Example shape: `[`8084d4a`](https://github.com/<Org>/<Repo>/commit/8084d4a)` — use the repo’s real `origin` URL.  
+   Optional release range: `…/compare/<prev>...<head>`.
 6. Rewrite commit subjects into **user-facing** Highlights (impact). Drop pure `style:` / formatting / ProductVersion noise.
 7. Do **not** commit/push from this skill (use `/twincat3-cmd-commit` only if asked).
 
-If `origin` is not GitHub (or missing), omit commit links and note that in the reply to the user — do not invent URLs.
+If `origin` is not GitHub (or missing), omit commit links and note that in the reply — do not invent URLs.
 
----
-
-## Default template (slim-first)
-
-Use for almost every release (patches, fixes, small features):
-
-```markdown
-# Changelog — <LibraryName> X.X.X.X
-
-## Highlights
-
-- **Short impact title** — one sentence for the app developer. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-- **Second impact** — … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
-
-## Fixed
-
-**`FB_Example`**
-- Before → after (user-visible). ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-
-## Added
-
-**`FB_Example`**
-- New `bEnable : BOOL` – … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
-```
-
-### Slim rules
+## Slim rules
 
 - **Highlights:** max **3–5** bullets; each 1–2 sentences; **end with a commit link** to the main commit for that change
 - One highlight → one primary commit link (if many commits, link the most important or use compare URL once in Highlights intro)
 - Sections: only `Added` / `Changed` / `Fixed` / `Deprecated` / `Migration` as needed — **omit empty**
 - No `### Style` in user changelogs
-- No `---` required between sections (optional)
 - English; present tense; WHAT/WHY only
 - Code samples only when the user must wire a new API
+- Breaking → `> [!CAUTION]` with **BREAKING CHANGE:** + **Migration** steps
 
-### Multiple commits → one theme
-
-```markdown
-- **Token refresh reliability** — expired tokens trigger a full login; client no longer hangs. ([compare](https://github.com/<Org>/<Repo>/compare/abc1234...def5678))
-```
-
-Or list 2–3 short SHAs after the sentence: ([`abc1234`](…/commit/abc1234), [`def5678`](…/commit/def5678))
-
----
-
-## Full template (breaking / major only)
-
-When public API breaks, renames span many types, or Migration is non-trivial:
-
-```markdown
-# Changelog — <LibraryName> X.X.X.X
-
-## Highlights
-
-- **Impact 1** — … ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-- **Impact 2** — … ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
-
-## Changed
-
-**`FB_Example` inputs**
-
-> [!CAUTION]
-> **BREAKING CHANGE:** What broke and what the user must update.
-
-- `nOld` → `nNew` ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-
-## Fixed
-
-**`FB_Example`**
-- Before → after ([`def5678`](https://github.com/<Org>/<Repo>/commit/def5678))
-
-## Migration
-
-1. Concrete upgrade step
-2. …
-```
-
-Keep full changelogs as short as possible: Highlights still scannable; detail only for API/Migration.
-
----
-
-## Entry patterns
-
-### Fix
-
-```markdown
-**`FB_Example`**
-- Wrong color recall in RGB scenes → recalls the saved color mode. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-```
-
-### New API
-
-```markdown
-**`FB_Example`**
-- New inputs: `bSmartOpt : BOOL`, `fOffset : REAL` [°C]. ([`abc1234`](https://github.com/<Org>/<Repo>/commit/abc1234))
-```
-
-### Breaking
-
-```markdown
-> [!CAUTION]
-> **BREAKING CHANGE:** Description and required action.
-```
-
-Always add **Migration** when the user must rewire / rename / add a dependency.
-
----
+Blank templates and filled samples → [examples.md](examples.md).
 
 ## Do / don't
 
@@ -191,7 +86,3 @@ Always add **Migration** when the user must rewire / rename / add a dependency.
 - [ ] Breaking → `> [!CAUTION]` + Migration
 - [ ] English; no implementation noise
 - [ ] No push; commit only via `/twincat3-cmd-commit` if requested
-
-## Reference
-
-Examples: [examples.md](examples.md)

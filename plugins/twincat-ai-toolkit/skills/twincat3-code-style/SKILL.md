@@ -1,13 +1,13 @@
 ---
 name: twincat3-code-style
-description: TwinCAT3 ST code formatting and style rules quick reference. Delegates to detailed references for complete specs.
+description: TwinCAT3 ST formatting + comment quick reference. Points to rule principles and references/ for full examples.
 ---
 
 # TwinCAT3 Code Style
 
 The authoritative rules are:
-- `twincat3-formatting.mdc` — indentation, alignment, control flow, declarations
-- `twincat3-comments.mdc` — I/O comments, headers, section separators
+- `rules/twincat3-formatting.mdc` — indentation, alignment, control flow, declarations
+- `rules/twincat3-comments.mdc` — I/O comments, headers, prose phase blocks (inline pseudocode)
 
 ## Quick Decision Table
 
@@ -21,19 +21,21 @@ The authoritative rules are:
 | Binary operator wrap | After operator, not before |
 | Array initializer wrap | >30 elements → multiline |
 | Enum inline wrap | >5 members → multiline |
-| VAR_INPUT / VAR_OUTPUT comments | Every variable: `// [unit] Purpose` |
-| STRUCT member comments | Every member: `// [unit] Purpose` |
-| FB header | `//` one-line purpose before FUNCTION_BLOCK |
-| VAR group sections (>=5 vars) | `(* section name *)` header |
-| Code logical sections (>=3 related lines) | `(* --- purpose --- *)` separator |
+| Comment syntax | **Only** `(* *)` — never `//` |
+| VAR_INPUT / VAR_OUTPUT comments | Every variable: `(* [unit] Purpose *)` |
+| STRUCT member comments | Every member: `(* [unit] Purpose *)` |
+| FB header | `(* … *)` purpose above FUNCTION_BLOCK |
+| VAR group sections (>=5 vars) | `(* section name *)` header; selective private EOL |
+| Code logical sections | Prose `(* … *)` phase/invariant blocks; dash banners only if file already uses them |
 | STRUCT indentation | 4 spaces inside STRUCT |
 | Single-line IF | Never — body always on next line |
+| Comment density | Match short pseudocode in `rules/twincat3-comments.mdc` / `references/comment-rules.md` |
 
 ### Unit Bracket Format
 
 ```
-// [A] amperes    // [V] volts      // [W] watts
-// [kWh] kWh      // [%] percent    // [ms] milliseconds
+(* [A] … *)    (* [V] … *)    (* [W] … *)
+(* [kWh] … *)  (* [%] … *)    (* [ms] … *)
 ```
 
 ## Reference Files
@@ -41,3 +43,5 @@ The authoritative rules are:
 For complete specifications with all examples, read:
 - [references/formatting-rules.md](references/formatting-rules.md)
 - [references/comment-rules.md](references/comment-rules.md)
+
+Per-object comment pass: skill `twincat3-comment` / `/twincat3-cmd-comment`.

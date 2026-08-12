@@ -1,6 +1,159 @@
 # Modbus RTU Patterns (Tc3_ModbusRtuEB)
 
-> **Shared patterns** (state machine, step-pairs, delay, error handling, execute flags, interval timer, write change detection) are defined in `twincat3-modbus.mdc`. This file contains **only RTU-specific** implementation details.
+> **Shared patterns** (state machine, step-pairs, delay, error handling, execute flags, interval timer, write change detection) are defined in `rules/twincat3-modbus.mdc`. This file contains **only RTU-specific** implementation details.
+>
+> Workflow: skill `twincat3-modbus` / `SKILL.md`.
+
+## 0. Data struct (RTU)
+
+```iecst
+TYPE ST_[Device]_Data :
+STRUCT
+    fCurrent_A_L1           : REAL; (* [A] L1 - Reg. 2 *)
+    fVoltage_V_L1_N         : REAL; (* [V] L1-N - Reg. 10 *)
+    fPower_W_total          : REAL; (* [W] total - Reg. 40 *)
+    nEnergy_Import_total_Wh : DINT; (* [Wh] Import total - Reg. 180 *)
+END_STRUCT
+END_TYPE
+```
+
+Document unit, gain, and register address in comments.
+
+## 0b. Architecture + FB skeleton (RTU)
+
+```
+Device FBs (FB_ModbusRtu)  -->  ST_ModbusComBuffer (FIFO)  -->  FB_ModbusRtuCom_*  -->  ModbusRtuMasterV2_*
+                           <--  Answer via nMessageID       <--                     <--  Serial HW
+```
+
+**Additional VAR_INPUT + VAR_IN_OUT:**
+
+```iecst
+VAR_INPUT
+    nUnitID    : BYTE;              (* Modbus slave address (no default — must be set) *)
+    tReadDelay : TIME := T#250MS;   (* Delay between consecutive reads *)
+END_VAR
+VAR_IN_OUT
+    stModbusComBuffer : ST_ModbusComBuffer;  (* Shared FIFO buffer *)
+END_VAR
+```
+
+**Shared VAR_INPUT** (both transports): `bReadEnable`, `bWriteEnable`, `tReadInterval`, `stControl`.
+
+**VAR (communication FBs + BYTE buffer):**
+
+```iecst
+VAR
+    _fbModbusRead         : FB_ModbusRtu;
+    _eReadModbusFunction  : E_ModbusFunction;
+    _nReadUnitID          : BYTE;
+    _pReadMemoryAddr      : POINTER TO BYTE;
+    _cbLength             : UINT;
+    _arrReadMBDataByte    : ARRAY[1..40] OF BYTE;  (* Variable size! Must be >= nQuantity * 2 bytes. 40 here is just an example (= max 20 registers). *)
+    _bReadError           : BOOL;                  (* Shadow variable for FB error *)
+
+    _fbModbusWrite        : FB_ModbusRtu;
+    _eWriteModbusFunction : E_ModbusFunction;
+    _nWriteUnitID         : BYTE;
+    _pWriteMemoryAddr     : POINTER TO BYTE;
+    _cbWriteLength        : UINT;
+    _arrWriteData         : ARRAY[1..4] OF BYTE;
+    _bWriteError          : BOOL;
+END_VAR
+```
+
+**FB calls (after CASE blocks):**
+
+```iecst
+_fbModbusRead(
+    stModbusComBuffer := stModbusComBuffer,
+    eModbusFunction   := _eReadModbusFunction,
+    nUnitID           := _nReadUnitID,
+    nQuantity         := _nReadQuantity,
+    nMBAddr           := _nReadMBAddr,
+    pMemoryAddr       := _pReadMemoryAddr,
+    cbLength          := _cbLength,
+    bExecute          := _bReadExecute,
+    bBusy             => bReadBusy);
+
+_bReadExecute := FALSE;
+bReadBusy     := _fbModbusRead.bBusy;
+_bReadError   := _fbModbusRead.bError;
+
+_fbModbusWrite(
+    stModbusComBuffer := stModbusComBuffer,
+    eModbusFunction   := _eWriteModbusFunction,
+    nUnitID           := _nWriteUnitID,
+    nQuantity         := _nWriteQuantity,
+    nMBAddr           := _nWriteMBAddr,
+    pMemoryAddr       := _pWriteMemoryAddr,
+    cbLength          := _cbWriteLength,
+    bExecute          := _bWriteExecute,
+    bBusy             => bWriteBusy);
+
+_bWriteExecute := FALSE;
+bWriteBusy     := _fbModbusWrite.bBusy;
+_bWriteError   := _fbModbusWrite.bError;
+
+bError := bReadError OR bWriteError;
+bBusy  := bReadBusy OR bWriteBusy;
+```
+
+**Busy/error access (even steps) — use shadow variables:**
+
+```iecst
+IF NOT bReadBusy THEN
+    IF NOT _bReadError THEN ...
+
+(* Step 100: *)
+nReadErrorMBAddr := _fbModbusRead.nMBAddr;
+nReadErrId       := _fbModbusRead.eErrorId;
+```
+
+Limits: max ~20 registers (40 bytes) per read block.
+
+**Hardware selection:**
+
+| Hardware | Com FB | Master FB | Use case |
+|----------|--------|-----------|----------|
+| KL6x22B | `FB_ModbusRtuCom_KL6x22B` | `ModbusRtuMasterV2_KL6x22B` | Field bus via EtherCAT |
+| PC COM | `FB_ModbusRtuCom_PcCOM` | `ModbusRtuMasterV2_PcCOM` | Direct serial on IPC |
+
+**Supported Modbus functions:**
+
+| E_ModbusFunction | FC | Description |
+|------------------|----|-------------|
+| `ReadCoils` | 1 | Read coil status |
+| `ReadInputStatus` | 2 | Read input status |
+| `ReadRegs` | 3 | Read holding registers |
+| `ReadInputRegs` | 4 | Read input registers |
+| `WriteSingleCoil` | 5 | Write single coil |
+| `WriteSingleRegister` | 6 | Write single register |
+| `Diagnostics` | 8 | Diagnostics |
+| `WriteMultipleCoils` | 15 | Write multiple coils |
+| `WriteRegs` | 16 | Write multiple registers |
+
+## 0c. MAIN wiring (RTU)
+
+```iecst
+PROGRAM MAIN
+VAR
+    fbModbusRtuMaster      : ModbusRtuMasterV2_KL6x22B;
+    fbModbusRtuCom_KL6x22B : FB_ModbusRtuCom_KL6x22B(FB_ModbusRtuMaster := fbModbusRtuMaster);
+    stModbusComBuffer      : ST_ModbusComBuffer;
+    fbDevice               : ARRAY[1..2] OF FB_[Device];
+END_VAR
+
+(* Communication FB must be called FIRST, every cycle *)
+fbModbusRtuCom_KL6x22B(
+    bResetOverflowCounter := ,
+    stModbusComBuffer     := stModbusComBuffer,
+    bBusy                 =>);
+
+(* Device FBs share the same buffer *)
+fbDevice[1](bReadEnable := TRUE, nUnitID := 1, stModbusComBuffer := stModbusComBuffer);
+fbDevice[2](bReadEnable := TRUE, nUnitID := 2, stModbusComBuffer := stModbusComBuffer);
+```
 
 ## 1. BYTE-Based Helper Functions (RTU)
 

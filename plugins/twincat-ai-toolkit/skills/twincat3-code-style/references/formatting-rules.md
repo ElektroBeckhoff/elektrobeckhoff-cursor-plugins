@@ -1,6 +1,8 @@
-# TwinCAT3 Formatting Rules — Complete Reference
+# TwinCAT3 Formatting Rules — Examples / Complete Reference
 
-Source: project auto-formatter configuration + CLAUDE.md spec.
+Principles (lean): `rules/twincat3-formatting.mdc`.
+This file is the **examples SoT** (full specs + ST samples).
+Source: project auto-formatter configuration + toolkit formatting conventions.
 
 ---
 
@@ -115,40 +117,41 @@ END_CASE
 
 ## 4. Declarations — Column Alignment
 
-Align `:`, `:=`, and `//` in columns **within each VAR block**:
+Align `:`, `:=`, and `(* *)` comments in columns **within each VAR block**:
 
 ```iecst
 VAR_INPUT
-    bEnable       : BOOL;                     // Enable the FB
-    fSetpoint     : REAL := 0.0;              // [W] Power setpoint
-    tTimeout      : TIME := T#5S;             // Modbus timeout
-    stParam       : ST_EMS_PidParam;          // PID parameters
+    bEnable       : BOOL;                     (* Enable the FB *)
+    fSetpoint     : REAL := 0.0;              (* [W] Power setpoint *)
+    tTimeout      : TIME := T#5S;             (* Modbus timeout *)
+    stParam       : ST_EMS_PidParam;          (* PID parameters *)
 END_VAR
 
 VAR_OUTPUT
-    fOutput       : REAL;                     // [A] Controller output
-    bBusy         : BOOL;                     // TRUE while executing
-    bError        : BOOL;                     // TRUE on fault
-    nErrorId      : UDINT;                    // Error code
+    fOutput       : REAL;                     (* [A] Controller output *)
+    bBusy         : BOOL;                     (* TRUE while executing *)
+    bError        : BOOL;                     (* TRUE on fault *)
+    nErrorId      : UDINT;                    (* Error code *)
 END_VAR
 
 VAR
     (* state machine *)
-    _nStep        : INT;                      // Current step
-    _nNextStep    : INT;                      // Next step after delay
+    _nStep        : INT;                      (* Current step *)
+    _nNextStep    : INT;                      (* Next step after delay *)
 
     (* timers *)
-    _fbTon        : TON;                      // Delay timer
+    _fbTon        : TON;                      (* Delay timer *)
 
     (* Modbus *)
-    _fbMBRead     : ModbusRtuMaster_KL6x22B;  // Read FB instance
+    _fbMBRead     : ModbusRtuMaster_KL6x22B;  (* Read FB instance *)
 END_VAR
 ```
 
 Rules:
 - Column alignment resets per block — don't align across VAR/VAR_INPUT/VAR_OUTPUT
 - `:=` initial values aligned in same column as `:` of type
-- `//` comments aligned together (not necessarily to a fixed column)
+- `(* *)` comments aligned together (not necessarily to a fixed column)
+- Never use `//` in ST — see `twincat3-comments`
 
 ---
 
@@ -337,9 +340,9 @@ STRUCT always on its own line after `:`, not indented:
 ```iecst
 TYPE ST_EMS_Example :
 STRUCT
-    fCurrent      : REAL := 0.0;   // [A] Phase current
-    bEnable       : BOOL;          // Enable flag
-    nMode         : INT;           // Operating mode
+    fCurrent      : REAL := 0.0;   (* [A] Phase current *)
+    bEnable       : BOOL;          (* Enable flag *)
+    nMode         : INT;           (* Operating mode *)
 END_STRUCT
 END_TYPE
 ```
@@ -348,4 +351,4 @@ END_TYPE
 - `STRUCT` at column 0 (not indented, not on same line as `:`)
 - Members indented 4 spaces
 - `END_STRUCT` and `END_TYPE` at column 0
-- Column-align `:`, `:=`, and `//` within the struct
+- Column-align `:`, `:=`, and `(* *)` within the struct

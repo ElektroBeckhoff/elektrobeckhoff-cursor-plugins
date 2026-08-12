@@ -10,7 +10,7 @@ description: >-
 # TwinCAT3 Thematic Git Commits
 
 Create **local** Conventional Commits grouped by change theme / coherent file set.
-Gold-standard style: Tc3_EB_BA history (`feat:`, `fix:`, `refactor:`, …).
+Style: Conventional Commits (`feat:`, `fix:`, `refactor:`, …) — match the repo’s `git log`.
 
 ## Hard Rules
 
@@ -58,7 +58,9 @@ Preferred order when multiple groups exist:
 1. Feature / fix / refactor source groups (logical dependency order)
 2. `style:` formatting-only
 3. `docs:` changelog
-4. `release:` version bump + library export
+4. `release:` version files + library export (version already set by user
+   via `/twincat3-cmd-release`, or by `/twincat3-cmd-new-version` bump table —
+   never invent a version in this skill)
 
 ### 3. Commit each group sequentially
 
@@ -78,7 +80,7 @@ Optional body: what changed and why (behavior/scope), not a file list.
 
 **Types:** `feat`, `fix`, `refactor`, `style`, `docs`, `release`, `chore`
 
-- Subject: imperative, concise; name the component (`EvgControl`, `FB_EB_BA_View`, library name for release)
+- Subject: imperative, concise; name the component (`FB_Lib_Controller`, subsystem, library name for release)
 - No `(scope)` parentheses required unless the repo already uses them
 - Body: 1–3 sentences when the subject alone is unclear
 

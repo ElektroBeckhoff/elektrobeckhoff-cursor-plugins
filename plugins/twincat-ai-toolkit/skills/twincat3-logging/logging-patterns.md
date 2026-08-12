@@ -1,5 +1,7 @@
 # Logging Patterns
 
+Examples SoT for MessageLog ST samples. Principles: `rules/twincat3-logging.mdc`. Workflow: `SKILL.md`.
+
 ## Edge-Detected State Logging
 
 Never log every cycle. Use memory variables to detect transitions and log only on change.

@@ -1,6 +1,103 @@
 # Modbus TCP Patterns
 
-> **Shared patterns** (state machine, step-pairs, delay, error handling, execute flags, interval timer, write change detection) are defined in `twincat3-modbus.mdc`. This file contains **only TCP-specific** implementation details.
+> **Shared patterns** (state machine, step-pairs, delay, error handling, execute flags, interval timer, write change detection) are defined in `rules/twincat3-modbus.mdc`. This file contains **only TCP-specific** implementation details.
+>
+> Workflow: skill `twincat3-modbus` / `SKILL.md`.
+
+## 0. Data struct (TCP)
+
+```iecst
+TYPE ST_[Device]_Data :
+STRUCT
+    fVoltageL1    : REAL;  (* [V] L1 Phase voltage (Gain 0.1) - Reg 1000 *)
+    fCurrentL1    : REAL;  (* [A] L1 Phase current (Gain 0.01) - Reg 1001 *)
+    fActivePower  : LREAL; (* [W] Active power (S32) - Reg 1010-1011 *)
+    nFaultState   : UINT;  (* 0=OK, 1=Fault - Reg 1020 *)
+END_STRUCT
+END_TYPE
+```
+
+Use REAL for 16-bit values with gain, LREAL for 32-bit values. Document unit, gain, and register address in comments.
+
+## 0b. FB skeleton (TCP)
+
+**Additional VAR_INPUT:**
+
+```iecst
+    sIPAddr  : STRING;           (* Device IP address (no default — must be set) *)
+    nUnitID  : BYTE := 1;       (* Modbus TCP slave ID *)
+    nTCPPort : UINT := 502;     (* Modbus TCP port *)
+    tTimeout : TIME := T#5S;    (* Communication timeout *)
+```
+
+**Shared VAR_INPUT** (both transports): `bReadEnable`, `bWriteEnable`, `tReadInterval`, `stControl`.
+
+**VAR (communication FBs + WORD buffer):**
+
+```iecst
+VAR
+    _fbMBReadInputRegs  : FB_MBReadInputRegs;          (* FC04 (or FB_MBReadRegs for FC03) *)
+    _arrReadMBData      : ARRAY[0..31] OF WORD;        (* Variable size! Must be >= nQuantity. 32 here is just an example. *)
+    _fbMBWriteSingleReg : FB_MBWriteSingleReg;         (* FC06 *)
+END_VAR
+```
+
+**FB calls (after CASE blocks):**
+
+```iecst
+_fbMBReadInputRegs(
+    sIPAddr   := sIPAddr,
+    nTCPPort  := nTCPPort,
+    nUnitID   := nUnitID,
+    nQuantity := _nReadQuantity,
+    nMBAddr   := _nReadMBAddr,
+    cbLength  := _cbReadLength,
+    pDestAddr := _pReadDestAddr,
+    bExecute  := _bReadExecute,
+    tTimeout  := tTimeout,
+    bBusy     => bReadBusy);
+
+_fbMBWriteSingleReg(
+    sIPAddr  := sIPAddr,
+    nTCPPort := nTCPPort,
+    nUnitID  := nUnitID,
+    nMBAddr  := _nWriteMBAddr,
+    nValue   := _nWriteValueU16,
+    bExecute := _bWriteExecute,
+    tTimeout := tTimeout,
+    bBusy    => bWriteBusy);
+
+_bReadExecute  := FALSE;
+_bWriteExecute := FALSE;
+
+bError := bReadError OR bWriteError;
+bBusy  := bReadBusy OR bWriteBusy;
+```
+
+**Busy/error access (even steps):**
+
+```iecst
+IF NOT _fbMBReadInputRegs.bBusy THEN
+    IF NOT _fbMBReadInputRegs.bError THEN ...
+
+(* Step 100: *)
+nReadErrorMBAddr := _fbMBReadInputRegs.nMBAddr;
+nReadErrId       := _fbMBReadInputRegs.nErrId;
+```
+
+Limits: max 125 registers per read (Modbus protocol).
+
+## 0c. MAIN wiring (TCP)
+
+```iecst
+PROGRAM MAIN
+VAR
+    fbDevice : ARRAY[1..4] OF FB_[Device];
+END_VAR
+
+fbDevice[1](bReadEnable := TRUE, sIPAddr := '192.168.1.10', nUnitID := 1);
+fbDevice[2](bReadEnable := TRUE, sIPAddr := '192.168.1.11', nUnitID := 1);
+```
 
 ## 1. WORD-Based Helper Functions (TCP)
 

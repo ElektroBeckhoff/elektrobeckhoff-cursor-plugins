@@ -1,6 +1,6 @@
 # HTTP(S) REST Communication in TwinCAT3
 
-Complete reference for building HTTP(S) client FBs with `Tc3_IotBase`.
+Examples SoT for HTTP ST samples. Principles: `rules/twincat3-http.mdc`. Workflow: `SKILL.md`.
 Based on the working implementation in **Tc3_Seven_io** (`FB_Seven_io_Client`).
 
 ---

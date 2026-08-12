@@ -37,25 +37,8 @@ Both parsers share the same API — `FindMember`, `HasMember`, `GetArraySize`, `
 4. Free if allocated →  __DELETE(pPayload)
 ```
 
-### Parse HTTP Response (shortcut)
-
-```iecst
-_jsonDoc := _fbRequest.GetJsonDomContent(_fbJson);  // One call, no __NEW needed
-```
-
-### Parse MQTT Payload (manual)
-
-```iecst
-_pPayload := __NEW(BYTE, _fbMessage.nPayloadSize + 1);
-IF _pPayload <> 0 THEN
-    _fbMessage.GetPayload(_pPayload, _fbMessage.nPayloadSize + 1, TRUE);
-    _jsonDoc := _fbJson.ParseDocument(_pPayload^);
-    // ... navigate ...
-    __DELETE(_pPayload);
-END_IF
-```
-
-See [json-parse-patterns.md](json-parse-patterns.md) for object iteration, index-based array access, deep nesting, and complete examples.
+ST for HTTP shortcut, MQTT `__NEW` parse, object/array/deep nesting →
+[json-parse-patterns.md](json-parse-patterns.md).
 
 ## JSON Writing Workflow
 
@@ -67,47 +50,14 @@ See [json-parse-patterns.md](json-parse-patterns.md) for object iteration, index
    b. Large           →  __NEW + CopyDocument + __DELETE
 ```
 
-### Small JSON (GetDocument shortcut)
-
-```iecst
-_fbJsonWriter.ResetDocument();
-_fbJsonWriter.StartObject();
-_fbJsonWriter.AddKey('powerOn');
-_fbJsonWriter.AddBool(TRUE);
-_fbJsonWriter.EndObject();
-
-_sBody := _fbJsonWriter.GetDocument();  // Returns STRING(255)
-_fbJsonWriter.ResetDocument();
-```
-
-### Large JSON (CopyDocument)
-
-```iecst
-_nPayloadSize := _fbJsonWriter.GetDocumentLength();
-_pJsonPayload := __NEW(BYTE, _nPayloadSize);
-
-IF _pJsonPayload <> 0 THEN
-    _fbJsonWriter.CopyDocument(_pJsonPayload^, _nPayloadSize);
-    // Publish or send...
-    __DELETE(_pJsonPayload);
-END_IF
-```
-
-See [json-write-patterns.md](json-write-patterns.md) for nested arrays, DOM manipulation (AddJsonMember/SetJson/CopyJson), and the _CreateSendPayload reuse pattern.
+ST for GetDocument / CopyDocument, nested arrays, DOM mutation, `_CreateSendPayload` →
+[json-write-patterns.md](json-write-patterns.md).
 
 ## Dynamic String Allocation
 
-```iecst
-_nPayloadSize := _fbMessage.nPayloadSize + 1;
-_pPayload     := __NEW(BYTE, _nPayloadSize);
+Always: `__NEW` → check `<> 0` → use → `__DELETE` in same scope.
 
-IF _pPayload <> 0 THEN
-    // Use the buffer...
-    __DELETE(_pPayload);  // ALWAYS free in same scope
-END_IF
-```
-
-See [dynamic-strings.md](dynamic-strings.md) for allocation patterns, reuse strategies, and string operations.
+ST for allocation, reuse, string ops → [dynamic-strings.md](dynamic-strings.md).
 
 ## Key Rules
 

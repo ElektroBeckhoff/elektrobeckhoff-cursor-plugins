@@ -1,6 +1,6 @@
 # Thematic Commit Examples
 
-Patterns from TwinCAT3 library history (e.g. Tc3_EB_BA). **Never push** after these commits.
+Patterns for TwinCAT3 library repos. **Never push** after these commits.
 
 ---
 
@@ -51,7 +51,7 @@ After a release workflow:
 
 | Group | Files | Message |
 |-------|-------|---------|
-| release | `Global_Version.TcGVL`, `*.plcproj` ProjectVersion, `Versions/1.4.3.0/*.library` (+ compiled) | `release: bump Tc3_EB_BA to 1.4.3.0 and add library export` |
+| release | `Global_Version.TcGVL`, `*.plcproj` ProjectVersion, `Versions/1.4.3.0/*.library` (+ compiled) | `release: bump library to 1.4.3.0 and add library export` |
 | docs | `Versions/1.4.3.0/changelog-1.4.3.0.md` | `docs: add changelog for version 1.4.3.0` |
 
 Do **not** combine library binaries with the changelog markdown in one commit.
