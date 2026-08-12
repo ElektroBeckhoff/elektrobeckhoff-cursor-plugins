@@ -52,9 +52,21 @@ Never call STweep.CLI (separate license, not in team license).
 
 After Formatcode, MCP saves on first buffer-dirty (+~150 ms) via a held
 Document ref — not a long fixed settle wait (late Save often misses the buffer).
+Then it **fingerprints on-disk bytes**:
+
+| Result field | Meaning |
+|--------------|---------|
+| `files_formatted` / `disk_changed` | Disk content actually changed |
+| `files_unchanged` / `unchanged[]` | Formatcode ran; buffer never dirty (already OK or silent no-op) |
+| `failed[]` with “dirty…unchanged” | Buffer was dirty/Save ran but disk bytes unchanged → **failure** |
+
+Do **not** treat `files_formatted: 1` as proof of alignment without `disk_changed`
+or a post-check (`git diff` / file hash). On `files_unchanged` or dirty-save
+failure: retry once or stop and tell the user to format in XAE.
 
 ## Do not
 
 - Format the whole project without explicit user confirm
 - Treat STweep as a Beckhoff TE1000 API (it is a third-party VSIX)
 - Skip `twincat_open` and hope the focused XAE window is used — attach is by solution path / `xae_version`
+- Trust Formatcode COM success alone when `disk_changed=false`

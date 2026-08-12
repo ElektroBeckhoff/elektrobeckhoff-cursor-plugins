@@ -17,6 +17,7 @@ CLI (STweep.CLI) is intentionally never invoked.
 from __future__ import annotations
 
 import glob
+import hashlib
 import logging
 import os
 import re
@@ -24,7 +25,7 @@ import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
-from typing import Optional
+from typing import Optional, Tuple
 
 from dataclasses import asdict
 
@@ -50,7 +51,8 @@ STWEEP_COMMAND_GUID = "{3395FA64-3C7F-4FB2-9551-CE197238B175}"
 # using a held Document ref — do not use a long min_wait floor.
 _STWEEP_POST_DIRTY_S = 0.15
 _STWEEP_POLL_S = 0.05
-_STWEEP_CLEAN_POLLS = 10  # ~0.5s with real sleep; fast under tests mocking sleep
+# ~1.0s grace for late dirty before treating buffer as never-dirty (no-op).
+_STWEEP_CLEAN_POLLS = 20
 _STWEEP_SETTLE_MAX_S = 2.5
 
 # TwinCAT ST objects STweep can format via the XAE editor command.
@@ -500,6 +502,11 @@ class StweepOpsMixin:
         if result.canceled or result.method == "canceled":
             phase = "canceled"
         self._format_cancel_requested = False
+        done = (
+            result.files_formatted
+            + result.files_failed
+            + result.files_unchanged
+        )
         self._update_format_progress(
             running=False,
             phase=phase,
@@ -507,19 +514,12 @@ class StweepOpsMixin:
             files_total=result.files_total,
             files_formatted=result.files_formatted,
             files_failed=result.files_failed,
-            files_done=result.files_formatted + result.files_failed,
+            files_done=done,
             percent=(
                 100.0
-                if result.files_total and (
-                    result.files_formatted + result.files_failed
-                ) >= result.files_total
+                if result.files_total and done >= result.files_total
                 else (
-                    round(
-                        100.0
-                        * (result.files_formatted + result.files_failed)
-                        / result.files_total,
-                        1,
-                    )
+                    round(100.0 * done / result.files_total, 1)
                     if result.files_total
                     else (100.0 if result.success else 0.0)
                 )
@@ -932,6 +932,7 @@ class StweepOpsMixin:
             )
 
         formatted: list[str] = []
+        unchanged: list[str] = []
         failed: list[dict] = []
         deadline = time.time() + max(30, timeout_s)
         # Per-file editor path — SE folder Formatcode needs UIHierarchy.Select
@@ -976,13 +977,16 @@ class StweepOpsMixin:
                 })
                 self._update_format_progress(
                     files_failed=len(failed),
-                    files_done=len(formatted) + len(failed),
+                    files_done=len(formatted) + len(failed) + len(unchanged),
                 )
                 continue
             try:
-                self._format_one_file(file_path, deadline)
-                formatted.append(file_path)
-                # First successful format proves license without wizard UI
+                outcome = self._format_one_file(file_path, deadline) or "changed"
+                if outcome == "unchanged":
+                    unchanged.append(file_path)
+                else:
+                    formatted.append(file_path)
+                # Formatcode executed without COM error → license usable
                 self._stweep_license_ok = True
                 self._stweep_license_detail = (
                     "license ok (verified by successful Formatcode)"
@@ -1045,7 +1049,7 @@ class StweepOpsMixin:
             self._update_format_progress(
                 files_formatted=len(formatted),
                 files_failed=len(failed),
-                files_done=len(formatted) + len(failed),
+                files_done=len(formatted) + len(failed) + len(unchanged),
             )
 
         if canceled:
@@ -1053,6 +1057,8 @@ class StweepOpsMixin:
                 f"Canceled: formatted {len(formatted)}/{len(files)} file(s) "
                 f"via {command} (per-file OpenFile)"
             )
+            if unchanged:
+                msg += f" | {len(unchanged)} unchanged on disk"
             if failed:
                 msg += f" | {len(failed)} failed before cancel"
             license_ok = getattr(self, "_stweep_license_ok", None)
@@ -1069,8 +1075,11 @@ class StweepOpsMixin:
                 files_total=len(files),
                 files_formatted=len(formatted),
                 files_failed=len(failed),
+                files_unchanged=len(unchanged),
                 formatted=formatted,
                 failed=failed,
+                unchanged=unchanged,
+                disk_changed=bool(formatted),
                 installed=status.installed,
                 license_ok=license_ok,
                 license_state=license_state,
@@ -1079,11 +1088,19 @@ class StweepOpsMixin:
                 canceled=True,
             )
 
-        success = bool(formatted) and not failed
+        # Hard failures fail the job. Pure unchanged (already OK or silent
+        # no-op Save) is success=True with disk_changed=False so agents can
+        # verify via git/hash — do not claim files_formatted when disk same.
+        success = not failed and (bool(formatted) or bool(unchanged))
         msg = (
             f"Formatted {len(formatted)}/{len(files)} file(s) via {command} "
             f"(per-file OpenFile; SE folder Formatcode needs UIHierarchy.Select)"
         )
+        if unchanged:
+            msg += (
+                f" | {len(unchanged)} unchanged on disk "
+                f"(never dirty or already formatted — verify alignment)"
+            )
         if failed:
             msg += f" | {len(failed)} failed"
 
@@ -1101,8 +1118,11 @@ class StweepOpsMixin:
             files_total=len(files),
             files_formatted=len(formatted),
             files_failed=len(failed),
+            files_unchanged=len(unchanged),
             formatted=formatted,
             failed=failed,
+            unchanged=unchanged,
+            disk_changed=bool(formatted),
             installed=status.installed,
             license_ok=license_ok,
             license_state=license_state,
@@ -1221,10 +1241,32 @@ class StweepOpsMixin:
                 continue
         return ""
 
-    def _format_one_file(self, file_path: str, deadline: float) -> None:
+    @staticmethod
+    def _file_fingerprint(path: str) -> Tuple[int, str]:
+        """Return (size, sha256 hex) of on-disk bytes for post-format verify."""
+        try:
+            size = os.path.getsize(path)
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(65536), b""):
+                    h.update(chunk)
+            return (size, h.hexdigest())
+        except OSError:
+            return (-1, "")
+
+    def _format_one_file(self, file_path: str, deadline: float) -> str:
+        """Run Formatcode + save. Return ``changed`` or ``unchanged``.
+
+        ``unchanged`` = Formatcode ran but on-disk fingerprint matches pre-format
+        and the buffer never went dirty (already formatted or silent no-op).
+
+        Raises if the buffer was dirty / Save ran but disk bytes still match
+        (false-positive persist failure).
+        """
         tai = _tai()
         if self._cancel_requested():
             raise RuntimeError("format canceled")
+        pre = self._file_fingerprint(file_path)
         self._retry_com(
             self._dte.ItemOperations.OpenFile, file_path,
             max_retries=8, delay_s=1,
@@ -1255,9 +1297,13 @@ class StweepOpsMixin:
                     max_retries=5, delay_s=1,
                 )
                 doc = self._capture_document(file_path)
-                self._wait_and_save_active(file_path, deadline, doc=doc)
+                was_dirty, did_save = self._wait_and_save_active(
+                    file_path, deadline, doc=doc,
+                )
                 self._close_active_if_path(file_path, doc=doc)
-                return
+                return self._classify_format_disk_result(
+                    file_path, pre, was_dirty, did_save,
+                )
             raise RuntimeError(
                 f"STweep editor Formatcode not available for '{file_path}'. "
                 "Is the PLC editor open and is STweep licensed?"
@@ -1268,10 +1314,33 @@ class StweepOpsMixin:
             self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
             max_retries=5, delay_s=1,
         )
-        self._wait_and_save_active(file_path, deadline, doc=doc)
+        was_dirty, did_save = self._wait_and_save_active(
+            file_path, deadline, doc=doc,
+        )
         # Close so multi-file jobs do not leave dozens of editor tabs open
         # (UI folder Formatcode does not open each object as a document).
         self._close_active_if_path(file_path, doc=doc)
+        return self._classify_format_disk_result(
+            file_path, pre, was_dirty, did_save,
+        )
+
+    def _classify_format_disk_result(
+        self,
+        file_path: str,
+        pre: Tuple[int, str],
+        was_dirty: bool,
+        did_save: bool,
+    ) -> str:
+        post = self._file_fingerprint(file_path)
+        if pre != post and post[0] >= 0:
+            return "changed"
+        if was_dirty or did_save:
+            raise RuntimeError(
+                f"STweep Formatcode dirtied/saved '{file_path}' but on-disk "
+                f"content is unchanged (Save no-op or missed buffer). "
+                f"Retry format or format manually in XAE, then verify git diff."
+            )
+        return "unchanged"
 
     def _capture_document(self, file_path: str):
         """Return ActiveDocument when it matches *file_path* (best-effort)."""
@@ -1327,8 +1396,11 @@ class StweepOpsMixin:
             except Exception as exc:
                 log.debug("Close after format %s: %s", file_path, exc)
 
-    def _save_format_document(self, file_path: str, doc=None) -> None:
-        """Save dirty buffer via held Document, else ActiveDocument."""
+    def _save_format_document(self, file_path: str, doc=None) -> bool:
+        """Save dirty buffer via held Document, else ActiveDocument.
+
+        Returns True if ``Save`` was invoked on a matching document.
+        """
         candidates = []
         if doc is not None:
             candidates.append(doc)
@@ -1344,23 +1416,28 @@ class StweepOpsMixin:
             try:
                 if not bool(candidate.Saved):
                     self._retry_com(candidate.Save, max_retries=5, delay_s=0.5)
-                return
+                    return True
+                return False
             except Exception as exc:
                 log.debug("Document.Save after format %s: %s", file_path, exc)
+        return False
 
     def _wait_and_save_active(
         self, file_path: str, deadline: float, doc=None,
-    ) -> None:
+    ) -> Tuple[bool, bool]:
         """Save as soon as STweep dirties the buffer (held Document preferred).
 
         Live measurements: dirty ~50ms after Formatcode; ActiveDocument often
         dies after ~0.3s. A 1.2s min_wait misses the save window. On first
         dirty, wait ``_STWEEP_POST_DIRTY_S`` then Save on the held ref.
+
+        Returns ``(was_dirty, did_save)``.
         """
         tai = _tai()
         end_wait = min(deadline, time.time() + _STWEEP_SETTLE_MAX_S)
         held = doc if doc is not None else self._capture_document(file_path)
         clean_polls = 0
+        was_dirty = False
 
         while time.time() < end_wait:
             if self._cancel_requested():
@@ -1374,6 +1451,7 @@ class StweepOpsMixin:
                 saved = self._doc_saved_state(held)
 
             if saved is False:
+                was_dirty = True
                 # Formatter is writing; short post then persist immediately.
                 time.sleep(_STWEEP_POST_DIRTY_S)
                 tai.pythoncom.PumpWaitingMessages()
@@ -1385,4 +1463,5 @@ class StweepOpsMixin:
                 break
             time.sleep(_STWEEP_POLL_S)
 
-        self._save_format_document(file_path, held)
+        did_save = self._save_format_document(file_path, held)
+        return was_dirty, did_save

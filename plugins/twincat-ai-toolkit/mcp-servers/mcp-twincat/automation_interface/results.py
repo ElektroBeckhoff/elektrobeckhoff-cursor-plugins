@@ -248,8 +248,13 @@ class StweepFormatResult:
     files_total: int = 0
     files_formatted: int = 0
     files_failed: int = 0
+    files_unchanged: int = 0
     formatted: list = field(default_factory=list)
     failed: list = field(default_factory=list)
+    # Formatcode ran but disk fingerprint unchanged (never dirty, or already OK).
+    unchanged: list = field(default_factory=list)
+    # True when at least one file's on-disk bytes changed.
+    disk_changed: bool = False
     installed: Optional[bool] = None
     license_ok: Optional[bool] = None
     license_state: str = ""

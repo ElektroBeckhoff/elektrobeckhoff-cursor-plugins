@@ -122,6 +122,13 @@ class TestFormatCode(unittest.TestCase):
             path = tmp.name
             tmp.write(b"dummy")
         doc.FullName = path
+
+        def _save_writes():
+            with open(path, "wb") as fh:
+                fh.write(b"formatted-content")
+            doc.Saved = True
+
+        doc.Save.side_effect = _save_writes
         try:
             with patch("stweep_ops.discover_stweep_installs", return_value=[{
                 "path": r"C:\fake\STweep", "version": "4.4.7.0",
@@ -140,6 +147,8 @@ class TestFormatCode(unittest.TestCase):
                     probe.assert_not_called()
             self.assertTrue(r.success)
             self.assertEqual(r.files_formatted, 1)
+            self.assertTrue(r.disk_changed)
+            self.assertEqual(r.files_unchanged, 0)
             self.assertEqual(r.command, STWEEP_CMD_EDITOR)
             self.assertIn("per_file", r.method)
             self.assertTrue(r.license_ok)
@@ -173,6 +182,7 @@ class TestFormatCode(unittest.TestCase):
                     # Request cancel after first file starts succeeding
                     b.cancel_format()
                 # Simulate work; cancel is checked at loop head before next file
+                return "changed"
 
             with patch("stweep_ops.discover_stweep_installs", return_value=[{
                 "path": r"C:\fake\STweep", "version": "4.4.7.0",
@@ -266,7 +276,10 @@ class TestFormatCode(unittest.TestCase):
                         r = b.format_code(path=tmp, recursive=False)
             self.assertTrue(r.success)
             self.assertEqual(r.files_total, 3)
-            self.assertEqual(r.files_formatted, 3)
+            # Saved=True → never dirty → disk unchanged (not false files_formatted)
+            self.assertEqual(r.files_formatted, 0)
+            self.assertEqual(r.files_unchanged, 3)
+            self.assertFalse(r.disk_changed)
             self.assertNotIn(STWEEP_CMD_FOLDER, r.command)
 
     def test_project_scope_requires_confirm(self):
@@ -335,7 +348,8 @@ class TestFormatCode(unittest.TestCase):
                         r = b.format_code(path=plcproj, confirm=True)
             self.assertTrue(r.success)
             self.assertEqual(r.files_total, 2)
-            self.assertEqual(r.files_formatted, 2)
+            self.assertEqual(r.files_formatted, 0)
+            self.assertEqual(r.files_unchanged, 2)
 
     def test_progress_updated_and_idle_after_sync_format(self):
         b = _make_bridge()
@@ -367,10 +381,11 @@ class TestFormatCode(unittest.TestCase):
                     ):
                         r = b.format_code(path=path, wait=True)
             self.assertTrue(r.success)
+            self.assertEqual(r.files_unchanged, 1)
             prog = b.get_format_progress()
             self.assertFalse(prog.running)
             self.assertEqual(prog.phase, "done")
-            self.assertEqual(prog.files_formatted, 1)
+            self.assertEqual(prog.files_done, 1)
             self.assertEqual(prog.percent, 100.0)
             self.assertIsNotNone(prog.result)
         finally:
@@ -448,8 +463,52 @@ class TestWaitAndSave(unittest.TestCase):
                     pythoncom=MagicMock(PumpWaitingMessages=MagicMock()),
                 ),
             ):
-                b._wait_and_save_active(path, deadline=time.time() + 30, doc=doc)
+                was_dirty, did_save = b._wait_and_save_active(
+                    path, deadline=time.time() + 30, doc=doc,
+                )
         doc.Save.assert_not_called()
+        self.assertFalse(was_dirty)
+        self.assertFalse(did_save)
+
+    def test_dirty_save_without_disk_change_is_failure(self):
+        """False-positive: buffer dirty + Save, but file bytes unchanged."""
+        b = _make_bridge()
+        b._dte = MagicMock()
+        cmd = MagicMock()
+        cmd.IsAvailable = True
+        b._dte.Commands.Item.return_value = cmd
+        doc = MagicMock()
+        doc.Saved = False
+        b._dte.ActiveDocument = doc
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".TcPOU", delete=False,
+        ) as tmp:
+            path = tmp.name
+            tmp.write(b"same-bytes")
+        doc.FullName = path
+        # Save does not rewrite the file → fingerprint unchanged
+        doc.Save.side_effect = lambda: setattr(doc, "Saved", True)
+        try:
+            with patch("stweep_ops.discover_stweep_installs", return_value=[{
+                "path": r"C:\fake\STweep", "version": "4.4.7.0",
+            }]):
+                with patch("stweep_ops.time.sleep", return_value=None):
+                    with patch(
+                        "stweep_ops._tai",
+                        return_value=MagicMock(
+                            pythoncom=MagicMock(
+                                PumpWaitingMessages=MagicMock(),
+                            ),
+                        ),
+                    ):
+                        r = b.format_code(path=path, timeout_s=30)
+            self.assertFalse(r.success)
+            self.assertEqual(r.files_formatted, 0)
+            self.assertEqual(r.files_failed, 1)
+            self.assertIn("unchanged", r.failed[0]["error"].lower())
+        finally:
+            os.unlink(path)
 
     def test_close_prefers_held_document(self):
         b = _make_bridge()

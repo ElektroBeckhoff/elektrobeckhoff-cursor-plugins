@@ -18,7 +18,8 @@ Task Progress:
 - [ ] Step 3: twincat_format_code (file/folder; project needs confirm=true)
 - [ ] Step 4: Many files → wait=false + poll twincat_format_progress
 - [ ] Step 5: To abort → twincat_format_cancel (stops between files)
-- [ ] Step 6: On unlicensed fail-fast → stop; else report files_formatted
+- [ ] Step 6: Verify disk — require `disk_changed` or accept `files_unchanged` only after git/hash check
+- [ ] Step 7: On unlicensed fail-fast → stop; else report files_formatted / unchanged / failed
 ```
 
 ## Step 1: Open the same XAE session
@@ -95,9 +96,10 @@ the SE folder the way the UI does. Command names still exist:
 **Cancel:** `twincat_format_cancel()` while a job runs → stops after the
 current file (`phase=canceled`). Prefer `wait=false` so the agent can cancel.
 
-**Settle/save:** After Formatcode, MCP holds the Document ref and saves on
-first dirty (+~150 ms) — not a long fixed wait. Saving too late often misses
-the buffer (ActiveDocument goes away).
+**Settle/save + disk verify:** After Formatcode, MCP holds the Document ref and
+saves on first dirty (+~150 ms), then compares a **content fingerprint**.
+Saving too late often misses the buffer (ActiveDocument goes away) — that must
+not look like a successful format.
 
 Do **not** use STweep.CLI.
 
@@ -105,11 +107,17 @@ Do **not** use STweep.CLI.
 
 | Field | Meaning |
 |-------|---------|
-| `success` | all requested files formatted |
+| `success` | no hard failures; may still have `files_unchanged` |
+| `disk_changed` | at least one file’s on-disk bytes changed |
 | `async_started` | background job started (`wait=false`) |
-| `files_formatted` / `files_failed` | counts |
-| `formatted[]` / `failed[]` | paths |
+| `files_formatted` | disk actually changed |
+| `files_unchanged` / `unchanged[]` | Formatcode ran; never dirty (already OK or silent no-op) |
+| `files_failed` / `failed[]` | errors — includes dirty/Save but disk unchanged |
 | `license_ok` / `installed` | echoed preflight |
+
+**Agent check:** After format, if `disk_changed=false` (or only `files_unchanged`),
+verify with `git diff` / file hash. Do not assume column alignment applied.
+On dirty-save failure text: retry once or stop and format in XAE.
 
 ## Related
 
