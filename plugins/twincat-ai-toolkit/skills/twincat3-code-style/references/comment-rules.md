@@ -1,83 +1,64 @@
-# TwinCAT3 Comment Rules — Complete Reference
+# TwinCAT3 Comment Rules — Examples / Density Reference
+
+Principles (lean): `rules/twincat3-comments.mdc`.
+This file is the **examples SoT** (inline pseudocode density target). Match this
+density — not denser, not bare. Do not open external library sources for style.
 
 ---
 
-## 1. FB / FUNCTION Header
+## 1. Syntax
 
-One-line `//` purpose comment before `FUNCTION_BLOCK` / `FUNCTION`.  
-Max 3 lines for complex FBs.
+Use **only** `(* *)`. Never `//` in ST CDATA.
 
-```iecst
-// Modbus TCP client for Solplanet AI-Logger 1000.
-// Reads inverter measurements via FC04, writes control registers via FC06.
-FUNCTION_BLOCK FB_Solplanet_Ai_Logger_1000
-```
-
-```iecst
-// Converts two WORD registers to DINT (big-endian, high word first).
-FUNCTION F_Solplanet_Int32 : DINT
-```
-
-Rules:
-- English only
-- Describes **what** the FB does, not **how**
-- No period at end
-- No redundant `// FB for ...`
+English only. TwinCAT allows nested `(* outer (* inner *) *)`.
 
 ---
 
-## 2. VAR_INPUT / VAR_OUTPUT — Always Commented
+## 2. Density target (pseudocode map)
 
-Every input and output **must** have an inline `//` comment.
+| Pattern | What good looks like |
+|---------|----------------------|
+| FB header | Multi-line `(* … *)` above `FUNCTION_BLOCK` — purpose / contracts |
+| `VAR_INPUT` / `VAR_OUTPUT` | Section headers optional; **every** member has EOL `(* *)` |
+| `VAR` | Section headers; selective private EOL (non-obvious only) |
+| Body | Prose `(* … *)` before phases — why / order / invariant |
+| Methods | Header when contract/OC/order matters; skip trivial helpers |
+
+---
+
+## 3. FB / FUNCTION / PROGRAM Header
+
+```iecst
+(* On/off hysteresis for a digital enable line. *)
+FUNCTION_BLOCK FB_Lib_HysteresisTimer
+```
+
+Complex FBs: 2–3 lines of purpose/contract. Describes **what**, not line-by-line how.
+
+---
+
+## 4. VAR_INPUT / VAR_OUTPUT
 
 ```iecst
 VAR_INPUT
-    sIPAddr       : STRING(15) := '192.168.0.1'; // Inverter IP address
-    nUnitID       : BYTE := 1;                   // Modbus unit ID
-    nTCPPort      : UINT := 502;                 // [port] Modbus TCP port
-    tTimeout      : TIME := T#5S;               // Modbus response timeout
-    tReadInterval : TIME := T#5S;               // Polling interval
+    sHost     : STRING(15); (* Device host / IP *)
+    nPort     : UINT := 502; (* [port] TCP port *)
+    tTimeout  : TIME := T#5S; (* Response timeout *)
 END_VAR
-
 VAR_OUTPUT
-    bBusy         : BOOL;  // TRUE while read/write cycle running
-    bError        : BOOL;  // TRUE on Modbus fault
-    nErrorId      : UDINT; // Last Modbus error code
+    bBusy     : BOOL; (* TRUE while transaction running *)
+    bError    : BOOL; (* TRUE on fault *)
+    nErrorId  : UDINT; (* Last error code *)
 END_VAR
 ```
 
-### Unit bracket convention
-
-Units always in brackets at the start of comment:
-
-| Unit | Example |
-|------|---------|
-| Ampere | `// [A] Max phase current` |
-| Volt | `// [V] Grid voltage` |
-| Watt | `// [W] Active power setpoint` |
-| Kilowatt-hour | `// [kWh] Total energy` |
-| Percent | `// [%] State of charge` |
-| Celsius | `// [°C] Temperature limit` |
-| Milliseconds | `// [ms] Scan interval` |
-| Seconds | `// [s] Timeout duration` |
-| Port | `// [port] TCP port number` |
-
-### BOOL comment style
-
-Describe the TRUE condition:
-
-```iecst
-bEnabled   : BOOL; // TRUE when FB is active
-bOverlimit : BOOL; // TRUE when current exceeds limit
-bBusy      : BOOL; // TRUE while operation in progress
-```
+- Units: `(* [A] … *)`, `(* [W] … *)`, `(* [%] … *)`, `(* [ms] … *)`
+- BOOL: TRUE condition
+- Do not repeat the identifier in the comment
 
 ---
 
-## 3. VAR Section Headers
-
-Group private variables with `(* section name *)` headers.  
-Use when a VAR block has ≥5 variables **or** has clearly distinct subgroups.
+## 5. VAR Section Headers + Selective Inline
 
 ```iecst
 VAR
@@ -86,164 +67,137 @@ VAR
     _negEdgeDone   : F_TRIG;
 
     (* timers *)
-    _fbTonRead     : TON;
-    _fbTonWrite    : TON;
+    _fbTonRead : TON;
 
-    (* Modbus read state *)
-    _nReadStep     : INT;
-    _nReadNextStep : INT;
-    _bReadExecute  : BOOL;
-    _arrReadBuf    : ARRAY [0..15] OF WORD;
-
-    (* Modbus write state *)
-    _nWriteStep    : INT;
-    _bWriteExecute : BOOL;
-    _nWriteValue   : WORD;
-
-    (* FB instances *)
-    _fbMBRead      : FB_MBReadInputRegs;
-    _fbMBWrite     : FB_MBWriteSingleReg;
+    (* state — non-obvious *)
+    _nOwnerIdx : INT; (* Active owner; -1 = none *)
 END_VAR
 ```
 
-One blank line between sections. Headers are lowercase, 2-4 words.
+- Headers when ≥5 vars or clear subgroups
+- One blank line between sections
+- Extra EOL only for non-obvious members — not every `_fb*`
 
 ---
 
-## 4. Code Block Separators
-
-Use `(* --- Purpose --- *)` to separate logical sections in implementation:
+## 6. Implementation Phase Blocks
 
 ```iecst
-(* --- edge detection --- *)
-_posEdgeEnable(CLK := bEnable);
+(* Snapshot inputs once per cycle (no mid-cycle tear). *)
+_stSnap := stIn;
 
-(* --- parameter validation --- *)
-IF tTimeout < T#100MS
-THEN
-    bError := TRUE;
-    RETURN;
+(* Only apply outputs after settle time. *)
+IF _fbTonSettle.Q THEN
+    bApply := TRUE;
 END_IF
+```
 
-(* --- read cycle --- *)
-CASE _nReadStep OF
-    (* ... *)
-END_CASE
+Prefer prose over mandatory dash banners. `(* --- purpose --- *)` only if the
+file already uses that style. Never for single obvious statements.
 
-(* --- write cycle --- *)
-CASE _nWriteStep OF
-    (* ... *)
+---
+
+## 7. CASE Step Comments
+
+```iecst
+CASE _nStep OF
+    0: (* idle *)
+        ;
+    1: (* issue request *)
+        _bBusy := TRUE;
 END_CASE
 ```
 
-Rules:
-- At least 3 dashes on each side: `(* --- text --- *)`
-- Lowercase text, 2-5 words
-- **1 blank line before** separator, **no blank line after** it
-- Only for groups of ≥3 related lines
-- Never for single statements
+Every case label: inline `(* purpose *)`. Do not repeat the step number.
 
 ---
 
-## 5. STRUCT / DUT Members
-
-Same rules as VAR_INPUT — each member should have an inline comment:
+## 8. Method / Action Headers
 
 ```iecst
-TYPE ST_Solplanet_InverterBasic :
-STRUCT
-    (* power *)
-    fActivePower    : REAL; // [W] Total active power (Reg 36100)
-    fReactivePower  : REAL; // [var] Total reactive power (Reg 36102)
-    fApparentPower  : REAL; // [VA] Total apparent power (Reg 36104)
+(* Flush pending bind after OC settle; returns TRUE if applied. *)
+METHOD _ApplyDeferredBinding : BOOL
+```
 
-    (* temperatures *)
-    fTempInternal   : REAL; // [°C] Internal temperature (Reg 1310)
-    fTempPhaseU     : REAL; // [°C] U phase temperature (Reg 1311)
-    fTempPhaseV     : REAL; // [°C] V phase temperature (Reg 1312)
-    fTempPhaseW     : REAL; // [°C] W phase temperature (Reg 1313)
-    fTempBoost      : REAL; // [°C] Boost temperature (Reg 1314)
-    fTempDCDC       : REAL; // [°C] Bidirectional DC/DC converter temp (Reg 1315)
+Trivial helpers: no essay. No required `------` banner boxes.
+
+---
+
+## 9. STRUCT DUT
+
+```iecst
+(* Bundled diagnostics; *Valid = TRUE only for a real source. *)
+TYPE ST_Lib_Diagnostics :
+STRUCT
+    (* --- Aggregation --- *)
+    nCount     : UINT; (* Number of reporting devices *)
+    fLevelMean : REAL; (* [0..100] - Mean; 0 if nCount = 0 *)
+
+    (* --- Quality --- *)
+    bValid     : BOOL; (* TRUE after at least one resolved snapshot *)
 END_STRUCT
 END_TYPE
 ```
 
-STRUCT can also use `(* section name *)` headers to group members.
+- Purpose above `TYPE`; `(* --- Section --- *)` when large
+- Every member EOL-commented (units, TRUE-meaning, empty-count notes)
+
+## 9b. ENUM DUT
+
+```iecst
+{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_Lib_ControlMode : (
+    Binary       := 0, (* 0 % or 100 % based on demand *)
+    Proportional := 1, (* PID-based position 0..100 % *)
+    Manual       := 2  (* Fixed manual position *)
+);
+END_TYPE
+```
+
+Every enumerator EOL-commented. Do not strip attributes.
+
+## 9c. GVL / constants
+
+GVL / `VAR CONSTANT`: comment each constant; units/register meta in `(* *)`
+when useful.
 
 ---
 
-## 6. Action / Method Headers (Large FBs Only)
-
-For complex actions/methods in FBs with 5+ actions, use a 3-line block header:
+## 10. Domain notes (e.g. register maps)
 
 ```iecst
-(* ------------------------------------------- *)
-(*           Modbus Read Cycle                 *)
-(* ------------------------------------------- *)
+stMeas.fPower_W := WORD_TO_REAL(arrBuf[0]) * 0.1; (* Reg 1000, Gain 0.1 *)
 ```
 
-Only for FBs with 5+ actions/methods. Small FBs: plain `(* --- name --- *)` is enough.
+Still `(* *)`, never `//`.
 
 ---
 
-## 7. Inline Modbus Register Comments
+## 11. What NOT to Comment
 
-When assigning from Modbus buffer arrays, always include register address:
-
-```iecst
-// ✅ Clear — reader knows exactly which register maps to what
-stWeather.fIrradiance       := WORD_TO_REAL(_arrReadBuf[0]) * 0.1;   // Reg 1000, Gain 0.1
-stWeather.fModuleTemp       := F_Solplanet_Int16(_arrReadBuf[1]) * 0.1; // Reg 1001, S16 Gain 0.1
-stWeather.fAmbientTemp      := F_Solplanet_Int16(_arrReadBuf[2]) * 0.1; // Reg 1002, S16 Gain 0.1
-stWeather.fWindSpeed        := WORD_TO_REAL(_arrReadBuf[3]) * 0.1;   // Reg 1003, Gain 0.1
-```
-
-Include:
-- Modbus register address
-- Data type if non-obvious (S16, S32, U32)
-- Gain/multiplier if applied
+- Narration: `bDone := TRUE; (* Set bDone to TRUE *)`
+- Duplicate name: `bEnable : BOOL; (* Enable flag for bEnable *)`
+- `END_IF` / `END_CASE` / `END_FOR`
+- TODO without owner/date — use `(* TODO(Name YYYY-MM-DD): … *)`
+- Every private VAR
+- `//` anywhere in ST CDATA
 
 ---
 
-## 8. What NOT to Comment
+## 12. Checklist (per FB)
 
-```iecst
-// ❌ Narrates what the code already says
-bDone := TRUE;   // Set bDone to TRUE
+- [ ] Header `(* … *)` above `FUNCTION_BLOCK` / `FUNCTION` / `PROGRAM`
+- [ ] Every `VAR_INPUT` member has inline `(* *)`
+- [ ] Every `VAR_OUTPUT` member has inline `(* *)`
+- [ ] `VAR` grouped with section headers when large
+- [ ] Extra VAR inline comments only where non-obvious
+- [ ] Non-trivial methods have declaration header comments
+- [ ] Implementation has block comments on phase boundaries / invariants
+- [ ] No `//` in CDATA
+- [ ] No obvious narration comments
+- [ ] STRUCT: TYPE header + every member; section headers when large
+- [ ] ENUM: every enumerator commented; attributes intact
+- [ ] Style density matches the pseudocode above (not denser, not bare)
 
-// ❌ Duplicates variable name
-bEnable : BOOL;  // Enable flag for bEnable
-
-// ❌ Commenting END_IF / END_CASE / END_FOR
-END_IF   // end if
-END_CASE // end case
-
-// ❌ TODO without owner and date
-// TODO: add timeout
-
-// ✅ Correct TODO
-// TODO(ChristianAu 2026-01-14): add watchdog timeout for Modbus disconnect
-```
-
-- Internal VAR members: comments **optional**, only if purpose is non-obvious
-- Don't comment trivial assignments in the body — only at declaration
-- Don't state the obvious with `(* --- end of ... --- *)` after END_IF blocks
-
----
-
-## 9. GVL / Constants Comments
-
-Every constant in a GVL or `VAR CONSTANT` block should have a comment:
-
-```iecst
-VAR CONSTANT
-    READ_DELAY               : TIME := T#200MS; // Inter-register group delay
-    WRITE_DELAY              : TIME := T#100MS; // Post-write stabilization delay
-
-    REG_TOTAL_ACTIVE_POWER   : WORD := 36100;   // S32, Gain 1, [W]
-    REG_TOTAL_REACTIVE_POWER : WORD := 36102;   // S32, Gain 1, [var]
-    REG_WEATHER_IRRADIANCE   : WORD := 1000;    // U16, Gain 0.1, [W/m²]
-END_VAR
-```
-
-Format for register constants: `// DataType, Gain, [Unit]`
+Per-object pass: skill `twincat3-comment` / `/twincat3-cmd-comment`.

@@ -1,181 +1,25 @@
 ---
-description: TwinCAT3 commenting standards. Mandatory I/O comments, block section separators, FB headers. Enforces consistent documentation style using (* *) comment syntax exclusively.
+description: TwinCAT3 comments — mandatory I/O (* *), selective VAR, prose phase blocks. Never //. Density examples in skill references.
 globs: "**/*.TcPOU,**/*.TcDUT,**/*.TcGVL,**/*.TcIO"
 alwaysApply: false
 ---
 
 # Comment Standards
 
-## Comment Syntax
+Density / pseudocode examples (Read when commenting or auditing):
+`skills/twincat3-code-style/references/comment-rules.md`
 
-Use **only** `(* *)` comment syntax. Never use `//` single-line comments.
+## Principles
 
-| Type | Syntax | Example |
-|------|--------|---------|
-| Single-line | `(* text *)` | `(* Enable the controller *)` |
-| Multi-line | `(* text ... text *)` | `(* Signal must stay TRUE for tActivate before Q goes TRUE. Signal must stay FALSE for tDeactivate before Q goes FALSE. *)` |
-| Nested | `(* outer (* inner *) *)` | `(* a := fbTest.out; (* disabled *) b := b + 1; *)` |
+1. **Only `(* *)`** — never `//` in ST CDATA. English only. Nested pairs allowed.
+2. **FB / FUNCTION / PROGRAM header** — `(* … *)` above declaration (purpose/contracts). One line OK for simple FBs; no decorative banners unless the file already uses them.
+3. **VAR_INPUT / VAR_OUTPUT** — every member has EOL `(* *)`. Units in brackets when useful (`[A]`, `[W]`, `[%]`). BOOL: describe TRUE meaning. Do not repeat the identifier.
+4. **VAR** — section headers for large/grouped blocks; EOL only for non-obvious members. Small blocks (<5) need no header.
+5. **Implementation** — short prose before phases (why / order / invariant). Prefer prose over dash banners; dash banners only if file already uses them. Do not narrate obvious code.
+6. **CASE** — every case label: inline `(* purpose *)` (no step-number echo).
+7. **Methods / Actions** — header when contract/OC/order matters; skip trivial helpers.
+8. **STRUCT** — every member EOL `(* *)`; section headers when large; purpose above `TYPE` when non-trivial.
+9. **ENUM** — every enumerator EOL `(* *)`; keep attributes unchanged.
+10. **Do not** — comment `END_*`, name-only echoes, TODO without owner+date, every private VAR, whole-library silent rewrites.
 
-TwinCAT supports nested `(* *)` comments — inner `(* *)` pairs are allowed inside outer ones. This is useful for commenting out code blocks that already contain comments.
-
-## FB / FUNCTION Header
-
-One-line `(* *)` purpose comment before `FUNCTION_BLOCK` / `FUNCTION`. Multi-line for complex FBs (max 3 lines). This comment appears as tooltip in TwinCAT XAE.
-
-```iecst
-(* On/off hysteresis timer.
-   Signal must stay TRUE for tActivate before Q goes TRUE.
-   Signal must stay FALSE for tDeactivate before Q goes FALSE. *)
-FUNCTION_BLOCK FB_EMS_HysteresisTimer
-```
-
-For simple FBs, a single line is enough:
-
-```iecst
-(* Floating average over 1 minute sample window. *)
-FUNCTION_BLOCK FB_EMS_FloatingAvg_1m
-```
-
-## VAR_INPUT / VAR_OUTPUT — Always Commented
-
-Every input and output **must** have an inline `(* *)` comment. Format: `(* [unit] Purpose *)`
-
-```iecst
-VAR_INPUT
-    bEnable       : BOOL;  (* Enable the controller *)
-    rW            : REAL;  (* Setpoint value *)
-    rX            : REAL;  (* Actual value (process variable) *)
-    rDeadRange    : REAL;  (* [%] Dead band relative to output range *)
-    rKp           : REAL;  (* Proportional gain *)
-    tTi           : TIME;  (* Integration time *)
-    rYMin         : REAL;  (* [A] Minimum output value *)
-    rYMax         : REAL;  (* [A] Maximum output value *)
-END_VAR
-VAR_OUTPUT
-    rY        : REAL;  (* Controller output *)
-    bMaxLimit : BOOL;  (* TRUE when output hit upper limit *)
-    bMinLimit : BOOL;  (* TRUE when output hit lower limit *)
-    bError    : BOOL;  (* Error flag *)
-END_VAR
-```
-
-Rules:
-- Physical units in brackets at the start: `(* [A] *)`, `(* [W] *)`, `(* [kWh] *)`, `(* [%] *)`, `(* [ms] *)`
-- BOOL: describe TRUE condition: `(* TRUE when charging is active *)`
-- Keep it short — one line, no period at end
-- English comments
-
-## VAR Section Headers
-
-Group private variables with `(* section name *)` headers:
-
-```iecst
-VAR
-    (* edge triggers *)
-    _posEdgePlugged : R_TRIG;
-    _negEdgeDone    : F_TRIG;
-
-    (* timers *)
-    _fbTonTest      : TON;
-    _fbTonFailsafe  : TON;
-
-    (* state *)
-    _nStep   : INT;
-    _bActive : BOOL;
-END_VAR
-```
-
-One blank line between sections. No `(* *)` header needed for small VAR blocks (< 5 vars).
-
-## Code Block Separators
-
-Use `(* --- Purpose --- *)` to separate logical sections in implementation code:
-
-```iecst
-(* --- Rising edge of enable signal --- *)
-_posEdgeEnable(CLK := bEnable);
-
-(* --- Parameter validation --- *)
-IF rKp <= 0 THEN
-    bError := TRUE;
-    RETURN;
-END_IF
-
-(* --- Calculate output --- *)
-fY_P := fKp * fE;
-```
-
-Rules:
-- At least 3 dashes on each side: `(* --- text --- *)`
-- Lowercase text, short (3-6 words)
-- One blank line before the separator, none after
-- Use for logical groupings of 3+ related lines
-- Do NOT use for single statements
-
-## CASE Step Comments
-
-In state machines (`CASE _nStep OF`), every case label gets an inline `(* purpose *)` comment on the same line:
-
-```iecst
-CASE _nStep OF
-    0: (* idle — wait for enable *)
-        IF bEnable THEN
-            _nStep := 1;
-        END_IF
-
-    1: (* start initialization *)
-        _bBusy := TRUE;
-        _nStep := 2;
-
-    9: (* barrier — all views must have completed phase 2 *)
-        IF _stClientState.nRrViewInit2 >= _stClientState.nViewCount THEN
-            _stClientState.eViewInitStatus := E_EB_BA_ViewInitStatus.Done;
-            _nStep := 10;
-        END_IF
-
-    10: (* mark this view as fully initialized *)
-        _bDone := TRUE;
-END_CASE
-```
-
-Rules:
-- Comment format: `(* short purpose *)` — directly after the case label on the same line
-- Do not repeat the step number in the comment — the case label already shows it
-- Keep it short (3-10 words), describe the intent, not the code
-- Every case label must have a step comment — no exceptions
-- One blank line between case blocks for readability
-
-## Action / Method Headers (optional, for large FBs only)
-
-For complex actions/methods in large FBs, use a 3-line block header:
-
-```iecst
-(* ------------------------------------------- *)
-(*               Initial Sync                  *)
-(* ------------------------------------------- *)
-```
-
-Only use this for FBs with 5+ actions/methods. Small FBs don't need it.
-
-## What NOT to Comment
-
-- Do not narrate obvious code: `(* Set bDone to TRUE *)` on `bDone := TRUE;`
-- Do not comment END_IF / END_CASE / END_FOR
-- Do not duplicate the variable name: `bEnable : BOOL; (* Enable flag for bEnable *)`
-- Do not write TODO/FIXME without a name and date
-- Do not use `//` comments — always use `(* *)` syntax
-- Internal VAR members: comments optional (only if purpose is non-obvious)
-
-## STRUCT Members
-
-Same rules as VAR_INPUT — each member gets an inline comment:
-
-```iecst
-TYPE ST_EMS_ECabinet_Param :
-    STRUCT
-        fMaxCurrent         : REAL := 120;  (* [A] Max current per phase *)
-        fMaxFailsafeCurrent : REAL := 72;   (* [A] Failsafe current limit *)
-        bCalculateCircuits  : BOOL := TRUE; (* TRUE: dynamic distribution *)
-    END_STRUCT
-END_TYPE
-```
+Per-object workflow: skill `twincat3-comment` / `/twincat3-cmd-comment`.
