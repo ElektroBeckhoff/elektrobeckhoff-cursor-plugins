@@ -81,13 +81,13 @@ class TestAdsClientMocked(unittest.TestCase):
         conn = MagicMock()
         conn.read_list_by_name.return_value = {
             "MAIN.bEnable": True,
-            "P_Sample_Room.fbRoomControl._bGateOpen": False,
+            "P_Sample.fbController._bGateOpen": False,
         }
         mock_pyads.Connection.return_value = conn
         client = AdsClient("127.0.0.1.1.1", port=851)
         client._conn = conn
         r = client.read_list_by_name([
-            "MAIN.bEnable", "P_Sample_Room.fbRoomControl._bGateOpen",
+            "MAIN.bEnable", "P_Sample.fbController._bGateOpen",
         ])
         self.assertTrue(r["success"])
         self.assertEqual(r["count"], 2)
@@ -116,18 +116,18 @@ class TestAdsClientMocked(unittest.TestCase):
 
         conn = MagicMock()
         conn.get_all_symbols.return_value = [
-            Sym("P_Sample_Room.stLightControl1", "ST_EB_BA_Control_Light"),
-            Sym("P_Sample_Room.fbRoomControl", "FB_EB_BA_RoomControl"),
+            Sym("P_Sample.stLightControl1", "ST_Lib_Control_Light"),
+            Sym("P_Sample.fbController", "FB_Lib_Controller"),
             Sym("MAIN.bEnable", "BOOL"),
         ]
         mock_pyads.Connection.return_value = conn
         client = AdsClient("127.0.0.1.1.1", port=851)
         client._conn = conn
-        r = client.list_symbols(prefix="P_Sample_Room.", max_symbols=10)
+        r = client.list_symbols(prefix="P_Sample.", max_symbols=10)
         self.assertTrue(r["success"])
         self.assertEqual(r["returned"], 2)
-        self.assertEqual(r["symbols"][0]["name"], "P_Sample_Room.stLightControl1")
-        r2 = client.list_symbols(name_contains="fbRoom", type_contains="FB_EB")
+        self.assertEqual(r["symbols"][0]["name"], "P_Sample.stLightControl1")
+        r2 = client.list_symbols(name_contains="fbController", type_contains="FB_Lib")
         self.assertEqual(r2["returned"], 1)
 
 

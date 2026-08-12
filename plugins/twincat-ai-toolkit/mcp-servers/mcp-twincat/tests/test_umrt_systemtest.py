@@ -33,8 +33,8 @@ class FakeBackends:
         self.messages_findings: list = []
         self.activate_findings: list = []
         self.values = {
-            "P_Sample_Room.fbX._bFlag": True,
-            "P_Sample_Room.stControl.bOn": False,
+            "P_Sample.fbX._bFlag": True,
+            "P_Sample.stControl.bOn": False,
         }
         self.write_store: dict = {}
         self.calls: list[str] = []
@@ -111,8 +111,8 @@ class FakeBackends:
         def ads_symbols(net_id="", port=851, prefix="", max_symbols=50, **_kw):
             f.calls.append("symbols")
             return _ok(symbols=[
-                {"name": "P_Sample_Room.fbX", "type": "FB_X"},
-                {"name": "P_Sample_Room.stControl", "type": "ST_Ctrl"},
+                {"name": "P_Sample.fbX", "type": "FB_X"},
+                {"name": "P_Sample.stControl", "type": "ST_Ctrl"},
             ])
 
         def ads_read_list(symbols=None, net_id="", port=851, **_kw):
@@ -157,10 +157,10 @@ class TestUmrtSystemtestPass(unittest.TestCase):
             sln_path=r"C:\sample\Sample.sln",
             settle_s=0,
             read_symbols=[
-                "P_Sample_Room.fbX._bFlag",
-                "P_Sample_Room.stControl.bOn",
+                "P_Sample.fbX._bFlag",
+                "P_Sample.stControl.bOn",
             ],
-            write_symbol="P_Sample_Room.stControl.bOn",
+            write_symbol="P_Sample.stControl.bOn",
             write_value="true",
         )
         report = run_umrt_systemtest(cfg, fake.backends())
@@ -178,7 +178,7 @@ class TestUmrtSystemtestPass(unittest.TestCase):
         cfg = SystemtestConfig(
             sln_path=r"C:\sample\Sample.sln",
             settle_s=0,
-            read_symbols=["P_Sample_Room.fbX._bFlag"],
+            read_symbols=["P_Sample.fbX._bFlag"],
             skip_write=True,
         )
         report = run_umrt_systemtest(cfg, fake.backends())
@@ -197,7 +197,7 @@ class TestUmrtSystemtestFailFast(unittest.TestCase):
         cfg = SystemtestConfig(
             sln_path=r"C:\sample\Sample.sln",
             settle_s=0,
-            read_symbols=["P_Sample_Room.fbX._bFlag"],
+            read_symbols=["P_Sample.fbX._bFlag"],
             skip_write=True,
         )
         report = run_umrt_systemtest(cfg, fake.backends())

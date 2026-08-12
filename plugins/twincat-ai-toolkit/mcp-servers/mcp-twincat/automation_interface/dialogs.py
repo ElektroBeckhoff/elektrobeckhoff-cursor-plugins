@@ -1,15 +1,11 @@
 """XAE modal dialog enumeration and auto-dismiss."""
 from __future__ import annotations
 
-import glob
 import logging
-import os
 import re
 import sys
-import time
-from dataclasses import asdict
+import threading
 from typing import Optional
-
 
 
 log = logging.getLogger("twincat-mcp")
@@ -22,17 +18,95 @@ def _tai():
 class DialogOpsMixin:
     # --------------- Modal dialog auto-dismiss ---------------
 
+    # Substrings matched against normalized (lower, collapsed whitespace) dialog
+    # text. TwinCAT/VS wording differs by version and language — keep broad but
+    # still specific to the external-file-change / reload prompt.
     _SAFE_DIALOG_PATTERNS = [
-        "modified outside the environment",  # EN: XAE file-change dialog
-        "file has been modified outside",    # EN: alternate wording
-        "modified outside of twincat",       # EN: TwinCAT-specific variant
-        "außerhalb der umgebung geändert",   # DE: XAE file-change dialog
-        "außerhalb von twincat xae",         # DE: TwinCAT-specific variant
-        "datei neu laden",                   # DE: "Datei neu laden?" prompt
+        # EN — VS / TcXaeShell file-change (4024 often says "changed", not "modified")
+        "file has been changed outside",
+        "file has been modified outside",
+        "changed outside the environment",
+        "modified outside the environment",
+        "modified outside of twincat",
+        "outside the environment",  # broad EN anchor for reload prompt
+        # DE
+        "außerhalb der umgebung geändert",
+        "ausserhalb der umgebung geändert",  # ae spelling
+        "außerhalb von twincat xae",
+        "außerhalb der umgebung",
+        "datei neu laden",
     ]
 
     _POLL_IDLE_S = 0.5
     _POLL_BURST_S = 0.15
+
+    # Child classes that commonly carry MessageBox / XAE dialog body text.
+    _DIALOG_TEXT_CLASSES = frozenset({
+        "Static",
+        "Button",  # sometimes "Yes"/"Ja" only; harmless for our patterns
+        "RichEdit20W",
+        "RichEdit20A",
+        "Edit",
+    })
+
+    def _normalize_dialog_text(self, text: str) -> str:
+        """Lowercase and collapse whitespace/newlines for stable matching."""
+        if not text:
+            return ""
+        return re.sub(r"\s+", " ", text.replace("\x00", " ")).strip().lower()
+
+    def _read_dialog_text(self, hwnd) -> str:
+        """Best-effort body text from a ``#32770`` dialog.
+
+        TwinCAT puts the path and the English/German sentence into one or more
+        ``Static`` children (sometimes split). Relying on a single control or
+        only the first 200 chars for matching is unsafe — collect all useful
+        child text, then normalize.
+        """
+        tai = _tai()
+        parts: list[str] = []
+
+        def enum_children(child_hwnd, _):
+            try:
+                cls = tai.win32gui.GetClassName(child_hwnd) or ""
+                # Prefer known text hosts; also accept any non-empty child text
+                # (covers uncommon wrappers) except the dialog chrome we skip.
+                text = tai.win32gui.GetWindowText(child_hwnd) or ""
+                if not text.strip():
+                    return True
+                if cls in self._DIALOG_TEXT_CLASSES or cls.startswith("Static"):
+                    parts.append(text)
+                elif cls not in ("#32770", "ScrollBar"):
+                    # Fallback: unknown class with text (e.g. custom label)
+                    parts.append(text)
+            except Exception:
+                pass
+            return True
+
+        try:
+            tai.win32gui.EnumChildWindows(hwnd, enum_children, None)
+        except Exception as exc:
+            log.debug("EnumChildWindows for dialog %s failed: %s", hwnd, exc)
+
+        if not parts:
+            # Last resort: dialog window text (usually just "TcXaeShell")
+            try:
+                top = tai.win32gui.GetWindowText(hwnd) or ""
+                if top:
+                    parts.append(top)
+            except Exception:
+                pass
+
+        return self._normalize_dialog_text(" ".join(parts))
+
+    def _match_safe_dialog_pattern(self, full_text: str) -> str:
+        """Return first matching safe pattern, or empty string."""
+        if not full_text:
+            return ""
+        for pattern in self._SAFE_DIALOG_PATTERNS:
+            if pattern in full_text:
+                return pattern
+        return ""
 
     def _enumerate_xae_dialogs(self) -> list[dict]:
         """Return visible TcXaeShell ``#32770`` dialogs (read-only).
@@ -56,30 +130,14 @@ class DialogOpsMixin:
                 if _tai().win32gui.GetClassName(hwnd) != "#32770":
                     return True
 
-                dialog_texts = []
-
-                def enum_children(child_hwnd, _):
-                    if _tai().win32gui.GetClassName(child_hwnd) == "Static":
-                        text = _tai().win32gui.GetWindowText(child_hwnd)
-                        if text:
-                            dialog_texts.append(text.lower())
-                    return True
-
-                try:
-                    _tai().win32gui.EnumChildWindows(hwnd, enum_children, None)
-                except Exception:
-                    return True
-
-                full_text = " ".join(dialog_texts)
-                matched = [
-                    p for p in self._SAFE_DIALOG_PATTERNS if p in full_text
-                ]
+                full_text = self._read_dialog_text(hwnd)
+                matched = self._match_safe_dialog_pattern(full_text)
                 found.append({
                     "hwnd": int(hwnd),
                     "title": title,
-                    "text": full_text[:200],
+                    "text": full_text[:240],
                     "auto_dismissable": bool(matched),
-                    "matched_pattern": matched[0] if matched else "",
+                    "matched_pattern": matched,
                 })
             except Exception:
                 pass
@@ -94,10 +152,10 @@ class DialogOpsMixin:
     def _dialog_dismiss_worker(self, stop_event: threading.Event):
         """Background worker that auto-dismisses known XAE modal dialogs.
 
-        Runs alongside every COM call to prevent the STA thread from
-        getting stuck on a modal dialog (e.g. "project modified outside
-        of TwinCAT XAE -- reload?").  Only dismisses dialogs whose text
-        matches a known safe pattern.
+        Runs for the duration of each ``_call_sta`` COM call (not while MCP is
+        idle). Prevents the STA thread from sticking on a modal dialog
+        (e.g. "file has been changed outside the environment — reload?").
+        Only dismisses dialogs whose text matches a known safe pattern.
 
         When multiple files are modified, XAE shows one dialog per file
         in sequence.  After a successful dismiss the worker switches to
@@ -106,7 +164,7 @@ class DialogOpsMixin:
         if not _tai().HAS_WIN32GUI:
             return
 
-        IDYES = 6  # MessageBox button ID for "Yes"/"Ja"
+        IDYES = 6  # MessageBox button ID for "Yes"/"Ja" (reload)
 
         while not stop_event.is_set():
             dismissed_any = False
@@ -133,4 +191,3 @@ class DialogOpsMixin:
 
             delay = self._POLL_BURST_S if dismissed_any else self._POLL_IDLE_S
             stop_event.wait(delay)
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -140,12 +141,57 @@ class TestFormatCode(unittest.TestCase):
             self.assertTrue(r.success)
             self.assertEqual(r.files_formatted, 1)
             self.assertEqual(r.command, STWEEP_CMD_EDITOR)
+            self.assertIn("per_file", r.method)
             self.assertTrue(r.license_ok)
             b._dte.ItemOperations.OpenFile.assert_called()
             b._dte.ExecuteCommand.assert_any_call(STWEEP_CMD_EDITOR)
             doc.Save.assert_called()
+            # Multi-file UX: close editor tab after format (vsSaveChangesNo)
+            doc.Close.assert_called()
         finally:
             os.unlink(path)
+
+    def test_cancel_stops_between_files(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        cmd = MagicMock()
+        cmd.IsAvailable = True
+        b._dte.Commands.Item.return_value = cmd
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for name in ("A.TcPOU", "B.TcPOU", "C.TcPOU"):
+                p = os.path.join(tmp, name)
+                with open(p, "wb") as fh:
+                    fh.write(b"x")
+                paths.append(p)
+
+            calls = {"n": 0}
+
+            def fmt_one(file_path, deadline):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    # Request cancel after first file starts succeeding
+                    b.cancel_format()
+                # Simulate work; cancel is checked at loop head before next file
+
+            with patch("stweep_ops.discover_stweep_installs", return_value=[{
+                "path": r"C:\fake\STweep", "version": "4.4.7.0",
+            }]):
+                with patch.object(b, "_format_one_file", side_effect=fmt_one):
+                    r = b.format_code(path=tmp, recursive=False, timeout_s=60)
+
+            self.assertTrue(r.canceled)
+            self.assertEqual(r.method, "canceled")
+            self.assertEqual(r.files_formatted, 1)
+            self.assertEqual(calls["n"], 1)
+            self.assertFalse(r.success)
+
+    def test_cancel_when_idle(self):
+        b = _make_bridge()
+        r = b.cancel_format()
+        self.assertTrue(r.success)
+        self.assertFalse(r.was_running)
+        self.assertFalse(r.canceled)
 
     def test_format_fail_fast_on_license_error(self):
         b = _make_bridge()
@@ -366,6 +412,57 @@ class TestFormatCode(unittest.TestCase):
             prog = b.get_format_progress()
             self.assertFalse(prog.running)
             self.assertEqual(prog.phase, "done")
+
+
+class TestWaitAndSave(unittest.TestCase):
+    def test_saves_held_doc_on_first_dirty(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        path = r"C:\proj\A.TcPOU"
+        doc = MagicMock()
+        doc.FullName = path
+        doc.Saved = False
+        b._dte.ActiveDocument = doc
+        with patch("stweep_ops.time.sleep", return_value=None):
+            with patch(
+                "stweep_ops._tai",
+                return_value=MagicMock(
+                    pythoncom=MagicMock(PumpWaitingMessages=MagicMock()),
+                ),
+            ):
+                b._wait_and_save_active(path, deadline=time.time() + 30, doc=doc)
+        doc.Save.assert_called()
+
+    def test_noop_when_never_dirty(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        path = r"C:\proj\A.TcPOU"
+        doc = MagicMock()
+        doc.FullName = path
+        doc.Saved = True
+        b._dte.ActiveDocument = doc
+        with patch("stweep_ops.time.sleep", return_value=None):
+            with patch(
+                "stweep_ops._tai",
+                return_value=MagicMock(
+                    pythoncom=MagicMock(PumpWaitingMessages=MagicMock()),
+                ),
+            ):
+                b._wait_and_save_active(path, deadline=time.time() + 30, doc=doc)
+        doc.Save.assert_not_called()
+
+    def test_close_prefers_held_document(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        path = r"C:\proj\A.TcPOU"
+        held = MagicMock()
+        held.FullName = path
+        other = MagicMock()
+        other.FullName = r"C:\proj\B.TcPOU"
+        b._dte.ActiveDocument = other
+        b._close_active_if_path(path, doc=held)
+        held.Close.assert_called_once_with(False)
+        other.Close.assert_not_called()
 
 
 if __name__ == "__main__":

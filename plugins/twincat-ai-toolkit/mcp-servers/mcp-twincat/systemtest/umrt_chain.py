@@ -11,8 +11,8 @@ CLI (live TwinCAT + pyads)::
 
     python systemtest/umrt_chain.py --sln "C:\\path\\sample.sln" \\
         --xae-version 4026 \\
-        --read "P_Sample_Room.fbRoomControl._bGateOpen" \\
-        --write "P_Sample_Room.fbRoomControl._bGateOpen" --write-value true
+        --read "P_Sample.fbController._bGateOpen" \\
+        --write "P_Sample.fbController._bGateOpen" --write-value true
 
 Unit tests inject a mock ``SystemtestBackends`` — no XAE required.
 """

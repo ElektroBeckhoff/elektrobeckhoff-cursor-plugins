@@ -566,14 +566,28 @@ def twincat_format_progress() -> str:
     Use after twincat_format_code(..., wait=false) for large folders/projects.
     Also works during a blocking wait=true call if the client can poll in parallel.
 
-    Response: running, phase (idle|starting|formatting|done|error), target,
-    files_total/done/formatted/failed, current_file, percent, elapsed_s,
-    message, result{} (final StweepFormatResult when finished)."""
+    Response: running, phase (idle|starting|formatting|done|error|canceled),
+    target, files_total/done/formatted/failed, current_file, percent,
+    elapsed_s, message, result{} (final StweepFormatResult when finished)."""
 
     try:
         return _json(_get_bridge().get_format_progress())
     except Exception as exc:
         return _json({"success": False, "running": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_format_cancel() -> str:
+    """Cancel a running multi-file STweep format job.
+
+    Sets a cancel flag; the job stops after the current file finishes
+    (does not hard-kill mid-Formatcode). Poll twincat_format_progress until
+    running=false / phase=canceled. Safe while STA is busy."""
+
+    try:
+        return _json(_get_bridge().cancel_format())
+    except Exception as exc:
+        return _json({"success": False, "canceled": False, "error": str(exc)})
 
 
 @mcp.tool()
@@ -586,8 +600,13 @@ def twincat_format_code(
 ) -> str:
     """Format Structured Text via STweep \"Format code\" in the open XAE shell.
 
-    Uses EnvDTE ExecuteCommand (same menu as Solution Explorer / editor
-    context menu). Does not use STweep.CLI.
+    Uses EnvDTE ExecuteCommand. Does not use STweep.CLI.
+
+    IMPORTANT — folder vs UI: Right-click Format on a Solution Explorer folder
+    uses PlcFolder/SPSOrdner.Formatcode once. Automation cannot Select SE
+    items (UIHierarchyItemMarshaler.Select missing on TcXaeShell), so MCP
+    walks files and runs editor Formatcode after OpenFile, then closes the
+    document. Cancel with twincat_format_cancel (between files).
 
     Preflight (same session as twincat_open, no license window):
       - STweep installed on disk
@@ -611,7 +630,8 @@ def twincat_format_code(
     Requires twincat_open first (same bridge session as build/check).
 
     Response: success, method, command, target, files_*, installed,
-    license_ok, license_state, license_detail, async_started, message."""
+    license_ok, license_state, license_detail, async_started, canceled,
+    message."""
 
     try:
         return _json(_get_bridge().format_code(
@@ -630,6 +650,20 @@ def twincat_format_code(
 # ================================================================
 
 @mcp.tool()
+def twincat_export_progress() -> str:
+    """Poll live library-export job progress (no STA / safe while exporting).
+
+    Use after twincat_export_library(..., wait=false). Also works during a
+    blocking wait=true call from another agent turn. Fields: running, phase
+    (starting/checking/exporting_library/exporting_compiled/done/error),
+    percent, elapsed_s, message, result{} (final ExportResult when finished)."""
+    try:
+        return _json(_get_bridge().get_export_progress())
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
 def twincat_export_library(
     output_dir: str = "",
     plcproj_path: str = "",
@@ -638,6 +672,8 @@ def twincat_export_library(
     install_library: bool = True,
     install_compiled_library: bool = False,
     force: bool = False,
+    wait: bool = False,
+    timeout_seconds: int = 1800,
 ) -> str:
     """Export the PLC project as .library and/or .compiled-library.
 
@@ -658,7 +694,13 @@ def twincat_export_library(
     Guards: refuses ProjectVersion 0.0.0.0 and non-library projects unless
     force=true. Always echoes resolved_plcproj_path, project_title,
     project_version, output_dir. Prefer an explicit plcproj_path when a
-    sample solution is open."""
+    sample solution is open.
+
+    IMPORTANT — Cursor MCP idle timeout: long blocking exports often hit
+    MCP error -32001 even when XAE finishes successfully. Default wait=false
+    starts the job in background (method=async_started); poll
+    twincat_export_progress until running=false, then read result{}.
+    wait=true blocks (use only for small/fast exports)."""
 
     from export_guards import export_echo_fields, validate_export_target
 
@@ -721,6 +763,8 @@ def twincat_export_library(
                 compiled_library=compiled_library,
                 install_library=install_library,
                 install_compiled_library=install_compiled_library,
+                wait=wait,
+                timeout_s=timeout_seconds,
             )
         )
         result.update(echo)
@@ -1458,8 +1502,8 @@ def twincat_ads_symbols(
 ) -> str:
     """List top-level ADS symbols on the PLC (filtered).
 
-    Filters: prefix (e.g. \"P_Sample_Room.\"), name_contains, type_contains
-    (e.g. \"FB_EB_BA\"), regex. max_symbols default 500 (cap 5000).
+    Filters: prefix (e.g. \"P_Sample.\"), name_contains, type_contains
+    (e.g. \"FB_Lib\"), regex. max_symbols default 500 (cap 5000).
     Nested/private paths are often missing here but still R/W via
     twincat_ads_read/write with the full instance path (incl. members of
     library FBs whose type has {attribute 'hide'}; not single-var hide).
@@ -1498,8 +1542,8 @@ def twincat_ads_read(
 ) -> str:
     """Read a PLC variable by full ADS symbol path.
 
-    Examples: \"MAIN.bEnable\", \"P_Sample_Room.fbRoomControl._bGateOpen\",
-    \"P_Sample_Room.fbDaliLight1._bValidLightControl\" (member of hide base FB).
+    Examples: \"MAIN.bEnable\", \"P_Sample.fbController._bGateOpen\",
+    \"P_Sample.fbDevice1._bValid\" (member of hide base FB).
     Nested/private paths work even if absent from twincat_ads_symbols.
     Single-variable {attribute 'hide'} / hide PROPERTY → not found.
     For many symbols at once use twincat_ads_read_list. Default port 851."""
@@ -1535,7 +1579,7 @@ def twincat_ads_read_list(
 ) -> str:
     """Read many PLC variables in one ADS Sum-Command batch.
 
-    symbols: JSON array '[\"MAIN.bEnable\", \"P_Sample_Room.…\"]' or
+    symbols: JSON array '[\"MAIN.bEnable\", \"P_Sample.…\"]' or
     newline/comma-separated paths. Uses pyads read_list_by_name (chunked by
     ads_sub_commands, default/max 500). Returns values map path→value.
     Prefer this over many twincat_ads_read calls for large lists."""
@@ -1634,7 +1678,7 @@ def twincat_ads_write_list(
 ) -> str:
     """Write many PLC variables in one ADS Sum-Command batch.
 
-    values: JSON object '{\"MAIN.bEnable\": true, \"P_Sample_Room.…._nX\": 2}'.
+    values: JSON object '{\"MAIN.bEnable\": true, \"P_Sample.…._nX\": 2}'.
     Uses pyads write_list_by_name (chunked). Requires confirm=true."""
     from twincat_ads_client import (
         AdsClient, ads_available, parse_symbol_value_map,

@@ -139,6 +139,53 @@ class TestEnumerateXaeDialogs:
         assert dialogs[0]["auto_dismissable"] is True
         assert "modified outside" in dialogs[0]["matched_pattern"]
 
+    def test_4024_changed_outside_wording(self):
+        """4024 uses 'changed' not 'modified' — must still auto-dismiss."""
+        bridge = _make_bridge()
+        # Path and sentence often split across Static children (or newlines)
+        child_text = {
+            100: r"c:\proj\foo.tcpou",
+            101: "file has been changed outside the environment.\nReload the new contents?",
+        }
+        fake_gui = MagicMock()
+        fake_gui.IsWindowVisible.return_value = True
+        fake_gui.GetWindowText.side_effect = lambda hwnd: (
+            "TcXaeShell" if hwnd == 42 else child_text.get(hwnd, "")
+        )
+        fake_gui.GetClassName.side_effect = lambda hwnd: (
+            "#32770" if hwnd == 42 else "Static"
+        )
+
+        def enum_windows(cb, _):
+            cb(42, None)
+
+        def enum_children(hwnd, cb, _):
+            cb(100, None)
+            cb(101, None)
+
+        fake_gui.EnumWindows.side_effect = enum_windows
+        fake_gui.EnumChildWindows.side_effect = enum_children
+
+        with patch(
+            "twincat_automation_interface.HAS_WIN32GUI", True,
+        ), patch(
+            "twincat_automation_interface.win32gui", fake_gui,
+        ):
+            dialogs = bridge._enumerate_xae_dialogs()
+
+        assert len(dialogs) == 1
+        assert dialogs[0]["auto_dismissable"] is True
+        assert "changed outside" in dialogs[0]["matched_pattern"]
+
+    def test_match_patterns_normalize_whitespace(self):
+        bridge = _make_bridge()
+        blob = bridge._normalize_dialog_text(
+            "Foo.TcPOU\n\nfile has been   changed\toutside the environment"
+        )
+        assert bridge._match_safe_dialog_pattern(blob) == (
+            "file has been changed outside"
+        )
+
 
 # ==================================================================
 # _impl_get_status

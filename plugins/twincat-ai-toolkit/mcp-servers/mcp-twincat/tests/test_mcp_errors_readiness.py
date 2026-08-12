@@ -102,7 +102,7 @@ class TestLibraryVerify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             r = verify_library_versions(
                 expected_version="1.6.1.0",
-                library_name="Tc3_EB_BA",
+                library_name="Tc3_ExampleLib",
                 search_roots=[tmp],
             )
             self.assertTrue(r["verify_incomplete"])
@@ -113,10 +113,10 @@ class TestLibraryVerify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             lib = os.path.join(tmp, "_Libraries")
             os.makedirs(lib)
-            open(os.path.join(lib, "Tc3_EB_BA_1.6.1.0.compiled-library"), "wb").close()
+            open(os.path.join(lib, "Tc3_ExampleLib_1.6.1.0.compiled-library"), "wb").close()
             r = verify_library_versions(
                 expected_version="1.6.1.0",
-                library_name="Tc3_EB_BA",
+                library_name="Tc3_ExampleLib",
                 search_roots=[tmp],
             )
             self.assertTrue(r["ok"])

@@ -300,11 +300,11 @@ class TestGuessProjName:
         bridge = self._make_bridge()
         bridge._plcproj_file_path = None
         dte_mock = MagicMock()
-        dte_mock.Solution.FullName = r"C:\Work\Tc3_EB_BA.sln"
+        dte_mock.Solution.FullName = r"C:\Work\Tc3_ExampleLib.sln"
         bridge._dte = dte_mock
 
         name = bridge._guess_proj_name()
-        assert name == "Tc3_EB_BA"
+        assert name == "Tc3_ExampleLib"
 
 
 # ===================================================================

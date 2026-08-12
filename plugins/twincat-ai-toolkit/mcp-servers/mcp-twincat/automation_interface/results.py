@@ -97,6 +97,27 @@ class ExportResult:
     project_title: str = ""
     project_version: str = ""
     output_dir: str = ""
+    # True when wait=false started a background job (poll twincat_export_progress).
+    async_started: bool = False
+    method: str = ""
+
+
+@dataclass
+class ExportProgressResult:
+    """Live export job progress (readable without STA / while export runs)."""
+    success: bool = True
+    running: bool = False
+    phase: str = "idle"
+    output_dir: str = ""
+    project_title: str = ""
+    project_version: str = ""
+    percent: float = 0.0
+    started_unix: float = 0.0
+    updated_unix: float = 0.0
+    elapsed_s: float = 0.0
+    message: str = ""
+    # Final ExportResult as dict when phase is done/error (async jobs).
+    result: Optional[dict] = None
 
 
 @dataclass
@@ -236,6 +257,16 @@ class StweepFormatResult:
     message: str = ""
     # True when wait=false started a background job (poll twincat_format_progress).
     async_started: bool = False
+    # True when twincat_format_cancel stopped the job mid-loop.
+    canceled: bool = False
+
+
+@dataclass
+class StweepFormatCancelResult:
+    success: bool
+    canceled: bool = False
+    was_running: bool = False
+    message: str = ""
 
 
 @dataclass

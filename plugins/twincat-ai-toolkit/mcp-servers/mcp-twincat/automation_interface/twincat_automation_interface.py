@@ -30,6 +30,7 @@ from results import (  # noqa: F401
     ErrorEntry,
     ErrorsResult,
     ExportResult,
+    ExportProgressResult,
     ReloadResult,
     CloseResult,
     TargetResult,
@@ -43,6 +44,7 @@ from results import (  # noqa: F401
     StweepStatusResult,
     StweepFormatResult,
     StweepFormatProgressResult,
+    StweepFormatCancelResult,
     SMDS_NOT_DISABLED,
     SMDS_DISABLED,
 )
@@ -159,6 +161,7 @@ class TcAutomationInterface(
         self._stweep_license_ok: Optional[bool] = None
         self._stweep_license_detail: str = ""
         self._stweep_format_lock = threading.Lock()
+        self._format_cancel_requested = False
         self._stweep_format_progress: dict = {
             "running": False,
             "phase": "idle",

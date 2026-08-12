@@ -5,9 +5,13 @@ Verified on TwinCAT 4024 + 4026 / TcXaeShell:
   - OtherContextMenus.PlcFolder.Formatcode               (SE folder, EN / 4024)
   - OtherContextMenus.SPSOrdner.Formatcode               (SE folder, DE / 4026)
 
-UIHierarchyItem.Select is broken on the VS PlatformUI marshaler, so folder /
-project formatting walks formattable files and uses the editor command after
-ItemOperations.OpenFile (same effect as context-menu Format code per file).
+UI right-click Format on a Solution Explorer *folder* uses PlcFolder/SPSOrdner
+Formatcode once. Automation cannot do that today: UIHierarchyItem.Select fails
+on the VS PlatformUI marshaler
+(``Method '…UIHierarchyItemMarshaler.Select' not found``). Folder / project
+scope therefore walks formattable files and runs the editor command after
+ItemOperations.OpenFile (then closes the document). Use
+``twincat_format_cancel`` to abort a running multi-file job between files.
 CLI (STweep.CLI) is intentionally never invoked.
 """
 from __future__ import annotations
@@ -25,6 +29,7 @@ from typing import Optional
 from dataclasses import asdict
 
 from results import (
+    StweepFormatCancelResult,
     StweepFormatProgressResult,
     StweepFormatResult,
     StweepStatusResult,
@@ -39,6 +44,14 @@ STWEEP_CMD_FOLDER_EN = "OtherContextMenus.PlcFolder.Formatcode"
 STWEEP_CMD_FOLDERS = (STWEEP_CMD_FOLDER_EN, STWEEP_CMD_FOLDER)
 STWEEP_CMD_LICENSE = "STweep.License"
 STWEEP_COMMAND_GUID = "{3395FA64-3C7F-4FB2-9551-CE197238B175}"
+
+# Settle after Formatcode: STweep dirties the buffer in ~50ms; ActiveDocument
+# often becomes unavailable after ~0.3-0.5s. Save on first dirty + short post
+# using a held Document ref — do not use a long min_wait floor.
+_STWEEP_POST_DIRTY_S = 0.15
+_STWEEP_POLL_S = 0.05
+_STWEEP_CLEAN_POLLS = 10  # ~0.5s with real sleep; fast under tests mocking sleep
+_STWEEP_SETTLE_MAX_S = 2.5
 
 # TwinCAT ST objects STweep can format via the XAE editor command.
 # Includes interfaces (.TcIO) — same ST source as POUs/DUTs/GVLs.
@@ -311,6 +324,37 @@ class StweepOpsMixin:
         result.format_progress = asdict(self.get_format_progress())
         return result
 
+    def cancel_format(self) -> StweepFormatCancelResult:
+        """Request cancel of the running multi-file format job.
+
+        Stops between files (does not kill a mid-file Formatcode call).
+        Safe to call while STA is busy — only flips a flag.
+        """
+        self._ensure_format_progress_state()
+        with self._stweep_format_lock:
+            running = bool(self._stweep_format_progress.get("running"))
+            if not running:
+                return StweepFormatCancelResult(
+                    success=True,
+                    canceled=False,
+                    was_running=False,
+                    message="No format job running",
+                )
+            self._format_cancel_requested = True
+            self._stweep_format_progress["message"] = (
+                "Cancel requested — stopping after current file…"
+            )
+            self._stweep_format_progress["updated_unix"] = time.time()
+        return StweepFormatCancelResult(
+            success=True,
+            canceled=True,
+            was_running=True,
+            message=(
+                "Cancel requested. Job stops after the current file finishes "
+                "(poll twincat_format_progress until running=false)."
+            ),
+        )
+
     def get_format_progress(self) -> StweepFormatProgressResult:
         """Read live format job progress (safe while format holds the STA)."""
         self._ensure_format_progress_state()
@@ -370,6 +414,7 @@ class StweepOpsMixin:
                 )
             # Claim the job slot before leaving the lock (sync or async).
             now = time.time()
+            self._format_cancel_requested = False
             self._stweep_format_progress.update({
                 "running": True,
                 "phase": "starting",
@@ -412,6 +457,8 @@ class StweepOpsMixin:
     def _ensure_format_progress_state(self) -> None:
         if not hasattr(self, "_stweep_format_lock"):
             self._stweep_format_lock = threading.Lock()
+        if not hasattr(self, "_format_cancel_requested"):
+            self._format_cancel_requested = False
         if not hasattr(self, "_stweep_format_progress"):
             self._stweep_format_progress = {
                 "running": False,
@@ -428,6 +475,9 @@ class StweepOpsMixin:
                 "message": "",
                 "result": None,
             }
+
+    def _cancel_requested(self) -> bool:
+        return bool(getattr(self, "_format_cancel_requested", False))
 
     def _update_format_progress(self, **kwargs) -> None:
         self._ensure_format_progress_state()
@@ -447,6 +497,9 @@ class StweepOpsMixin:
         phase = "done" if result.success else "error"
         if result.method == "unlicensed":
             phase = "error"
+        if result.canceled or result.method == "canceled":
+            phase = "canceled"
+        self._format_cancel_requested = False
         self._update_format_progress(
             running=False,
             phase=phase,
@@ -881,9 +934,12 @@ class StweepOpsMixin:
         formatted: list[str] = []
         failed: list[dict] = []
         deadline = time.time() + max(30, timeout_s)
-        method = "DTE_Editor_Formatcode"
+        # Per-file editor path — SE folder Formatcode needs UIHierarchy.Select
+        # which is broken on TcXaeShell PlatformUI marshaler (see module doc).
+        method = "DTE_Editor_Formatcode_per_file"
         command = STWEEP_CMD_EDITOR
         target = path or (self._plcproj_file_path or "")
+        canceled = False
 
         self._update_format_progress(
             running=True,
@@ -894,10 +950,21 @@ class StweepOpsMixin:
             files_formatted=0,
             files_failed=0,
             current_file="",
-            message=f"Formatting 0/{len(files)} file(s)…",
+            message=(
+                f"Formatting 0/{len(files)} file(s) "
+                f"(per-file OpenFile; cancel via twincat_format_cancel)…"
+            ),
         )
 
         for index, file_path in enumerate(files, start=1):
+            if self._cancel_requested():
+                canceled = True
+                self._update_format_progress(
+                    message=(
+                        f"Canceled after {len(formatted)}/{len(files)} file(s)"
+                    ),
+                )
+                break
             self._update_format_progress(
                 current_file=file_path,
                 message=f"Formatting {index}/{len(files)}: {os.path.basename(file_path)}",
@@ -922,6 +989,9 @@ class StweepOpsMixin:
                 )
             except Exception as exc:
                 err = str(exc)
+                if self._cancel_requested() or "format canceled" in err.lower():
+                    canceled = True
+                    break
                 log.warning("STweep format failed for %s: %s", file_path, exc)
                 wizard = None
                 try:
@@ -978,9 +1048,41 @@ class StweepOpsMixin:
                 files_done=len(formatted) + len(failed),
             )
 
+        if canceled:
+            msg = (
+                f"Canceled: formatted {len(formatted)}/{len(files)} file(s) "
+                f"via {command} (per-file OpenFile)"
+            )
+            if failed:
+                msg += f" | {len(failed)} failed before cancel"
+            license_ok = getattr(self, "_stweep_license_ok", None)
+            license_state = (
+                "activated" if license_ok is True
+                else "not_activated" if license_ok is False
+                else "unknown"
+            )
+            return StweepFormatResult(
+                success=False,
+                method="canceled",
+                command=command,
+                target=target,
+                files_total=len(files),
+                files_formatted=len(formatted),
+                files_failed=len(failed),
+                formatted=formatted,
+                failed=failed,
+                installed=status.installed,
+                license_ok=license_ok,
+                license_state=license_state,
+                license_detail=getattr(self, "_stweep_license_detail", "") or "",
+                message=msg,
+                canceled=True,
+            )
+
         success = bool(formatted) and not failed
         msg = (
-            f"Formatted {len(formatted)}/{len(files)} file(s) via {command}"
+            f"Formatted {len(formatted)}/{len(files)} file(s) via {command} "
+            f"(per-file OpenFile; SE folder Formatcode needs UIHierarchy.Select)"
         )
         if failed:
             msg += f" | {len(failed)} failed"
@@ -1121,12 +1223,17 @@ class StweepOpsMixin:
 
     def _format_one_file(self, file_path: str, deadline: float) -> None:
         tai = _tai()
+        if self._cancel_requested():
+            raise RuntimeError("format canceled")
         self._retry_com(
             self._dte.ItemOperations.OpenFile, file_path,
             max_retries=8, delay_s=1,
         )
 
         while time.time() < deadline:
+            if self._cancel_requested():
+                self._close_active_if_path(file_path)
+                raise RuntimeError("format canceled")
             tai.pythoncom.PumpWaitingMessages()
             if self._command_available(STWEEP_CMD_EDITOR):
                 break
@@ -1147,56 +1254,135 @@ class StweepOpsMixin:
                     self._dte.ExecuteCommand, folder_cmd,
                     max_retries=5, delay_s=1,
                 )
-                self._wait_and_save_active(file_path, deadline)
+                doc = self._capture_document(file_path)
+                self._wait_and_save_active(file_path, deadline, doc=doc)
+                self._close_active_if_path(file_path, doc=doc)
                 return
             raise RuntimeError(
                 f"STweep editor Formatcode not available for '{file_path}'. "
                 "Is the PLC editor open and is STweep licensed?"
             )
 
+        doc = self._capture_document(file_path)
         self._retry_com(
             self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
             max_retries=5, delay_s=1,
         )
-        self._wait_and_save_active(file_path, deadline)
+        self._wait_and_save_active(file_path, deadline, doc=doc)
+        # Close so multi-file jobs do not leave dozens of editor tabs open
+        # (UI folder Formatcode does not open each object as a document).
+        self._close_active_if_path(file_path, doc=doc)
 
-    def _wait_and_save_active(self, file_path: str, deadline: float) -> None:
-        """Pump briefly so STweep can dirty the buffer, then Save if needed."""
-        tai = _tai()
-        end_wait = min(deadline, time.time() + 8.0)
-        min_wait = time.time() + 1.2
-        while time.time() < end_wait:
-            tai.pythoncom.PumpWaitingMessages()
-            time.sleep(0.15)
-            if time.time() < min_wait:
-                continue
-            try:
-                doc = self._dte.ActiveDocument
-                if doc is None:
-                    continue
-                full = str(doc.FullName or "")
-                if full and os.path.normcase(full) != os.path.normcase(
-                    file_path
-                ):
-                    continue
-                # Once the buffer is dirty, give the formatter a short moment
-                # then persist — do not wait the full window if already Saved.
-                if not bool(doc.Saved):
-                    time.sleep(0.4)
-                    tai.pythoncom.PumpWaitingMessages()
-                    break
-                # No dirty flag after min_wait: treat as no-op format
-                break
-            except Exception:
-                pass
+    def _capture_document(self, file_path: str):
+        """Return ActiveDocument when it matches *file_path* (best-effort)."""
         try:
             doc = self._dte.ActiveDocument
             if doc is None:
-                return
+                return None
             full = str(doc.FullName or "")
             if full and os.path.normcase(full) != os.path.normcase(file_path):
+                return None
+            return doc
+        except Exception:
+            return None
+
+    def _doc_matches_path(self, doc, file_path: str) -> bool:
+        if doc is None:
+            return False
+        try:
+            full = str(doc.FullName or "")
+        except Exception:
+            return False
+        if not full:
+            return True
+        return os.path.normcase(full) == os.path.normcase(file_path)
+
+    def _doc_saved_state(self, doc) -> Optional[bool]:
+        """Return Saved flag, or None if the COM object is unusable."""
+        if doc is None:
+            return None
+        try:
+            return bool(doc.Saved)
+        except Exception:
+            return None
+
+    def _close_active_if_path(self, file_path: str, doc=None) -> None:
+        """Close the formatted document (held ref preferred; already saved)."""
+        candidates = []
+        if doc is not None:
+            candidates.append(doc)
+        try:
+            ad = self._dte.ActiveDocument
+            if ad is not None and ad not in candidates:
+                candidates.append(ad)
+        except Exception:
+            pass
+        for candidate in candidates:
+            if not self._doc_matches_path(candidate, file_path):
+                continue
+            try:
+                # vsSaveChangesNo — we already saved when dirty
+                self._retry_com(candidate.Close, False, max_retries=3, delay_s=0.5)
                 return
-            if not bool(doc.Saved):
-                self._retry_com(doc.Save, max_retries=5, delay_s=1)
-        except Exception as exc:
-            log.debug("ActiveDocument.Save after format: %s", exc)
+            except Exception as exc:
+                log.debug("Close after format %s: %s", file_path, exc)
+
+    def _save_format_document(self, file_path: str, doc=None) -> None:
+        """Save dirty buffer via held Document, else ActiveDocument."""
+        candidates = []
+        if doc is not None:
+            candidates.append(doc)
+        try:
+            ad = self._dte.ActiveDocument
+            if ad is not None and ad not in candidates:
+                candidates.append(ad)
+        except Exception:
+            pass
+        for candidate in candidates:
+            if not self._doc_matches_path(candidate, file_path):
+                continue
+            try:
+                if not bool(candidate.Saved):
+                    self._retry_com(candidate.Save, max_retries=5, delay_s=0.5)
+                return
+            except Exception as exc:
+                log.debug("Document.Save after format %s: %s", file_path, exc)
+
+    def _wait_and_save_active(
+        self, file_path: str, deadline: float, doc=None,
+    ) -> None:
+        """Save as soon as STweep dirties the buffer (held Document preferred).
+
+        Live measurements: dirty ~50ms after Formatcode; ActiveDocument often
+        dies after ~0.3s. A 1.2s min_wait misses the save window. On first
+        dirty, wait ``_STWEEP_POST_DIRTY_S`` then Save on the held ref.
+        """
+        tai = _tai()
+        end_wait = min(deadline, time.time() + _STWEEP_SETTLE_MAX_S)
+        held = doc if doc is not None else self._capture_document(file_path)
+        clean_polls = 0
+
+        while time.time() < end_wait:
+            if self._cancel_requested():
+                break
+            tai.pythoncom.PumpWaitingMessages()
+
+            saved = self._doc_saved_state(held)
+            if saved is None:
+                # Held ref died — try ActiveDocument (may still be valid briefly)
+                held = self._capture_document(file_path)
+                saved = self._doc_saved_state(held)
+
+            if saved is False:
+                # Formatter is writing; short post then persist immediately.
+                time.sleep(_STWEEP_POST_DIRTY_S)
+                tai.pythoncom.PumpWaitingMessages()
+                break
+
+            # Still clean: allow a short grace for late dirty, then treat as no-op
+            clean_polls += 1
+            if clean_polls >= _STWEEP_CLEAN_POLLS:
+                break
+            time.sleep(_STWEEP_POLL_S)
+
+        self._save_format_document(file_path, held)

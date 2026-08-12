@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from dataclasses import asdict
 from typing import Optional
@@ -16,6 +17,7 @@ from results import (
     ErrorEntry,
     ErrorsResult,
     ExportResult,
+    ExportProgressResult,
 )
 
 
@@ -45,23 +47,184 @@ class BuildOpsMixin:
         compiled_library: bool = True,
         install_library: bool = True,
         install_compiled_library: bool = False,
+        wait: bool = False,
+        timeout_s: int = 1800,
     ) -> ExportResult:
         """Export PLC project as .library and/or .compiled-library.
 
-        Args:
-            output_dir: Target directory for exported files.
-            title: Library title (used in filename).
-            version: Library version (used in filename).
-            library: Export .library file.
-            compiled_library: Export .compiled-library file.
-            install_library: Install .library into local TwinCAT repo.
-            install_compiled_library: Install .compiled-library into local TwinCAT repo.
+        ``wait=False`` (default, same as MCP ``twincat_export_library``): start
+        on a background thread and return immediately; poll
+        ``get_export_progress`` / ``twincat_export_progress`` until ``running``
+        is false. ``wait=True``: block until finished (progress still updated).
+        Prefer wait=false — Cursor MCP idle-timeouts long blocking tool calls
+        even when XAE export succeeds.
         """
-        return self._call_sta(
-            self._impl_export_library, output_dir, title, version,
-            library, compiled_library,
-            install_library, install_compiled_library,
-            timeout=120,
+        self._ensure_export_progress_state()
+        with self._export_lock:
+            if self._export_progress.get("running"):
+                return ExportResult(
+                    success=False,
+                    method="busy",
+                    message=(
+                        "An export job is already running. "
+                        "Poll twincat_export_progress until running=false."
+                    ),
+                    output_dir=output_dir,
+                    project_title=title,
+                    project_version=version,
+                )
+            now = time.time()
+            self._export_progress.update({
+                "running": True,
+                "phase": "starting",
+                "output_dir": output_dir or "",
+                "project_title": title or "",
+                "project_version": version or "",
+                "percent": 0.0,
+                "started_unix": now,
+                "updated_unix": now,
+                "message": "Starting export job…",
+                "result": None,
+            })
+
+        if not wait:
+            return self._start_export_library_async(
+                output_dir, title, version,
+                library, compiled_library,
+                install_library, install_compiled_library,
+                timeout_s,
+            )
+
+        try:
+            result = self._call_sta(
+                self._impl_export_library, output_dir, title, version,
+                library, compiled_library,
+                install_library, install_compiled_library,
+                timeout=max(120, int(timeout_s) + 60),
+            )
+            self._finish_export_progress(result)
+            return result
+        except Exception as exc:
+            fail = ExportResult(
+                success=False,
+                method="error",
+                message=str(exc),
+                output_dir=output_dir,
+                project_title=title,
+                project_version=version,
+            )
+            self._finish_export_progress(fail)
+            raise
+
+    def get_export_progress(self) -> ExportProgressResult:
+        """Read live export job progress (safe while export holds the STA)."""
+        self._ensure_export_progress_state()
+        with self._export_lock:
+            p = dict(self._export_progress)
+        started = float(p.get("started_unix") or 0.0)
+        updated = float(p.get("updated_unix") or 0.0)
+        elapsed = 0.0
+        if started > 0:
+            end = updated if not p.get("running") and updated > 0 else time.time()
+            elapsed = max(0.0, round(end - started, 1))
+        return ExportProgressResult(
+            success=True,
+            running=bool(p.get("running")),
+            phase=str(p.get("phase") or "idle"),
+            output_dir=str(p.get("output_dir") or ""),
+            project_title=str(p.get("project_title") or ""),
+            project_version=str(p.get("project_version") or ""),
+            percent=float(p.get("percent") or 0.0),
+            started_unix=started,
+            updated_unix=updated,
+            elapsed_s=elapsed,
+            message=str(p.get("message") or ""),
+            result=p.get("result"),
+        )
+
+    def _ensure_export_progress_state(self) -> None:
+        if not hasattr(self, "_export_lock"):
+            self._export_lock = threading.Lock()
+        if not hasattr(self, "_export_progress"):
+            self._export_progress = {
+                "running": False,
+                "phase": "idle",
+                "output_dir": "",
+                "project_title": "",
+                "project_version": "",
+                "percent": 0.0,
+                "started_unix": 0.0,
+                "updated_unix": 0.0,
+                "message": "",
+                "result": None,
+            }
+
+    def _update_export_progress(self, **kwargs) -> None:
+        self._ensure_export_progress_state()
+        with self._export_lock:
+            self._export_progress.update(kwargs)
+            self._export_progress["updated_unix"] = time.time()
+
+    def _finish_export_progress(self, result: ExportResult) -> None:
+        phase = "done" if result.success else "error"
+        if result.method == "busy":
+            return
+        with self._export_lock:
+            cur_pct = float(self._export_progress.get("percent") or 0.0)
+        self._update_export_progress(
+            running=False,
+            phase=phase,
+            percent=100.0 if phase == "done" else cur_pct,
+            message=result.message or phase,
+            result=asdict(result),
+        )
+
+    def _start_export_library_async(
+        self,
+        output_dir: str,
+        title: str,
+        version: str,
+        library: bool,
+        compiled_library: bool,
+        install_library: bool,
+        install_compiled_library: bool,
+        timeout_s: int,
+    ) -> ExportResult:
+        def runner():
+            try:
+                result = self._call_sta(
+                    self._impl_export_library, output_dir, title, version,
+                    library, compiled_library,
+                    install_library, install_compiled_library,
+                    timeout=max(120, int(timeout_s) + 60),
+                )
+                self._finish_export_progress(result)
+            except Exception as exc:
+                fail = ExportResult(
+                    success=False,
+                    method="error",
+                    message=str(exc),
+                    output_dir=output_dir,
+                    project_title=title,
+                    project_version=version,
+                )
+                if self.get_export_progress().running:
+                    self._finish_export_progress(fail)
+
+        threading.Thread(
+            target=runner, name="TwinCAT-Export-Async", daemon=True,
+        ).start()
+        return ExportResult(
+            success=True,
+            method="async_started",
+            async_started=True,
+            output_dir=output_dir,
+            project_title=title,
+            project_version=version,
+            message=(
+                "Export started in background. "
+                "Poll twincat_export_progress until running=false."
+            ),
         )
     # -------- check all objects --------
 
@@ -368,6 +531,10 @@ class BuildOpsMixin:
                         "compiled_library are false.",
             )
 
+        self._update_export_progress(
+            phase="checking", percent=5.0,
+            message="CheckAllObjects before export…",
+        )
         check = self._impl_check_all_objects()
         if not check.success:
             return ExportResult(
@@ -405,10 +572,17 @@ class BuildOpsMixin:
         os.makedirs(output_dir, exist_ok=True)
         result = ExportResult(success=True)
         msg_parts: list[str] = []
+        steps = (1 if library else 0) + (1 if compiled_library else 0)
+        done_steps = 0
 
         # --- .library ---
         if library:
             lib_path = os.path.join(output_dir, f"{title}-{version}.library")
+            self._update_export_progress(
+                phase="exporting_library",
+                percent=20.0,
+                message=f"SaveAsLibrary → {os.path.basename(lib_path)}",
+            )
             try:
                 self._plc_proj_item.SaveAsLibrary(lib_path, install_library)
                 result.library_path = lib_path
@@ -417,6 +591,11 @@ class BuildOpsMixin:
                 if install_library:
                     label += " (installed)"
                 msg_parts.append(label)
+                done_steps += 1
+                self._update_export_progress(
+                    percent=20.0 + 70.0 * (done_steps / max(1, steps)),
+                    message=f"Exported {label}",
+                )
             except Exception as exc:
                 result.success = False
                 result.message = f".library export failed: {exc}"
@@ -425,6 +604,11 @@ class BuildOpsMixin:
         # --- .compiled-library ---
         if compiled_library:
             comp_path = os.path.join(output_dir, f"{title}-{version}.compiled-library")
+            self._update_export_progress(
+                phase="exporting_compiled",
+                percent=20.0 + 70.0 * (done_steps / max(1, steps)),
+                message=f"SaveAsLibrary → {os.path.basename(comp_path)}",
+            )
             try:
                 self._plc_proj_item.SaveAsLibrary(comp_path, install_compiled_library)
                 result.compiled_library_path = comp_path
@@ -435,6 +619,11 @@ class BuildOpsMixin:
                 if install_compiled_library:
                     label += " (installed)"
                 msg_parts.append(label)
+                done_steps += 1
+                self._update_export_progress(
+                    percent=20.0 + 70.0 * (done_steps / max(1, steps)),
+                    message=f"Exported {label}",
+                )
             except Exception as exc:
                 result.success = False
                 result.message = f".compiled-library export failed: {exc}"

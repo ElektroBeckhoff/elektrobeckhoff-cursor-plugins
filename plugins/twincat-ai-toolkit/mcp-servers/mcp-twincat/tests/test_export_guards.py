@@ -103,13 +103,13 @@ class TestExportGuards(unittest.TestCase):
 
     def test_library_ok(self):
         info = {
-            "title": "Tc3_EB_BA",
+            "title": "Tc3_ExampleLib",
             "version": "1.6.1.0",
             "is_library_project": True,
             "project_category": "TwinCAT PLC Library Project",
         }
         err = validate_export_target(
-            plcproj_path=r"C:\repo\Tc3_EB_BA.plcproj",
+            plcproj_path=r"C:\repo\Tc3_ExampleLib.plcproj",
             info=info,
             output_dir=r"C:\repo\Versions\1.6.1.0",
             plcproj_explicit=True,
@@ -117,7 +117,7 @@ class TestExportGuards(unittest.TestCase):
         )
         self.assertIsNone(err)
         echo = export_echo_fields(
-            plcproj_path=r"C:\repo\Tc3_EB_BA.plcproj",
+            plcproj_path=r"C:\repo\Tc3_ExampleLib.plcproj",
             info=info,
             output_dir=r"C:\repo\Versions\1.6.1.0",
         )

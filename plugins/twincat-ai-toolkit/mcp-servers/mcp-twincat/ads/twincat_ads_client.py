@@ -4,11 +4,11 @@ TwinCAT ADS client wrapper (pyads / TcAdsDll).
 Used for runtime mode control (System Service port 10000), PLC start/stop,
 and symbolic variable read/write. Independent of the TE1000 COM bridge.
 
-Symbol path rules (verified on TwinCAT 4026 / Tc3_EB_BA sample + UmRT):
+Symbol path rules (verified on TwinCAT 4026 sample projects + UmRT):
 
 * Prefer the full instance path, e.g.
-  ``P_Sample_Room.fbDaliLight1._bValidLightControl`` or
-  ``…._fbLight.bError``. Nested members work even when absent from
+  ``P_Sample.fbDevice1._bValid`` or
+  ``…._fbChild.bError``. Nested members work even when absent from
   ``get_all_symbols()`` (list often shows only top-level instances).
 * Private ``VAR`` members (``_`` prefix, no hide pragma): R/W by full path.
 * ``{attribute 'hide'}`` on an **entire FB type** (typical library base):
