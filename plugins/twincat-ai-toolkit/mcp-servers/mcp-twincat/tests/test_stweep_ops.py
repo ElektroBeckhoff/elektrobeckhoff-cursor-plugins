@@ -79,7 +79,7 @@ class TestStweepStatus(unittest.TestCase):
 class TestFormatCode(unittest.TestCase):
     def test_requires_dte(self):
         b = _make_bridge()
-        r = b.format_code(path=r"C:\x\A.TcPOU")
+        r = b.format_code(path=r"C:\x\A.TcPOU", wait=True, timeout_s=60)
         self.assertFalse(r.success)
         self.assertIn("twincat_open", r.message)
 
@@ -97,7 +97,7 @@ class TestFormatCode(unittest.TestCase):
             path = tmp.name
         try:
             with patch("stweep_ops.discover_stweep_installs", return_value=[]):
-                r = b.format_code(path=path)
+                r = b.format_code(path=path, wait=True, timeout_s=60)
             self.assertFalse(r.success)
             self.assertIn("Unsupported", r.message)
         finally:
@@ -143,7 +143,7 @@ class TestFormatCode(unittest.TestCase):
                                 ),
                             ),
                         ):
-                            r = b.format_code(path=path, timeout_s=30)
+                            r = b.format_code(path=path, wait=True, timeout_s=30)
                     probe.assert_not_called()
             self.assertTrue(r.success)
             self.assertEqual(r.files_formatted, 1)
@@ -188,7 +188,7 @@ class TestFormatCode(unittest.TestCase):
                 "path": r"C:\fake\STweep", "version": "4.4.7.0",
             }]):
                 with patch.object(b, "_format_one_file", side_effect=fmt_one):
-                    r = b.format_code(path=tmp, recursive=False, timeout_s=60)
+                    r = b.format_code(path=tmp, recursive=False, wait=True, timeout_s=60)
 
             self.assertTrue(r.canceled)
             self.assertEqual(r.method, "canceled")
@@ -228,7 +228,7 @@ class TestFormatCode(unittest.TestCase):
                         "stweep_ops._read_stweep_license_wizard",
                         return_value=None,
                     ):
-                        r = b.format_code(path=tmp, recursive=False)
+                        r = b.format_code(path=tmp, recursive=False, wait=True, timeout_s=60)
             self.assertFalse(r.success)
             self.assertEqual(r.method, "unlicensed")
             self.assertEqual(fmt.call_count, 1)
@@ -273,7 +273,7 @@ class TestFormatCode(unittest.TestCase):
                             ),
                         ),
                     ):
-                        r = b.format_code(path=tmp, recursive=False)
+                        r = b.format_code(path=tmp, recursive=False, wait=True, timeout_s=60)
             self.assertTrue(r.success)
             self.assertEqual(r.files_total, 3)
             # Saved=True → never dirty → disk unchanged (not false files_formatted)
@@ -295,15 +295,15 @@ class TestFormatCode(unittest.TestCase):
                 fh.write(b"<Project/>")
             b._plcproj_file_path = plcproj
 
-            r_empty = b.format_code(path="", confirm=False)
+            r_empty = b.format_code(path="", confirm=False, wait=True, timeout_s=60)
             self.assertFalse(r_empty.success)
             self.assertIn("confirm=true", r_empty.message)
 
-            r_proj = b.format_code(path=plcproj, confirm=False)
+            r_proj = b.format_code(path=plcproj, confirm=False, wait=True, timeout_s=60)
             self.assertFalse(r_proj.success)
             self.assertIn("confirm=true", r_proj.message)
 
-            r_root = b.format_code(path=tmp, confirm=False)
+            r_root = b.format_code(path=tmp, confirm=False, wait=True, timeout_s=60)
             self.assertFalse(r_root.success)
             self.assertIn("confirm=true", r_root.message)
 
@@ -345,7 +345,7 @@ class TestFormatCode(unittest.TestCase):
                             ),
                         ),
                     ):
-                        r = b.format_code(path=plcproj, confirm=True)
+                        r = b.format_code(path=plcproj, confirm=True, wait=True, timeout_s=60)
             self.assertTrue(r.success)
             self.assertEqual(r.files_total, 2)
             self.assertEqual(r.files_formatted, 0)
@@ -379,7 +379,7 @@ class TestFormatCode(unittest.TestCase):
                             ),
                         ),
                     ):
-                        r = b.format_code(path=path, wait=True)
+                        r = b.format_code(path=path, wait=True, timeout_s=60)
             self.assertTrue(r.success)
             self.assertEqual(r.files_unchanged, 1)
             prog = b.get_format_progress()
@@ -502,7 +502,7 @@ class TestWaitAndSave(unittest.TestCase):
                             ),
                         ),
                     ):
-                        r = b.format_code(path=path, timeout_s=30)
+                        r = b.format_code(path=path, wait=True, timeout_s=30)
             self.assertFalse(r.success)
             self.assertEqual(r.files_formatted, 0)
             self.assertEqual(r.files_failed, 1)
@@ -522,6 +522,179 @@ class TestWaitAndSave(unittest.TestCase):
         b._close_active_if_path(path, doc=held)
         held.Close.assert_called_once_with(False)
         other.Close.assert_not_called()
+
+    def test_wait_true_long_timeout_coerced_to_async(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        with patch.object(b, "_impl_format_code") as impl:
+            impl.return_value = MagicMock()
+            r = b.format_code(
+                path=r"C:\x\A.TcPOU", wait=True, timeout_s=1800,
+            )
+        self.assertTrue(r.async_started)
+        self.assertEqual(r.method, "async_started")
+        self.assertIn("coerced", r.message.lower())
+        for _ in range(40):
+            if not b.get_format_progress().running:
+                break
+            time.sleep(0.05)
+
+    def test_editor_avail_times_out_fails_fast(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        editor = MagicMock()
+        editor.IsAvailable = False
+
+        def cmd_item(name):
+            if "PlcCodeWin" in name:
+                return editor
+            raise Exception("missing folder cmd")
+
+        b._dte.Commands.Item.side_effect = cmd_item
+        doc = MagicMock()
+        doc.Saved = True
+        b._dte.ActiveDocument = doc
+        with tempfile.NamedTemporaryFile(
+            suffix=".TcPOU", delete=False,
+        ) as tmp:
+            path = tmp.name
+            tmp.write(b"x")
+        doc.FullName = path
+        try:
+            with patch("stweep_ops.time.sleep", return_value=None):
+                with patch(
+                    "stweep_ops._tai",
+                    return_value=MagicMock(
+                        pythoncom=MagicMock(
+                            PumpWaitingMessages=MagicMock(),
+                        ),
+                    ),
+                ):
+                    with patch("stweep_ops._STWEEP_EDITOR_AVAIL_S", 0.3):
+                        t0 = {"v": 1000.0}
+
+                        def fake_time():
+                            t0["v"] += 0.2
+                            return t0["v"]
+
+                        with patch(
+                            "stweep_ops.time.time", side_effect=fake_time,
+                        ):
+                            with self.assertRaises(RuntimeError) as ctx:
+                                b._format_one_file(
+                                    path, deadline=t0["v"] + 10_000,
+                                )
+            self.assertIn("not available", str(ctx.exception).lower())
+        finally:
+            os.unlink(path)
+
+    def test_editor_avail_times_out_then_folder_fallback(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        editor = MagicMock()
+        editor.IsAvailable = False
+        folder = MagicMock()
+        folder.IsAvailable = True
+
+        def cmd_item(name):
+            if "PlcCodeWin" in name:
+                return editor
+            if "PlcFolder" in name or "SPSOrdner" in name:
+                return folder
+            raise Exception("missing")
+
+        b._dte.Commands.Item.side_effect = cmd_item
+        doc = MagicMock()
+        doc.Saved = True
+        b._dte.ActiveDocument = doc
+        with tempfile.NamedTemporaryFile(
+            suffix=".TcPOU", delete=False,
+        ) as tmp:
+            path = tmp.name
+            tmp.write(b"x")
+        doc.FullName = path
+        try:
+            with patch("stweep_ops.discover_stweep_installs", return_value=[{
+                "path": r"C:\fake\STweep", "version": "4.4.7.0",
+            }]):
+                with patch("stweep_ops.time.sleep", return_value=None):
+                    with patch(
+                        "stweep_ops._tai",
+                        return_value=MagicMock(
+                            pythoncom=MagicMock(
+                                PumpWaitingMessages=MagicMock(),
+                            ),
+                        ),
+                    ):
+                        t0 = {"v": 1000.0}
+
+                        def fake_time():
+                            t0["v"] += 0.25
+                            return t0["v"]
+
+                        with patch("stweep_ops.time.time", side_effect=fake_time):
+                            with patch("stweep_ops._STWEEP_EDITOR_AVAIL_S", 0.5):
+                                r = b.format_code(
+                                    path=path, wait=True, timeout_s=60,
+                                )
+            self.assertTrue(r.success)
+            # Folder Formatcode executed
+            calls = [
+                c.args[0] for c in b._dte.ExecuteCommand.call_args_list
+            ]
+            self.assertTrue(
+                any("PlcFolder" in c or "SPSOrdner" in c for c in calls),
+            )
+        finally:
+            os.unlink(path)
+
+    def test_avail_wait_heartbeats_progress(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        cmd = MagicMock()
+        cmd.IsAvailable = False
+        b._dte.Commands.Item.return_value = cmd
+        b._ensure_format_progress_state()
+        b._stweep_format_progress["running"] = True
+        path = r"C:\proj\A.TcPOU"
+        with patch(
+            "stweep_ops._tai",
+            return_value=MagicMock(
+                pythoncom=MagicMock(PumpWaitingMessages=MagicMock()),
+            ),
+        ):
+            with patch("stweep_ops.time.sleep", return_value=None):
+                with patch("stweep_ops._STWEEP_EDITOR_AVAIL_S", 0.5):
+                    with patch("stweep_ops._STWEEP_EDITOR_HEARTBEAT_S", 0.1):
+                        t0 = {"v": 0.0}
+
+                        def fake_time():
+                            t0["v"] += 0.15
+                            return t0["v"]
+
+                        with patch("stweep_ops.time.time", side_effect=fake_time):
+                            ok = b._wait_editor_formatcode_available(path)
+        self.assertFalse(ok)
+        msg = b.get_format_progress().message
+        self.assertIn("waiting_for_editor_Formatcode", msg)
+
+    def test_cancel_during_avail_wait(self):
+        b = _make_bridge()
+        b._dte = MagicMock()
+        cmd = MagicMock()
+        cmd.IsAvailable = False
+        b._dte.Commands.Item.return_value = cmd
+        b._ensure_format_progress_state()
+        b._format_cancel_requested = True
+        with patch(
+            "stweep_ops._tai",
+            return_value=MagicMock(
+                pythoncom=MagicMock(PumpWaitingMessages=MagicMock()),
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                b._wait_editor_formatcode_available(r"C:\a.TcPOU")
+        self.assertIn("canceled", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

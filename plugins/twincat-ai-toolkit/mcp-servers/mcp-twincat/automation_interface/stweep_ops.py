@@ -55,6 +55,13 @@ _STWEEP_POLL_S = 0.05
 _STWEEP_CLEAN_POLLS = 20
 _STWEEP_SETTLE_MAX_S = 2.5
 
+# Editor Formatcode IsAvailable wait — NEVER use the job deadline here.
+# Long spins freeze progress and hit Cursor MCP idle -32001 on wait=true.
+_STWEEP_EDITOR_AVAIL_S = 8.0
+_STWEEP_EDITOR_AVAIL_POLL_S = 0.2
+_STWEEP_EDITOR_HEARTBEAT_S = 1.0
+_STWEEP_EDITOR_RETRY_AVAIL_S = 2.0
+
 # TwinCAT ST objects STweep can format via the XAE editor command.
 # Includes interfaces (.TcIO) — same ST source as POUs/DUTs/GVLs.
 _FORMATABLE_EXTS = {".tcpou", ".tcgvl", ".tcdut", ".tcio"}
@@ -393,15 +400,24 @@ class StweepOpsMixin:
         recursive: bool = True,
         timeout_s: int = 300,
         confirm: bool = False,
-        wait: bool = True,
+        wait: bool = False,
     ) -> StweepFormatResult:
         """Format via STweep Formatcode.
 
-        ``wait=True`` (default): block until finished (progress still updated).
-        ``wait=False``: start on a background thread and return immediately;
-        poll ``get_format_progress`` / ``twincat_format_progress`` until
-        ``running`` is false. Prefer wait=false for large folders/projects.
+        ``wait=False`` (default): start on a background thread and return
+        immediately; poll ``get_format_progress`` / ``twincat_format_progress``
+        until ``running`` is false. ``wait=True`` only for short sync checks;
+        if ``timeout_s`` exceeds the Cursor idle guard, wait is coerced to async.
         """
+        from mcp_idle import (
+            async_coerced_message,
+            should_coerce_wait_to_async,
+        )
+
+        coerced = should_coerce_wait_to_async(wait, timeout_s)
+        if coerced:
+            wait = False
+
         self._ensure_format_progress_state()
         with self._stweep_format_lock:
             if self._stweep_format_progress.get("running"):
@@ -417,6 +433,9 @@ class StweepOpsMixin:
             # Claim the job slot before leaving the lock (sync or async).
             now = time.time()
             self._format_cancel_requested = False
+            start_msg = "Starting format job…"
+            if coerced:
+                start_msg = async_coerced_message("twincat_format_progress")
             self._stweep_format_progress.update({
                 "running": True,
                 "phase": "starting",
@@ -429,14 +448,21 @@ class StweepOpsMixin:
                 "percent": 0.0,
                 "started_unix": now,
                 "updated_unix": now,
-                "message": "Starting format job…",
+                "message": start_msg,
                 "result": None,
             })
 
         if not wait:
-            return self._start_format_code_async(
+            result = self._start_format_code_async(
                 path, recursive, timeout_s, confirm,
             )
+            if coerced and result.async_started:
+                result.message = (
+                    async_coerced_message("twincat_format_progress")
+                    + " "
+                    + (result.message or "")
+                )
+            return result
 
         try:
             return self._call_sta(
@@ -1263,7 +1289,6 @@ class StweepOpsMixin:
         Raises if the buffer was dirty / Save ran but disk bytes still match
         (false-positive persist failure).
         """
-        tai = _tai()
         if self._cancel_requested():
             raise RuntimeError("format canceled")
         pre = self._file_fingerprint(file_path)
@@ -1271,32 +1296,106 @@ class StweepOpsMixin:
             self._dte.ItemOperations.OpenFile, file_path,
             max_retries=8, delay_s=1,
         )
+        self._activate_format_document(file_path)
 
-        while time.time() < deadline:
+        if self._wait_editor_formatcode_available(file_path):
+            return self._execute_editor_formatcode(file_path, pre, deadline)
+
+        folder_outcome = self._try_folder_formatcode(file_path, pre, deadline)
+        if folder_outcome is not None:
+            return folder_outcome
+
+        self._close_active_if_path(file_path)
+        raise RuntimeError(
+            f"STweep editor Formatcode not available for '{file_path}' "
+            f"within {_STWEEP_EDITOR_AVAIL_S:.0f}s after OpenFile "
+            "(and folder Formatcode fallback failed). "
+            "Open the POU once in XAE, check STweep license, then retry."
+        )
+
+    def _activate_format_document(self, file_path: str):
+        """Best-effort Activate so editor Formatcode becomes available."""
+        tai = _tai()
+        tai.pythoncom.PumpWaitingMessages()
+        doc = self._capture_document(file_path)
+        if doc is None:
+            try:
+                docs = self._dte.Documents
+                count = int(docs.Count)
+                for i in range(1, count + 1):
+                    try:
+                        d = docs.Item(i)
+                        if self._doc_matches_path(d, file_path):
+                            doc = d
+                            break
+                    except Exception:
+                        continue
+            except Exception as exc:
+                log.debug("Documents scan for activate: %s", exc)
+        if doc is None:
+            return
+        try:
+            self._retry_com(doc.Activate, max_retries=3, delay_s=0.3)
+        except Exception as exc:
+            log.debug("Document.Activate %s: %s", file_path, exc)
+        tai.pythoncom.PumpWaitingMessages()
+
+    def _wait_editor_formatcode_available(self, file_path: str) -> bool:
+        """Poll editor Formatcode IsAvailable for a short capped window."""
+        tai = _tai()
+        end = time.time() + _STWEEP_EDITOR_AVAIL_S
+        next_hb = time.time()
+        started = time.time()
+        while time.time() < end:
             if self._cancel_requested():
                 self._close_active_if_path(file_path)
                 raise RuntimeError("format canceled")
             tai.pythoncom.PumpWaitingMessages()
             if self._command_available(STWEEP_CMD_EDITOR):
-                break
-            time.sleep(0.2)
-        else:
-            # Fallback: SE folder command if the file is the active selection
-            folder_cmd = self._resolve_folder_format_command()
-            if folder_cmd:
-                try:
-                    self._retry_com(
-                        self._dte.ExecuteCommand,
-                        "SolutionExplorer.SyncWithActiveDocument",
-                        max_retries=3, delay_s=1,
-                    )
-                except Exception as exc:
-                    log.debug("SyncWithActiveDocument: %s", exc)
-                self._retry_com(
-                    self._dte.ExecuteCommand, folder_cmd,
-                    max_retries=5, delay_s=1,
+                return True
+            now = time.time()
+            if now >= next_hb:
+                elapsed = now - started
+                self._update_format_progress(
+                    phase="formatting",
+                    current_file=file_path,
+                    message=(
+                        f"waiting_for_editor_Formatcode "
+                        f"({elapsed:.1f}s / {_STWEEP_EDITOR_AVAIL_S:.0f}s): "
+                        f"{os.path.basename(file_path)}"
+                    ),
                 )
+                next_hb = now + _STWEEP_EDITOR_HEARTBEAT_S
+            time.sleep(_STWEEP_EDITOR_AVAIL_POLL_S)
+        return False
+
+    def _formatcode_not_available_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "not available" in text and "formatcode" in text
+
+    def _execute_editor_formatcode(
+        self, file_path: str, pre: Tuple[int, str], deadline: float,
+    ) -> str:
+        """Run editor Formatcode with one short retry on not-available."""
+        last_exc: Optional[Exception] = None
+        for attempt in range(2):
+            if self._cancel_requested():
+                self._close_active_if_path(file_path)
+                raise RuntimeError("format canceled")
+            if attempt > 0:
+                self._activate_format_document(file_path)
+                retry_end = time.time() + _STWEEP_EDITOR_RETRY_AVAIL_S
+                while time.time() < retry_end:
+                    if self._command_available(STWEEP_CMD_EDITOR):
+                        break
+                    time.sleep(_STWEEP_EDITOR_AVAIL_POLL_S)
+                    _tai().pythoncom.PumpWaitingMessages()
+            try:
                 doc = self._capture_document(file_path)
+                self._retry_com(
+                    self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
+                    max_retries=3, delay_s=0.5,
+                )
                 was_dirty, did_save = self._wait_and_save_active(
                     file_path, deadline, doc=doc,
                 )
@@ -1304,25 +1403,52 @@ class StweepOpsMixin:
                 return self._classify_format_disk_result(
                     file_path, pre, was_dirty, did_save,
                 )
-            raise RuntimeError(
-                f"STweep editor Formatcode not available for '{file_path}'. "
-                "Is the PLC editor open and is STweep licensed?"
-            )
+            except Exception as exc:
+                last_exc = exc
+                if not self._formatcode_not_available_error(exc):
+                    raise
+                log.warning(
+                    "Editor Formatcode not available (attempt %s) for %s: %s",
+                    attempt + 1, file_path, exc,
+                )
+        raise RuntimeError(
+            f"STweep editor Formatcode not available for '{file_path}' "
+            f"after retry: {last_exc}"
+        )
 
-        doc = self._capture_document(file_path)
-        self._retry_com(
-            self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
-            max_retries=5, delay_s=1,
-        )
-        was_dirty, did_save = self._wait_and_save_active(
-            file_path, deadline, doc=doc,
-        )
-        # Close so multi-file jobs do not leave dozens of editor tabs open
-        # (UI folder Formatcode does not open each object as a document).
-        self._close_active_if_path(file_path, doc=doc)
-        return self._classify_format_disk_result(
-            file_path, pre, was_dirty, did_save,
-        )
+    def _try_folder_formatcode(
+        self, file_path: str, pre: Tuple[int, str], deadline: float,
+    ) -> Optional[str]:
+        """One-shot SE folder Formatcode fallback. Return outcome or None."""
+        folder_cmd = self._resolve_folder_format_command()
+        if not folder_cmd:
+            return None
+        try:
+            try:
+                self._retry_com(
+                    self._dte.ExecuteCommand,
+                    "SolutionExplorer.SyncWithActiveDocument",
+                    max_retries=3, delay_s=0.5,
+                )
+            except Exception as exc:
+                log.debug("SyncWithActiveDocument: %s", exc)
+            self._retry_com(
+                self._dte.ExecuteCommand, folder_cmd,
+                max_retries=3, delay_s=0.5,
+            )
+            doc = self._capture_document(file_path)
+            was_dirty, did_save = self._wait_and_save_active(
+                file_path, deadline, doc=doc,
+            )
+            self._close_active_if_path(file_path, doc=doc)
+            return self._classify_format_disk_result(
+                file_path, pre, was_dirty, did_save,
+            )
+        except Exception as exc:
+            log.warning(
+                "Folder Formatcode fallback failed for %s: %s", file_path, exc,
+            )
+            return None
 
     def _classify_format_disk_result(
         self,
