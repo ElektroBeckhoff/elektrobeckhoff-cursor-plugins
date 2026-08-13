@@ -1,6 +1,8 @@
 """Unit tests for async library export / progress (no live XAE)."""
 from __future__ import annotations
 
+import os
+import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -65,6 +67,108 @@ class TestExportAsync(unittest.TestCase):
         )
         self.assertFalse(r.success)
         self.assertEqual(r.method, "busy")
+
+    def test_wait_true_long_timeout_coerced_to_async(self):
+        b = _make_bridge()
+        done = ExportResult(success=True, message="ok")
+
+        def quick(*_a, **_k):
+            return done
+
+        with patch.object(b, "_impl_export_library", side_effect=quick):
+            r = b.export_library(
+                r"C:\out", "Lib", "1.0.0.0",
+                library=True, compiled_library=False,
+                wait=True, timeout_s=1800,
+            )
+        self.assertTrue(r.async_started)
+        self.assertIn("coerced", r.message.lower())
+        for _ in range(40):
+            if not b.get_export_progress().running:
+                break
+            time.sleep(0.05)
+
+    def test_check_export_artifacts_present(self):
+        b = _make_bridge()
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = os.path.join(tmp, "Lib-1.0.0.0.library")
+            with open(lib, "wb") as fh:
+                fh.write(b"x" * 100)
+            r = b.check_export_artifacts(
+                output_dir=tmp,
+                project_title="Lib",
+                project_version="1.0.0.0",
+                library=True,
+                compiled_library=False,
+            )
+        self.assertTrue(r.success)
+        self.assertTrue(r.all_present)
+
+    def test_check_export_artifacts_missing(self):
+        b = _make_bridge()
+        with tempfile.TemporaryDirectory() as tmp:
+            r = b.check_export_artifacts(
+                output_dir=tmp,
+                project_title="Lib",
+                project_version="1.0.0.0",
+                library=True,
+                compiled_library=True,
+            )
+        self.assertTrue(r.success)
+        self.assertFalse(r.all_present)
+
+    def test_zero_byte_library_fails_export(self):
+        b = _make_bridge()
+        with tempfile.TemporaryDirectory() as tmp:
+            lib_path = os.path.join(tmp, "Lib-1.0.0.0.library")
+
+            def save_as(path, _install):
+                with open(path, "wb") as fh:
+                    fh.write(b"")
+
+            b._plc_proj_item.SaveAsLibrary.side_effect = save_as
+            with patch.object(b, "_impl_check_all_objects") as chk:
+                chk.return_value = MagicMock(success=True, error_count=0)
+                with patch.object(
+                    b, "_find_git_root", return_value=tmp,
+                ):
+                    b._sln_path = os.path.join(tmp, "Lib.sln")
+                    r = b._impl_export_library(
+                        tmp, "Lib", "1.0.0.0",
+                        library=True, compiled_library=False,
+                        install_library=False,
+                        install_compiled_library=False,
+                    )
+            self.assertFalse(r.success)
+            self.assertFalse(r.artifacts_on_disk)
+            self.assertIn("zero-size", r.message.lower())
+            self.assertTrue(os.path.isfile(lib_path))
+
+    def test_export_heartbeat_updates_progress(self):
+        b = _make_bridge()
+        updates = []
+
+        def slow(*_a, **_k):
+            time.sleep(0.35)
+            return ExportResult(success=True, message="ok")
+
+        orig = b._update_export_progress
+
+        def track(**kw):
+            updates.append(dict(kw))
+            return orig(**kw)
+
+        b._update_export_progress = track
+        with patch("build_ops._EXPORT_HEARTBEAT_S", 0.1):
+            with patch.object(b, "_impl_export_library", side_effect=slow):
+                r = b._run_export_sta(
+                    r"C:\out", "Lib", "1.0.0.0",
+                    True, False, False, False, 60,
+                )
+        self.assertTrue(r.success)
+        self.assertTrue(
+            any("in progress" in str(u.get("message", "")) for u in updates),
+        )
 
 
 if __name__ == "__main__":

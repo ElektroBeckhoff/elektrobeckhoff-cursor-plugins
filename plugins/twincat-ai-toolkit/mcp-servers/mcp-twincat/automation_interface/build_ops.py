@@ -18,7 +18,10 @@ from results import (
     ErrorsResult,
     ExportResult,
     ExportProgressResult,
+    ExportArtifactsCheckResult,
 )
+
+_EXPORT_HEARTBEAT_S = 1.0
 
 
 log = logging.getLogger("twincat-mcp")
@@ -57,8 +60,18 @@ class BuildOpsMixin:
         ``get_export_progress`` / ``twincat_export_progress`` until ``running``
         is false. ``wait=True``: block until finished (progress still updated).
         Prefer wait=false — Cursor MCP idle-timeouts long blocking tool calls
-        even when XAE export succeeds.
+        even when XAE export succeeds. ``wait=true`` with
+        ``timeout_s`` above the Cursor idle guard is coerced to async.
         """
+        from mcp_idle import (
+            async_coerced_message,
+            should_coerce_wait_to_async,
+        )
+
+        coerced = should_coerce_wait_to_async(wait, timeout_s)
+        if coerced:
+            wait = False
+
         self._ensure_export_progress_state()
         with self._export_lock:
             if self._export_progress.get("running"):
@@ -74,6 +87,9 @@ class BuildOpsMixin:
                     project_version=version,
                 )
             now = time.time()
+            start_msg = "Starting export job…"
+            if coerced:
+                start_msg = async_coerced_message("twincat_export_progress")
             self._export_progress.update({
                 "running": True,
                 "phase": "starting",
@@ -83,24 +99,31 @@ class BuildOpsMixin:
                 "percent": 0.0,
                 "started_unix": now,
                 "updated_unix": now,
-                "message": "Starting export job…",
+                "message": start_msg,
                 "result": None,
             })
 
         if not wait:
-            return self._start_export_library_async(
+            result = self._start_export_library_async(
                 output_dir, title, version,
                 library, compiled_library,
                 install_library, install_compiled_library,
                 timeout_s,
             )
+            if coerced and result.async_started:
+                result.message = (
+                    async_coerced_message("twincat_export_progress")
+                    + " "
+                    + (result.message or "")
+                )
+            return result
 
         try:
-            result = self._call_sta(
-                self._impl_export_library, output_dir, title, version,
+            result = self._run_export_sta(
+                output_dir, title, version,
                 library, compiled_library,
                 install_library, install_compiled_library,
-                timeout=max(120, int(timeout_s) + 60),
+                timeout_s,
             )
             self._finish_export_progress(result)
             return result
@@ -192,11 +215,11 @@ class BuildOpsMixin:
     ) -> ExportResult:
         def runner():
             try:
-                result = self._call_sta(
-                    self._impl_export_library, output_dir, title, version,
+                result = self._run_export_sta(
+                    output_dir, title, version,
                     library, compiled_library,
                     install_library, install_compiled_library,
-                    timeout=max(120, int(timeout_s) + 60),
+                    timeout_s,
                 )
                 self._finish_export_progress(result)
             except Exception as exc:
@@ -226,6 +249,149 @@ class BuildOpsMixin:
                 "Poll twincat_export_progress until running=false."
             ),
         )
+
+    def _run_export_sta(
+        self,
+        output_dir: str,
+        title: str,
+        version: str,
+        library: bool,
+        compiled_library: bool,
+        install_library: bool,
+        install_compiled_library: bool,
+        timeout_s: int,
+    ) -> ExportResult:
+        """Run export on STA with a progress heartbeat while COM blocks."""
+        stop = threading.Event()
+        started = time.time()
+
+        def heartbeat():
+            while not stop.wait(_EXPORT_HEARTBEAT_S):
+                try:
+                    prog = self.get_export_progress()
+                    phase = prog.phase or "exporting"
+                    elapsed = max(0.0, time.time() - started)
+                    self._update_export_progress(
+                        message=(
+                            f"{phase} in progress (elapsed={elapsed:.0f}s)…"
+                        ),
+                    )
+                except Exception:
+                    pass
+
+        hb = threading.Thread(
+            target=heartbeat, name="TwinCAT-Export-Heartbeat", daemon=True,
+        )
+        hb.start()
+        try:
+            return self._call_sta(
+                self._impl_export_library, output_dir, title, version,
+                library, compiled_library,
+                install_library, install_compiled_library,
+                timeout=max(120, int(timeout_s) + 60),
+            )
+        finally:
+            stop.set()
+
+    def check_export_artifacts(
+        self,
+        output_dir: str = "",
+        project_title: str = "",
+        project_version: str = "",
+        library: bool = True,
+        compiled_library: bool = True,
+    ) -> ExportArtifactsCheckResult:
+        """Filesystem-only verify of expected export artifacts (no STA)."""
+        self._ensure_export_progress_state()
+        with self._export_lock:
+            p = dict(self._export_progress)
+        out = (output_dir or str(p.get("output_dir") or "")).strip()
+        title = (project_title or str(p.get("project_title") or "")).strip()
+        version = (
+            project_version or str(p.get("project_version") or "")
+        ).strip()
+        if not out or not title or not version:
+            return ExportArtifactsCheckResult(
+                success=False,
+                all_present=False,
+                output_dir=out,
+                project_title=title,
+                project_version=version,
+                message=(
+                    "Need output_dir, project_title, and project_version "
+                    "(or a prior export progress snapshot with those fields)."
+                ),
+            )
+        artifacts = self._expected_export_artifacts(
+            out, title, version, library, compiled_library,
+        )
+        all_present = bool(artifacts) and all(
+            a.get("exists") and float(a.get("size_kb") or 0) > 0
+            for a in artifacts
+        )
+        return ExportArtifactsCheckResult(
+            success=True,
+            all_present=all_present,
+            output_dir=out,
+            project_title=title,
+            project_version=version,
+            artifacts=artifacts,
+            message=(
+                "All requested export artifacts present on disk"
+                if all_present
+                else "One or more export artifacts missing or zero-size"
+            ),
+        )
+
+    @staticmethod
+    def _expected_export_artifacts(
+        output_dir: str,
+        title: str,
+        version: str,
+        library: bool,
+        compiled_library: bool,
+    ) -> list:
+        items = []
+        if library:
+            path = os.path.join(output_dir, f"{title}-{version}.library")
+            items.append(BuildOpsMixin._artifact_stat(path, "library"))
+        if compiled_library:
+            path = os.path.join(
+                output_dir, f"{title}-{version}.compiled-library",
+            )
+            items.append(
+                BuildOpsMixin._artifact_stat(path, "compiled-library"),
+            )
+        return items
+
+    @staticmethod
+    def _artifact_stat(path: str, kind: str) -> dict:
+        exists = os.path.isfile(path)
+        size_kb = 0.0
+        if exists:
+            try:
+                size_kb = round(os.path.getsize(path) / 1024, 1)
+            except OSError:
+                exists = False
+        return {
+            "path": path,
+            "kind": kind,
+            "exists": exists,
+            "size_kb": size_kb,
+        }
+
+    @staticmethod
+    def _verify_export_file(path: str, kind: str) -> tuple[bool, float, str]:
+        """Return (ok, size_kb, error_message)."""
+        if not os.path.isfile(path):
+            return False, 0.0, f"{kind} missing on disk: {path}"
+        try:
+            size = os.path.getsize(path)
+        except OSError as exc:
+            return False, 0.0, f"{kind} unreadable: {path} ({exc})"
+        if size <= 0:
+            return False, 0.0, f"{kind} is zero-size: {path}"
+        return True, round(size / 1024, 1), ""
     # -------- check all objects --------
 
     def _impl_check_all_objects(self) -> CheckResult:
@@ -570,10 +736,16 @@ class BuildOpsMixin:
             )
 
         os.makedirs(output_dir, exist_ok=True)
-        result = ExportResult(success=True)
+        result = ExportResult(
+            success=True,
+            output_dir=output_dir,
+            project_title=title,
+            project_version=version,
+        )
         msg_parts: list[str] = []
         steps = (1 if library else 0) + (1 if compiled_library else 0)
         done_steps = 0
+        artifacts: list = []
 
         # --- .library ---
         if library:
@@ -585,50 +757,81 @@ class BuildOpsMixin:
             )
             try:
                 self._plc_proj_item.SaveAsLibrary(lib_path, install_library)
-                result.library_path = lib_path
-                result.library_size_kb = round(os.path.getsize(lib_path) / 1024, 1)
-                label = f"{result.library_size_kb} KB .library"
-                if install_library:
-                    label += " (installed)"
-                msg_parts.append(label)
-                done_steps += 1
-                self._update_export_progress(
-                    percent=20.0 + 70.0 * (done_steps / max(1, steps)),
-                    message=f"Exported {label}",
-                )
             except Exception as exc:
                 result.success = False
                 result.message = f".library export failed: {exc}"
+                result.artifacts = artifacts
                 return result
+            ok, size_kb, err = self._verify_export_file(lib_path, ".library")
+            artifacts.append(self._artifact_stat(lib_path, "library"))
+            if not ok:
+                result.success = False
+                result.library_path = lib_path
+                result.artifacts = artifacts
+                result.artifacts_on_disk = False
+                result.message = err
+                return result
+            result.library_path = lib_path
+            result.library_size_kb = size_kb
+            label = f"{size_kb} KB .library"
+            if install_library:
+                label += " (installed)"
+            msg_parts.append(label)
+            done_steps += 1
+            self._update_export_progress(
+                percent=20.0 + 70.0 * (done_steps / max(1, steps)),
+                message=f"Exported {label}",
+            )
 
         # --- .compiled-library ---
         if compiled_library:
-            comp_path = os.path.join(output_dir, f"{title}-{version}.compiled-library")
+            comp_path = os.path.join(
+                output_dir, f"{title}-{version}.compiled-library",
+            )
             self._update_export_progress(
                 phase="exporting_compiled",
                 percent=20.0 + 70.0 * (done_steps / max(1, steps)),
                 message=f"SaveAsLibrary → {os.path.basename(comp_path)}",
             )
             try:
-                self._plc_proj_item.SaveAsLibrary(comp_path, install_compiled_library)
-                result.compiled_library_path = comp_path
-                result.compiled_library_size_kb = round(
-                    os.path.getsize(comp_path) / 1024, 1
-                )
-                label = f"{result.compiled_library_size_kb} KB .compiled-library"
-                if install_compiled_library:
-                    label += " (installed)"
-                msg_parts.append(label)
-                done_steps += 1
-                self._update_export_progress(
-                    percent=20.0 + 70.0 * (done_steps / max(1, steps)),
-                    message=f"Exported {label}",
+                self._plc_proj_item.SaveAsLibrary(
+                    comp_path, install_compiled_library,
                 )
             except Exception as exc:
                 result.success = False
                 result.message = f".compiled-library export failed: {exc}"
+                result.artifacts = artifacts
                 return result
+            ok, size_kb, err = self._verify_export_file(
+                comp_path, ".compiled-library",
+            )
+            artifacts.append(
+                self._artifact_stat(comp_path, "compiled-library"),
+            )
+            if not ok:
+                result.success = False
+                result.compiled_library_path = comp_path
+                result.artifacts = artifacts
+                result.artifacts_on_disk = False
+                result.message = err
+                return result
+            result.compiled_library_path = comp_path
+            result.compiled_library_size_kb = size_kb
+            label = f"{size_kb} KB .compiled-library"
+            if install_compiled_library:
+                label += " (installed)"
+            msg_parts.append(label)
+            done_steps += 1
+            self._update_export_progress(
+                percent=20.0 + 70.0 * (done_steps / max(1, steps)),
+                message=f"Exported {label}",
+            )
 
+        result.artifacts = artifacts
+        result.artifacts_on_disk = bool(artifacts) and all(
+            a.get("exists") and float(a.get("size_kb") or 0) > 0
+            for a in artifacts
+        )
         result.message = "Exported " + " + ".join(msg_parts)
         return result
     # ==================== Helpers (STA thread only) ====================

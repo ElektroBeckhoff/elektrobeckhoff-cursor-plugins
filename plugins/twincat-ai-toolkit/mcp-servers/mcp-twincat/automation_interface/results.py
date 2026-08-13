@@ -100,6 +100,32 @@ class ExportResult:
     # True when wait=false started a background job (poll twincat_export_progress).
     async_started: bool = False
     method: str = ""
+    # True when every requested artifact exists on disk with size > 0.
+    artifacts_on_disk: bool = False
+    # [{path, size_kb, kind, exists}] for requested outputs.
+    artifacts: list = field(default_factory=list)
+
+
+@dataclass
+class ExportArtifactsCheckResult:
+    """Filesystem-only check of expected export artifacts (no STA)."""
+    success: bool = True
+    all_present: bool = False
+    output_dir: str = ""
+    project_title: str = ""
+    project_version: str = ""
+    artifacts: list = field(default_factory=list)
+    message: str = ""
+
+
+@dataclass
+class DismissSafeDialogsResult:
+    """Result of twincat_dismiss_safe_dialogs (idle reload prompts)."""
+    success: bool = True
+    dismissed_count: int = 0
+    dismissed: list = field(default_factory=list)
+    remaining_blocking: list = field(default_factory=list)
+    message: str = ""
 
 
 @dataclass

@@ -31,6 +31,8 @@ from results import (  # noqa: F401
     ErrorsResult,
     ExportResult,
     ExportProgressResult,
+    ExportArtifactsCheckResult,
+    DismissSafeDialogsResult,
     ReloadResult,
     CloseResult,
     TargetResult,
