@@ -5,10 +5,18 @@ import logging
 import re
 import sys
 import threading
+import time
 from typing import Optional
+
+from results import DismissSafeDialogsResult
 
 
 log = logging.getLogger("twincat-mcp")
+
+# Caps for explicit idle dismiss (twincat_dismiss_safe_dialogs).
+_DISMISS_MAX_COUNT = 20
+_DISMISS_MAX_S = 10.0
+_DISMISS_BURST_S = 0.15
 
 
 def _tai():
@@ -191,3 +199,87 @@ class DialogOpsMixin:
 
             delay = self._POLL_BURST_S if dismissed_any else self._POLL_IDLE_S
             stop_event.wait(delay)
+
+    def dismiss_safe_dialogs(self) -> DismissSafeDialogsResult:
+        """Dismiss idle reload prompts (Yes/Ja) — fills the STA-worker gap.
+
+        Call when ``twincat_status.blocking_dialogs`` shows
+        ``auto_dismissable=true``. Does not require an active ``_call_sta``.
+        """
+        if not _tai().HAS_WIN32GUI:
+            return DismissSafeDialogsResult(
+                success=False,
+                message="win32gui not available — cannot dismiss dialogs",
+            )
+
+        IDYES = 6
+        dismissed: list[str] = []
+        deadline = time.time() + _DISMISS_MAX_S
+        while (
+            len(dismissed) < _DISMISS_MAX_COUNT
+            and time.time() < deadline
+        ):
+            found_any = False
+            for dlg in self._enumerate_xae_dialogs():
+                if not dlg.get("auto_dismissable"):
+                    continue
+                hwnd = dlg["hwnd"]
+                pattern = dlg.get("matched_pattern", "")
+                text = dlg.get("text", "")[:120]
+                try:
+                    _tai().win32gui.PostMessage(
+                        hwnd, _tai().win32con.WM_COMMAND, IDYES, 0,
+                    )
+                except Exception as exc:
+                    log.debug("PostMessage dismiss hwnd=%s: %s", hwnd, exc)
+                    continue
+                entry = f"[{pattern}] {text}"
+                dismissed.append(entry)
+                if not hasattr(self, "_dismissed_dialogs"):
+                    self._dismissed_dialogs = []
+                self._dismissed_dialogs.append(entry)
+                found_any = True
+                log.warning(
+                    "dismiss_safe_dialogs: hwnd=%s pattern='%s' text='%s'",
+                    hwnd, pattern, text,
+                )
+                if len(dismissed) >= _DISMISS_MAX_COUNT:
+                    break
+            if not found_any:
+                break
+            time.sleep(_DISMISS_BURST_S)
+
+        remaining = [
+            d for d in self._enumerate_xae_dialogs()
+            if not d.get("auto_dismissable")
+        ]
+        still_auto = [
+            d for d in self._enumerate_xae_dialogs()
+            if d.get("auto_dismissable")
+        ]
+        remaining_blocking = remaining + still_auto
+        if dismissed and not remaining_blocking:
+            msg = (
+                f"Dismissed {len(dismissed)} safe reload dialog(s). "
+                "Retry the original MCP call once."
+            )
+        elif dismissed and remaining_blocking:
+            msg = (
+                f"Dismissed {len(dismissed)} dialog(s); "
+                f"{len(remaining_blocking)} still blocking — "
+                "if auto_dismissable=false, tell the user; else call again."
+            )
+        elif remaining_blocking:
+            msg = (
+                f"{len(remaining_blocking)} blocking dialog(s) remain "
+                "(none auto-dismissable). Tell the user the dialog text."
+            )
+        else:
+            msg = "No TcXaeShell reload dialogs found"
+        return DismissSafeDialogsResult(
+            success=True,
+            dismissed_count=len(dismissed),
+            dismissed=dismissed,
+            remaining_blocking=remaining_blocking,
+            message=msg,
+        )

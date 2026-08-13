@@ -303,9 +303,11 @@ def twincat_status() -> str:
     SysManager error text, twincat_runtime_started, and target_net_id
     when a session is attached.
 
-    If ``dte_busy`` or ``blocking_dialogs`` is set, tell the user to
-    dismiss the popup in XAE before retrying open/build/check — do not
-    blind-retry until timeout.
+    If ``dte_busy`` or ``blocking_dialogs`` is set: READ those fields.
+    For ``auto_dismissable=true`` reload prompts call
+    ``twincat_dismiss_safe_dialogs`` once, then retry the original tool
+    once. Do not narrate manual XAE clicking. Non-auto-dismissable dialogs
+    → stop and tell the user the dialog text.
     """
 
     if not HAS_WIN32:
@@ -596,7 +598,7 @@ def twincat_format_code(
     recursive: bool = True,
     timeout_seconds: int = 300,
     confirm: bool = False,
-    wait: bool = True,
+    wait: bool = False,
 ) -> str:
     """Format Structured Text via STweep \"Format code\" in the open XAE shell.
 
@@ -622,10 +624,11 @@ def twincat_format_code(
       - path to a .plcproj
       - path to the PLC project root directory (folder containing .plcproj)
 
-    wait=true (default): block until finished. wait=false: start in background
-    (method=async_started) and poll twincat_format_progress until running=false.
-    Prefer wait=false + higher timeout_seconds for many files. STweep may show
-    its own UI progress in XAE; MCP progress is file-count based.
+    wait=false (default): start in background (method=async_started) and poll
+    twincat_format_progress until running=false. wait=true only for short sync
+    checks; if timeout_seconds>90, wait is coerced to async (Cursor idle -32001).
+    Per-file editor Formatcode availability is capped (~8s) then folder fallback
+    or fail — never spins for the full job timeout.
 
     Requires twincat_open first (same bridge session as build/check).
 
@@ -650,13 +653,38 @@ def twincat_format_code(
 # ================================================================
 
 @mcp.tool()
+def twincat_dismiss_safe_dialogs() -> str:
+    """Dismiss idle XAE \"file changed outside\" reload prompts (Yes/Ja).
+
+    Use when twincat_status.blocking_dialogs has auto_dismissable=true.
+    Clears the sequential dialog queue (not parallel windows). Then
+    twincat_status again and retry the original MCP call once.
+
+    Do NOT narrate manual XAE clicking. If remaining dialogs are not
+    auto_dismissable, stop and tell the user the dialog text."""
+
+    try:
+        return _json(_get_bridge().dismiss_safe_dialogs())
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "dismissed_count": 0,
+            "error": str(exc),
+            "message": str(exc),
+        })
+
+
+@mcp.tool()
 def twincat_export_progress() -> str:
     """Poll live library-export job progress (no STA / safe while exporting).
 
     Use after twincat_export_library(..., wait=false). Also works during a
     blocking wait=true call from another agent turn. Fields: running, phase
     (starting/checking/exporting_library/exporting_compiled/done/error),
-    percent, elapsed_s, message, result{} (final ExportResult when finished)."""
+    percent, elapsed_s, message, result{} (final ExportResult when finished).
+
+    After Cursor -32001: poll here first (job may still be running). If idle
+    and unclear, call twincat_export_check_artifacts before re-exporting."""
     try:
         return _json(_get_bridge().get_export_progress())
     except Exception as exc:
@@ -700,7 +728,8 @@ def twincat_export_library(
     MCP error -32001 even when XAE finishes successfully. Default wait=false
     starts the job in background (method=async_started); poll
     twincat_export_progress until running=false, then read result{}.
-    wait=true blocks (use only for small/fast exports)."""
+    wait=true with timeout_seconds>90 is coerced to async. After -32001:
+    progress → twincat_export_check_artifacts → retry only if missing."""
 
     from export_guards import export_echo_fields, validate_export_target
 
@@ -773,6 +802,40 @@ def twincat_export_library(
         err = {"success": False, "ok": False, "error": str(exc), "message": str(exc)}
         err.update(echo)
         return _json(err)
+
+
+@mcp.tool()
+def twincat_export_check_artifacts(
+    output_dir: str = "",
+    project_title: str = "",
+    project_version: str = "",
+    library: bool = True,
+    compiled_library: bool = True,
+) -> str:
+    """Check whether export artifacts exist on disk (no STA / safe anytime).
+
+    After Cursor MCP -32001 on export: (1) twincat_export_progress — if
+    running=true keep polling; (2) if idle/unclear call this tool; (3) if
+    all_present=true treat as success — do NOT re-export; (4) only if
+    missing retry twincat_export_library once with wait=false.
+
+    Empty output_dir/title/version → uses last export progress fields."""
+
+    try:
+        return _json(_get_bridge().check_export_artifacts(
+            output_dir=output_dir,
+            project_title=project_title,
+            project_version=project_version,
+            library=library,
+            compiled_library=compiled_library,
+        ))
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "all_present": False,
+            "error": str(exc),
+            "message": str(exc),
+        })
 
 
 # ================================================================

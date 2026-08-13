@@ -355,3 +355,61 @@ class TestImplGetStatus:
         assert result.sys_manager_errors == "Link error XYZ"
         assert result.twincat_runtime_started is True
         assert "SysManager has error messages" in result.message
+
+
+class TestDismissSafeDialogs:
+    def test_dismisses_auto_dismissable_queue(self):
+        bridge = _make_bridge()
+        dlg = {
+            "hwnd": 42,
+            "title": "TcXaeShell",
+            "text": "file has been changed outside the environment",
+            "auto_dismissable": True,
+            "matched_pattern": "file has been changed outside",
+        }
+        calls = {"n": 0}
+
+        def enum():
+            calls["n"] += 1
+            # First pass: one dialog; after PostMessage: empty
+            if calls["n"] == 1:
+                return [dlg]
+            return []
+
+        fake_gui = MagicMock()
+        with patch(
+            "twincat_automation_interface.HAS_WIN32GUI", True,
+        ), patch(
+            "twincat_automation_interface.win32gui", fake_gui,
+        ), patch(
+            "twincat_automation_interface.win32con", MagicMock(WM_COMMAND=273),
+        ), patch.object(bridge, "_enumerate_xae_dialogs", side_effect=enum):
+            result = bridge.dismiss_safe_dialogs()
+
+        assert result.success is True
+        assert result.dismissed_count == 1
+        assert result.remaining_blocking == []
+        fake_gui.PostMessage.assert_called()
+
+    def test_leaves_non_safe_dialogs(self):
+        bridge = _make_bridge()
+        unsafe = {
+            "hwnd": 7,
+            "title": "TcXaeShell",
+            "text": "save changes to untitled?",
+            "auto_dismissable": False,
+            "matched_pattern": "",
+        }
+        with patch(
+            "twincat_automation_interface.HAS_WIN32GUI", True,
+        ), patch.object(
+            bridge, "_enumerate_xae_dialogs", return_value=[unsafe],
+        ):
+            result = bridge.dismiss_safe_dialogs()
+
+        assert result.success is True
+        assert result.dismissed_count == 0
+        assert len(result.remaining_blocking) == 1
+        assert "not auto-dismissable" in result.message.lower() or (
+            "remain" in result.message.lower()
+        )
