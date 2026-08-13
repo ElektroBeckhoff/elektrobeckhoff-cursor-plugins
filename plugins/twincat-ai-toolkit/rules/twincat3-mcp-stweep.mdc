@@ -34,7 +34,11 @@ If format returns `method=unlicensed` / `license_ok=false`: stop and tell the us
 
 ## Long-running format
 
-- Prefer `wait=false` + poll `twincat_format_progress` for folders/projects (raise `timeout_seconds`).
+- Default `wait=false` + poll `twincat_format_progress` (raise `timeout_seconds`).
+- `wait=true` with `timeout_seconds>90` is coerced to async (Cursor idle `-32001`).
+- Per-file editor Formatcode availability is capped (~8s) with progress heartbeat,
+  then one folder-Formatcode fallback or **fail that file** — never spin for the
+  job deadline. On stall → dialog playbook in `twincat3-mcp-build`.
 - Abort with `twincat_format_cancel` (stops after the current file — not mid-Formatcode).
 - MCP walks files with `OpenFile` + editor Formatcode (SE folder Select is broken on TcXaeShell); closes each tab after format. Not the same as UI right-click on a folder.
 - MCP progress is **file-count** based; STweep may show its own XAE loading UI (not auto-dismissed).

@@ -15,11 +15,12 @@ description: >-
 Task Progress:
 - [ ] Step 1: Resolve .sln / path; twincat_open
 - [ ] Step 2: twincat_stweep_status — installed + commands_loaded (no UI)
-- [ ] Step 3: twincat_format_code (file/folder; project needs confirm=true)
-- [ ] Step 4: Many files → wait=false + poll twincat_format_progress
-- [ ] Step 5: To abort → twincat_format_cancel (stops between files)
-- [ ] Step 6: Verify disk — require `disk_changed` or accept `files_unchanged` only after git/hash check
-- [ ] Step 7: On unlicensed fail-fast → stop; else report files_formatted / unchanged / failed
+- [ ] Step 3: twincat_format_code wait=false (default); project needs confirm=true
+- [ ] Step 4: Poll twincat_format_progress until running=false
+- [ ] Step 5: Stall / popups → twincat_status + twincat_dismiss_safe_dialogs (see mcp-build)
+- [ ] Step 6: To abort → twincat_format_cancel (stops between files)
+- [ ] Step 7: Verify disk — require `disk_changed` or accept `files_unchanged` only after git/hash check
+- [ ] Step 8: On unlicensed fail-fast → stop; else report files_formatted / unchanged / failed
 ```
 
 ## Step 1: Open the same XAE session
@@ -48,19 +49,25 @@ Optional: `probe_license=true` only if the user wants wizard days/status (visibl
 
 ## Step 3: Format
 
-**File or small folder (blocking OK):**
+Default is **async** (`wait=false`). Always poll progress for folders. Use
+`wait=true` only for tiny sync checks (`timeout_seconds≤90`); larger timeouts
+are coerced to async (Cursor idle `-32001`).
 
 ```
-twincat_format_code(path="<file.TcPOU|folder>")
-```
-
-**Many files / whole project (prefer async + poll):**
-
-```
-twincat_format_code(path="<folder|project>", confirm=true?, wait=false, timeout_seconds=1800)
-# then poll until running=false:
+twincat_format_code(path="<file.TcPOU|folder>", timeout_seconds=1800)
+# poll until running=false:
 twincat_format_progress()
 ```
+
+**Whole project (explicit confirm):**
+
+```
+twincat_format_code(path="<folder|project>", confirm=true, timeout_seconds=1800)
+twincat_format_progress()
+```
+
+On COM stall / suspected reload popups → rule `twincat3-mcp-build` dialog
+playbook (`twincat_status` → `twincat_dismiss_safe_dialogs` → retry once).
 
 | Progress field | Meaning |
 |----------------|---------|
@@ -73,13 +80,6 @@ twincat_format_progress()
 STweep may show its own XAE progress UI; MCP does not drive that dialog — it tracks per-file Formatcode. Poll **`twincat_format_progress`** (not `twincat_stweep_status`) while a job runs — status goes through STA and can queue behind format.
 
 Supported: `.TcPOU`, `.TcGVL`, `.TcDUT`, `.TcIO`.
-
-**Whole project (explicit confirm only):**
-
-```
-twincat_format_code(path="", confirm=true, wait=false, timeout_seconds=1800)
-# or path="<....plcproj>" / project root folder, confirm=true
-```
 
 **How it differs from the XAE UI**
 
@@ -95,6 +95,10 @@ the SE folder the way the UI does. Command names still exist:
 
 **Cancel:** `twincat_format_cancel()` while a job runs → stops after the
 current file (`phase=canceled`). Prefer `wait=false` so the agent can cancel.
+
+**Editor availability:** After OpenFile, MCP waits ≤~8s for editor Formatcode
+`IsAvailable` (progress heartbeat). Then one folder-Formatcode fallback or
+fail that file — never spin for the full job timeout.
 
 **Settle/save + disk verify:** After Formatcode, MCP holds the Document ref and
 saves on first dirty (+~150 ms), then compares a **content fingerprint**.

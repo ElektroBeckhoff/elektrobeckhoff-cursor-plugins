@@ -192,8 +192,8 @@ Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requir
 | Area | Tools (summary) | Notes |
 |------|-----------------|-------|
 | **Session / build** | `twincat_status`, `twincat_open`, `twincat_reload`, `twincat_check_all_objects`, `twincat_build`, `twincat_get_output_log`, `twincat_close` | Primary validate = CheckAllObjects |
-| **Export (async)** | `twincat_export_library`, `twincat_export_progress` | Prefer `wait=false` + poll until `running=false` (avoids Cursor idle `-32001`) |
-| **STweep format** | `twincat_stweep_status`, `twincat_format_code`, `twincat_format_progress`, `twincat_format_cancel` | `wait=false` for large folders; cancel between files |
+| **Export (async)** | `twincat_export_library`, `twincat_export_progress`, `twincat_export_check_artifacts` | Default `wait=false`; after `-32001` poll then disk-check before re-export |
+| **STweep format** | `twincat_stweep_status`, `twincat_format_code`, `twincat_format_progress`, `twincat_format_cancel` | Default `wait=false`; poll progress; dismiss reload dialogs via `twincat_dismiss_safe_dialogs` |
 | **Target / activate** | `twincat_get_target`, `twincat_set_target`, `twincat_activate`, `twincat_start`, `twincat_task_*`, `twincat_io_*` | See `twincat3-mcp-runtime` |
 | **UmRT / PLC / messages** | `twincat_umrt_*`, `twincat_runtime_state`, `twincat_set_runtime_mode`, `twincat_plc_*`, `twincat_runtime_messages`, `twincat_verify_library_on_target`, `twincat_umrt_e2e` | Online-test path |
 | **ADS** | `twincat_ads_symbols`, `twincat_ads_read`, `twincat_ads_read_list`, `twincat_ads_write`, `twincat_ads_write_list` | Live-diagnostics path; writes need `confirm` |

@@ -110,14 +110,12 @@ Install into the local TwinCAT repo: `install_library=true` (default).
 diagnose may export **`.library` alone** (`compiled_library=false`) — see
 skill `twincat3-umrt-systemtest`. Never use that shortcut for a release.
 
-**Prefer async** (Cursor MCP idle-timeouts long blocking exports with `-32001`
-even when XAE finishes):
+**Always async** (default `wait=false`; `wait=true`+`timeout_seconds>90` coerced):
 
 ```
 twincat_export_library(
   library=true,
   compiled_library=true,
-  wait=false,
   timeout_seconds=1800
 )
 # poll until running=false:
@@ -125,13 +123,22 @@ twincat_export_progress()
 ```
 
 When `method=async_started`, use `result{}` from the final progress snapshot
-(not the start response) for paths/sizes. `wait=true` only for tiny/fast libs.
+(not the start response) for paths/sizes.
 
 Optional: `plcproj_path="<path>"` if auto-detect fails; `output_dir` defaults to `<git_repo>/Versions/<ProjectVersion>/`.
 
-Verify the final progress `result` shows **both** `.library` and
-`.compiled-library` with non-zero size. If Cursor already timed out on an old
-blocking export, check `Versions/<version>/` on disk before retrying.
+Verify final progress `result` shows **both** artifacts with non-zero size /
+`artifacts_on_disk=true`.
+
+**After Cursor `-32001` (idle timeout ≠ export failed):**
+
+1. `twincat_export_progress` — if `running=true` keep polling (do not re-export)
+2. If `running=false` and `result.success` → done
+3. Else `twincat_export_check_artifacts` — if `all_present` → success (no re-export)
+4. Only if missing → one retry with `wait=false`
+
+Reload popups while exporting → dialog playbook in rule `twincat3-mcp-build`
+(`twincat_dismiss_safe_dialogs`).
 
 ## Step 6: Create Changelog
 

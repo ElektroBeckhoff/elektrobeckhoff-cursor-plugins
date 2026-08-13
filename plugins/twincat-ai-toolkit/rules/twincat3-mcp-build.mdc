@@ -23,11 +23,13 @@ schemas by reading `mcps/**/tools/*.json`. Server IDs: see
 | `twincat_build` | Incremental build (`full_rebuild=true` for RebuildSolution) |
 | `twincat_get_output_log` | Re-read build pane only — not needed after check/build |
 | `twincat_reload` | Close+reopen solution — **only** after `.plcproj` was changed |
-| `twincat_export_library` | Export library; refuses `0.0.0.0` / non-library unless `force`; echoes `resolved_plcproj_path` / `project_version` / `output_dir`. Prefer `wait=false` + poll `twincat_export_progress` (Cursor idle-timeout `-32001` on long blocking exports). |
+| `twincat_export_library` | Export library; default `wait=false`; `wait=true`+`timeout_seconds>90` coerced to async. Echoes paths/version. |
 | `twincat_export_progress` | Live export poll (`running`, `phase`, `percent`, final `result{}`) |
+| `twincat_export_check_artifacts` | Disk-only verify after `-32001` / unclear finish — if `all_present` do **not** re-export |
+| `twincat_dismiss_safe_dialogs` | Dismiss idle “file changed outside” reload prompts (Yes/Ja) |
 | `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
 | `twincat_stweep_status` | STweep install + Formatcode commands (+ format_progress snapshot) |
-| `twincat_format_code` | STweep Format code (file/folder; project needs `confirm`; `wait=false` for long jobs) |
+| `twincat_format_code` | STweep Format code (default `wait=false`; project needs `confirm`) |
 | `twincat_format_progress` | Live format job poll while formatting |
 | `twincat_format_cancel` | Abort multi-file format between files (`phase=canceled`) |
 
@@ -71,8 +73,46 @@ Detailed workflow: skill `twincat3-validate`.
 - Content edits (`.TcPOU`/`.TcDUT`/`.TcGVL`): **no** reload. Reload **only** if `.plcproj` changed: `twincat_open` (if needed) → `twincat_reload` → check.
 - Libraries → `twincat_check_all_objects`. Apps/boot → `twincat_build`.
 
-## Session
+## Session / XAE dialog playbook (mandatory)
 
-Call `twincat_status` before open/build when XAE may be stuck: if any `instances[].dte_busy` is true or `blocking_dialogs` is non-empty, tell the user to dismiss the TcXaeShell popup — do not blind-retry COM calls until timeout. Known “file modified outside” dialogs may be auto-dismissed; others require manual action.
+Disk edits (comment/format/git) while POUs are open → sequential “file has been
+changed outside … Reload?” prompts. They **can** block COM. Do **not** invent
+manual clicking.
+
+```text
+WHEN COM fails / open-build-format-export stalls / you suspect XAE popups:
+
+1) twincat_status
+2) READ: blocking_dialogs[], instances[].dte_busy, dismissed_dialogs_recent
+3) IF any blocking_dialogs with auto_dismissable=true
+      → call twincat_dismiss_safe_dialogs ONCE
+      → twincat_status again
+      → IF cleared → RETRY the original MCP call once
+4) IF blocking_dialogs remain with auto_dismissable=false
+      → STOP. Tell user the dialog title/text. Do NOT invent clicks.
+5) IF blocking_dialogs empty but dte_busy=true
+      → wait briefly, status again; do not spam COM
+6) NEVER say "I will close the XAE dialogs manually" as the plan
+7) NEVER assume N dialogs for one FB name = N parallel windows
+   (XAE shows them sequentially; dismiss tool clears the queue)
+```
+
+| DO | DON'T |
+|----|--------|
+| `twincat_status` first | Blind-retry COM until timeout |
+| `twincat_dismiss_safe_dialogs` for known reload prompts | Narrate manual clicking in XAE |
+| Retry original tool **once** after clear | Re-export / re-format while dialogs up |
+| Ask user only if not auto-dismissable | Claim “N dialogs for FB X” without status evidence |
+
+## Export recovery after Cursor `-32001`
+
+`-32001` is a **client idle timeout**, not proof that XAE failed.
+
+1. `twincat_export_progress` — if `running=true` → keep polling (do **not** re-export)
+2. If `running=false` and `result.success` → done
+3. Else `twincat_export_check_artifacts` — if `all_present` → success (no re-export)
+4. Only if artifacts missing → one retry with `wait=false`
+
+## Session lifecycle
 
 Do **not** call `twincat_close` unless XAE is unresponsive or the user asks. Keep the session open; the next `twincat_open` re-attaches via ROT by solution path. Optional `force_quit=true` terminates XAE even when MCP only attached — use with caution.

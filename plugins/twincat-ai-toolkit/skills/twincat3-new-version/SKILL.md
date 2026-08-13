@@ -116,8 +116,11 @@ invocation; loop the set.
 
 ## Step 3: Format (baseline)
 
-Follow `twincat3-stweep-format`. File/folder OK; whole project only with
-`confirm=true`. Honor path filter. Prefer `xae_version="4024"` on open.
+Follow `twincat3-stweep-format`. Use default `wait=false` + poll progress.
+Whole project only with `confirm=true`. Honor path filter. Prefer
+`xae_version="4024"` on open. On reload popups → dialog playbook in
+`twincat3-mcp-build` (`twincat_dismiss_safe_dialogs`) — do not invent
+manual XAE clicks.
 
 Rationale: clean baseline **before** audit (also after comment churn).
 
@@ -182,15 +185,16 @@ Always both artifacts for this gate (not the online-test shortcut):
 twincat_export_library(
   library=true,
   compiled_library=true,
-  wait=false,
   timeout_seconds=1800
 )
 → poll twincat_export_progress until running=false
-→ verify both files under Versions/<ver>/ (non-zero size)
+→ verify both artifacts (result.artifacts_on_disk / non-zero size)
 ```
 
-Hard stop if either artifact missing / zero size. Follow `twincat3-release`
-export details.
+After Cursor `-32001`: progress → `twincat_export_check_artifacts` → retry
+only if missing (see `twincat3-release` / `twincat3-mcp-build`).
+
+Hard stop if either artifact missing / zero size.
 
 ## Step 10: Commits (default yes)
 
