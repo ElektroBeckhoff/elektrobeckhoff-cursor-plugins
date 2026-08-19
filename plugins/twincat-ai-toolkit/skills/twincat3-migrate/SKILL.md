@@ -107,8 +107,8 @@ The unified migrator detects each file's implementation type automatically:
 
 | Implementation | Detection | Converter |
 |----------------|-----------|-----------|
-| NWL (FBD/FUP) | `<NWL>` tag in XML | `twincat_fbd_to_st_migrator` |
-| CFC | `<CFC>` tag in XML | `twincat_cfc_to_st_migrator` |
+| NWL (FBD/FUP) | `<NWL>` tag in XML | `migrator.fbd` |
+| CFC | `<CFC>` tag in XML | `migrator.cfc` |
 | ST | `<ST>` tag in XML | Skipped (already Structured Text) |
 | GVL / DUT | No implementation block | Skipped |
 | Broken XML | Parse failure | Reported as error, does not abort batch |
@@ -128,3 +128,13 @@ If one file fails to convert, the error is logged and the migrator continues wit
 - If `strict=true` and TODOs exist, migration is aborted for that file
 - Binary/corrupted files are detected and skipped gracefully
 - A single failed file does not abort the entire batch
+
+## CLI (direct)
+
+From the `mcp-twincat` directory:
+
+```bash
+python -m migrator auto --input "<path>" [--dry-run | --analyze-only | --swap | --force] [--recursive]
+```
+
+See [cli-reference.md](cli-reference.md) for full options.

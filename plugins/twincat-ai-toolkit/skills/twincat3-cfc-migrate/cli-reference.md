@@ -5,7 +5,7 @@ The migrator can also be called directly from the command line.
 ## Synopsis
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input <PATH> [OPTIONS]
+python -m migrator cfc --input <PATH> [OPTIONS]
 ```
 
 ## Commands by Use Case
@@ -13,43 +13,43 @@ python twincat_cfc_to_st_migrator.py --input <PATH> [OPTIONS]
 ### Analyze CFC structure (read-only)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --analyze-only
+python -m migrator cfc --input "C:\Project\POUs\MyProg.TcPOU" --analyze-only
 ```
 
 ### Preview migration (read-only)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --dry-run
+python -m migrator cfc --input "C:\Project\POUs\MyProg.TcPOU" --dry-run
 ```
 
 ### Migrate single file (safe output, default)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU"
+python -m migrator cfc --input "C:\Project\POUs\MyProg.TcPOU"
 ```
 
 ### Migrate single file (swap mode)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --swap
+python -m migrator cfc --input "C:\Project\POUs\MyProg.TcPOU" --swap
 ```
 
 ### Migrate folder recursively (safe output)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs" --recursive
+python -m migrator cfc --input "C:\Project\POUs" --recursive
 ```
 
 ### Force in-place overwrite (destructive)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --force
+python -m migrator cfc --input "C:\Project\POUs\MyProg.TcPOU" --force
 ```
 
 ### Strict mode (safety-critical)
 
 ```bash
-python twincat_cfc_to_st_migrator.py --input "C:\Project\POUs" --recursive --strict
+python -m migrator cfc --input "C:\Project\POUs" --recursive --strict
 ```
 
 ## Exit Codes

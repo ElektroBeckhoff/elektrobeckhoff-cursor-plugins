@@ -26,7 +26,7 @@ Architecture: **rules** (always-on core + on-demand domains) · **skills** (work
 | **Pagefault audit** | InfoSys-aligned static audit (AND, pointers, `__NEW`/`__DELETE`, MEMCPY, bounds) |
 | **Comment pass** | `/twincat3-cmd-comment` — one-object `(* *)` comments from density rules |
 | **InfoSys offline** | Local `.mshc` search/read (EN/DE); web fallback only if empty |
-| **FBD / CFC → ST** | Preview-first migration (unified or FBD/CFC-specific tools) |
+| **FBD / CFC → ST** | Preview-first migration via MCP (`twincat_fup_migrate`, `twincat_cfc_migrate`, `twincat_migrate`) or CLI `python -m migrator fbd\|cfc\|auto` — see [toolkit README](plugins/twincat-ai-toolkit/README.md#direct-cli-fbdcfc-migration-no-xae) |
 | **IoT patterns** | Modbus TCP/RTU, MQTT, HTTP(S), JSON/`__NEW`, structured logging |
 | **Token-thin rules** | Lean alwaysApply core + naming; heavy samples in `rules/examples/` and skill `*-patterns.md` |
 

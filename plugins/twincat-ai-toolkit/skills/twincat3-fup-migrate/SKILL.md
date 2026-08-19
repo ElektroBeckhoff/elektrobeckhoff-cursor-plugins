@@ -131,3 +131,13 @@ Do **not** open XAE or run `twincat_check_all_objects` unless the user **explici
 - If swap mode write fails, the original is restored from backup automatically
 - If `strict=true` and TODOs exist, migration is aborted for that file
 - Binary/corrupted files are detected and skipped gracefully
+
+## CLI (direct)
+
+From the `mcp-twincat` directory:
+
+```bash
+python -m migrator fbd --input "<path>" [--dry-run | --analyze-only | --swap | --force] [--recursive]
+```
+
+See [cli-reference.md](cli-reference.md) for full options.

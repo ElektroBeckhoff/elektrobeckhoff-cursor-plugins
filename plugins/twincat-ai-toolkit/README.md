@@ -201,6 +201,31 @@ Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requir
 
 **Export scope:** ship gate / release → both `.library` + `.compiled-library`. Online-test (if export needed) → `.library` only (`compiled_library=false`).
 
+### Direct CLI (FBD/CFC migration, no XAE)
+
+From `mcp-servers/mcp-twincat/` (same Python env as the MCP server):
+
+```bash
+cd plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+
+# FBD/FUP (NWL) → ST
+python -m migrator fbd --input "POUs/MyFb.TcPOU" --dry-run
+python -m migrator fbd --input "POUs/MyFb.TcPOU" --swap
+
+# CFC → ST
+python -m migrator cfc --input "POUs/MyFb.TcPOU" --analyze-only
+
+# Auto-detect NWL vs CFC per file
+python -m migrator auto --input "POUs/" --recursive --dry-run
+python -m migrator auto --input "POUs/MyFb.TcPOU" --force
+```
+
+Common flags: `--dry-run`, `--analyze-only`, `--swap`, `--force`, `--recursive`, `--no-backup`, `--strict`.
+
+MCP equivalents (same backend): `twincat_fup_migrate`, `twincat_cfc_migrate`, `twincat_migrate`. Full flag reference: skills `twincat3-fup-migrate`, `twincat3-cfc-migrate`, `twincat3-migrate` → `cli-reference.md`.
+
+Migrates `.TcPOU` with NWL/CFC implementation only — not `.TcIO` (interfaces are declaration-only; code lives in implementing FBs).
+
 ### Requirements
 
 ```

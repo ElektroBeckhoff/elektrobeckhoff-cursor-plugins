@@ -5,7 +5,7 @@ The unified migrator can also be called directly from the command line. It auto-
 ## Synopsis
 
 ```bash
-python twincat_unified_migrator.py --input <PATH> [OPTIONS]
+python -m migrator auto --input <PATH> [OPTIONS]
 ```
 
 ## Commands by Use Case
@@ -13,49 +13,49 @@ python twincat_unified_migrator.py --input <PATH> [OPTIONS]
 ### Analyze project structure (read-only)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive --analyze-only
+python -m migrator auto --input "C:\Project\POUs" --recursive --analyze-only
 ```
 
 ### Preview migration (read-only)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive --dry-run
+python -m migrator auto --input "C:\Project\POUs" --recursive --dry-run
 ```
 
 ### Migrate single file (safe output, default)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs\MyProg.TcPOU"
+python -m migrator auto --input "C:\Project\POUs\MyProg.TcPOU"
 ```
 
 ### Migrate single file (swap mode)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs\MyProg.TcPOU" --swap
+python -m migrator auto --input "C:\Project\POUs\MyProg.TcPOU" --swap
 ```
 
 ### Migrate folder recursively (safe output)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive
+python -m migrator auto --input "C:\Project\POUs" --recursive
 ```
 
 ### Force in-place overwrite (destructive)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive --force
+python -m migrator auto --input "C:\Project\POUs" --recursive --force
 ```
 
 ### Strict mode (safety-critical)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive --strict
+python -m migrator auto --input "C:\Project\POUs" --recursive --strict
 ```
 
 ### Force without backup (dangerous, requires explicit intent)
 
 ```bash
-python twincat_unified_migrator.py --input "C:\Project\POUs" --recursive --force --no-backup
+python -m migrator auto --input "C:\Project\POUs" --recursive --force --no-backup
 ```
 
 ## Exit Codes

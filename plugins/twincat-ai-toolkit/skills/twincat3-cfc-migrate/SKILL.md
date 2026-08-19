@@ -137,3 +137,13 @@ Do **not** open XAE or run `twincat_check_all_objects` unless the user **explici
 - Operators (AND, OR, EQ, etc.) are inlined as nested ST expressions, not separate statements
 - Function Blocks produce standalone call statements with named parameters
 - The generated ST code includes an `AUTO-GENERATED from CFC` warning header
+
+## CLI (direct)
+
+From the `mcp-twincat` directory:
+
+```bash
+python -m migrator cfc --input "<path>" [--dry-run | --analyze-only | --swap | --force] [--recursive]
+```
+
+See [cli-reference.md](cli-reference.md) for full options.
