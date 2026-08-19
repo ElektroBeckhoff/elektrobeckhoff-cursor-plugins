@@ -4,7 +4,7 @@ TwinCAT MCP Server for Cursor IDE.
 Exposes TcXaeShell build automation, runtime control (TE1000 + ADS),
 Usermode Runtime (TC170x), FBD/FUP-to-ST and CFC-to-ST migration as MCP tools:
 status/open/check/build/export/close, target/activate/start/tasks,
-UmRT start/stop, ADS mode + PLC + variable R/W, STweep format via DTE,
+UmRT start/stop, ADS mode + PLC + variable R/W, ST formatting,
 migrators, plcproj, InfoSys.
 
 Transport: stdio  (Cursor starts this process as a child)
@@ -35,6 +35,10 @@ for _subdir in (
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from migrator._bootstrap import setup_migrator_paths  # noqa: E402
+
+setup_migrator_paths()
+
 # stdout is the MCP JSON-RPC wire -- all logging goes to stderr
 logging.basicConfig(
     level=logging.INFO,
@@ -45,10 +49,10 @@ log = logging.getLogger("twincat-mcp")
 
 from mcp.server.fastmcp import FastMCP
 from twincat_automation_interface import TcAutomationInterface, HAS_WIN32
-from twincat_fbd_to_st_migrator import main as fup_main
-from twincat_cfc_to_st_migrator import main as cfc_main
+from migrator.fbd import main as fup_main
+from migrator.cfc import main as cfc_main
 from twincat_plcproj_ops import main as plcproj_main, read_project_info
-from twincat_unified_migrator import main as unified_main
+from migrator.router import main as unified_main
 from twincat_infosys_mshc import InfoSysMshcIndex, resolve_mshc_path
 
 mcp = FastMCP("TwinCAT")
@@ -1790,6 +1794,183 @@ def twincat_ads_write_list(
 
 
 # ================================================================
+#  Post-migration ST formatting helper
+# ================================================================
+
+_AUTO_GEN_MARKER = "AUTO-GENERATED"
+_TC_EXTENSIONS = {".tcpou", ".tcdut", ".tcgvl", ".tcio"}
+
+
+def _detect_member_filter(file_path: str) -> str:
+    """Detect whether a TcPOU file contains only methods, actions, or properties.
+
+    Returns a member_filter value ("all_methods", "all_actions",
+    "all_properties") when exactly one member type is present, otherwise "".
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8-sig") as fh:
+            content = fh.read()
+    except Exception:
+        return ""
+
+    has_method = "<Method " in content or "<Method>" in content
+    has_action = "<Action " in content or "<Action>" in content
+    has_property = "<Property " in content or "<Property>" in content
+
+    types_found = sum([has_method, has_action, has_property])
+    if types_found == 1:
+        if has_method:
+            return "all_methods"
+        if has_action:
+            return "all_actions"
+        if has_property:
+            return "all_properties"
+    return ""
+
+
+def _file_has_auto_generated(file_path: str) -> bool:
+    """Check if a file contains the AUTO-GENERATED migration marker."""
+    try:
+        with open(file_path, "r", encoding="utf-8-sig") as fh:
+            head = fh.read(4096)
+        return _AUTO_GEN_MARKER in head
+    except Exception:
+        return False
+
+
+def _collect_format_targets(
+    input_path: str, output_path: str, swap: bool, force: bool
+) -> list[str]:
+    """Determine which output files/directories to format after migration.
+
+    Returns a list of absolute file paths that are TwinCAT ST files
+    with the AUTO-GENERATED marker.
+    """
+    inp = os.path.abspath(input_path)
+
+    if swap or force:
+        if os.path.isfile(inp):
+            candidates = [inp]
+        elif os.path.isdir(inp):
+            candidates = []
+            for root, _dirs, files in os.walk(inp):
+                for f in files:
+                    if os.path.splitext(f)[1].lower() in _TC_EXTENSIONS:
+                        candidates.append(os.path.join(root, f))
+        else:
+            return []
+        return [c for c in candidates if _file_has_auto_generated(c)]
+
+    if output_path:
+        target = os.path.abspath(output_path)
+    elif os.path.isfile(inp):
+        stem, ext = os.path.splitext(inp)
+        target = f"{stem}_st_generated{ext}"
+    elif os.path.isdir(inp):
+        parent = os.path.dirname(inp)
+        base = os.path.basename(inp)
+        candidates = []
+        for entry in os.listdir(parent):
+            if entry.startswith(f"{base}_st_generated"):
+                full = os.path.join(parent, entry)
+                if os.path.isdir(full):
+                    candidates.append(full)
+        if not candidates:
+            return []
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        target = candidates[0]
+    else:
+        return []
+
+    if not os.path.exists(target):
+        return []
+
+    if os.path.isfile(target):
+        if _file_has_auto_generated(target):
+            return [target]
+        return []
+
+    result = []
+    for root, _dirs, files in os.walk(target):
+        for f in files:
+            if os.path.splitext(f)[1].lower() in _TC_EXTENSIONS:
+                fp = os.path.join(root, f)
+                if _file_has_auto_generated(fp):
+                    result.append(fp)
+    return result
+
+
+def _format_after_migrate(
+    input_path: str,
+    output_path: str,
+    swap: bool,
+    force: bool,
+    dry_run: bool,
+    analyze_only: bool,
+    exit_code: int,
+) -> dict:
+    """Run twincat_format_st on migration output files.
+
+    Returns a dict with formatting summary to attach to the migration result.
+    Silently returns an empty dict if no formatting is needed or possible.
+    """
+    if exit_code != 0 or dry_run or analyze_only:
+        return {}
+
+    targets = _collect_format_targets(input_path, output_path, swap, force)
+    if not targets:
+        return {}
+
+    from formatter.config import load_config
+    from formatter.file_processor import process_batch
+    from formatter.types import FormatRegion, FormatScope, MemberFilter as MF
+
+    total_formatted = 0
+    total_errors = 0
+    file_results = []
+
+    for fpath in targets:
+        mf_str = _detect_member_filter(fpath)
+        scope = None
+        if mf_str:
+            scope = FormatScope(
+                region=FormatRegion.IMPLEMENTATION,
+                member_filter=MF(mf_str),
+            )
+
+        try:
+            cfg = load_config(project_root=os.path.dirname(fpath))
+            batch = process_batch(
+                [fpath], cfg,
+                dry_run=False,
+                validate=True,
+                format_st=True,
+                format_xml=True,
+                sort_xml=False,
+                scope=scope,
+            )
+            for r in batch.results:
+                entry = {"file": os.path.basename(r.path), "changed": r.changed, "success": r.success}
+                if r.errors:
+                    entry["errors"] = list(r.errors)
+                file_results.append(entry)
+            total_formatted += batch.formatted
+            total_errors += batch.errors
+        except Exception as exc:
+            file_results.append({"file": os.path.basename(fpath), "changed": False, "success": False, "errors": [str(exc)]})
+            total_errors += 1
+
+    return {
+        "format_after_migrate": {
+            "files_total": len(targets),
+            "files_formatted": total_formatted,
+            "files_errors": total_errors,
+            "results": file_results,
+        }
+    }
+
+
+# ================================================================
 #  twincat_fup_migrate  (pure Python -- no COM / no XAE needed)
 # ================================================================
 
@@ -1893,11 +2074,14 @@ def twincat_fup_migrate(
             "error": str(exc),
         })
 
-    return _json({
+    result = {
         "success": exit_code == 0,
         "exit_code": exit_code,
         "output": buf.getvalue(),
-    })
+    }
+    fmt = _format_after_migrate(input, output, swap, force, dry_run, analyze_only, exit_code)
+    result.update(fmt)
+    return _json(result)
 
 
 # ================================================================
@@ -2005,11 +2189,14 @@ def twincat_cfc_migrate(
             "error": str(exc),
         })
 
-    return _json({
+    result = {
         "success": exit_code == 0,
         "exit_code": exit_code,
         "output": buf.getvalue(),
-    })
+    }
+    fmt = _format_after_migrate(input, output, swap, force, dry_run, analyze_only, exit_code)
+    result.update(fmt)
+    return _json(result)
 
 
 # ================================================================
@@ -2117,11 +2304,14 @@ def twincat_migrate(
             "error": str(exc),
         })
 
-    return _json({
+    result = {
         "success": exit_code == 0,
         "exit_code": exit_code,
         "output": buf.getvalue(),
-    })
+    }
+    fmt = _format_after_migrate(input, output, swap, force, dry_run, analyze_only, exit_code)
+    result.update(fmt)
+    return _json(result)
 
 
 # ================================================================
