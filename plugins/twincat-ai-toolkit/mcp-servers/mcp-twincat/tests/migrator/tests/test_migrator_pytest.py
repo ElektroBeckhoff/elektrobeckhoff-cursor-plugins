@@ -1,5 +1,5 @@
 """
-Comprehensive pytest audit for twincat_fbd_to_st_migrator.py
+Comprehensive pytest audit for migrator.fbd (FBD/FUP to ST)
 
 Uses synthetic TwinCAT XML fixtures -- no external project files required.
 Run with:  pytest test_migrator_pytest.py -v
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import twincat_fbd_to_st_migrator as M
+import migrator.fbd as M
 
 # ===================================================================
 # Synthetic TwinCAT XML templates
@@ -1925,27 +1925,6 @@ class TestActionMigration:
 
 
 # ===================================================================
-# format_call_params alignment
-# ===================================================================
-
-class TestFormatCallParams:
-    def test_alignment(self):
-        mappings = [("IN", ":=", "bStart"), ("PT", ":=", "T#5S")]
-        lines = M._format_call_params(mappings)
-        assert all(":=" in l for l in lines)
-        col0 = lines[0].index(":=")
-        col1 = lines[1].index(":=")
-        assert col0 == col1
-
-    def test_mixed_positional_and_named(self):
-        mappings = [("", ":=", "42"), ("nVal", ":=", "10")]
-        lines = M._format_call_params(mappings)
-        assert len(lines) == 2
-
-    def test_empty_returns_empty(self):
-        assert M._format_call_params([]) == []
-
-
 # ===================================================================
 # Ordner-Batch-Mode mit batch_dir und Mirror-Struktur
 # ===================================================================

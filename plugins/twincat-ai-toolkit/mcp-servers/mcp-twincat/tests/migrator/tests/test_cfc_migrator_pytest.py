@@ -1,5 +1,5 @@
 """
-Comprehensive pytest suite for twincat_cfc_to_st_migrator.py
+Comprehensive pytest suite for migrator.cfc (CFC to ST)
 
 Uses real CFC fixture files and synthetic XML to test parsing, execution
 order extraction, IR mapping, ST codegen, XML writing, and edge cases.
@@ -14,13 +14,16 @@ from pathlib import Path
 
 import pytest
 
-import twincat_cfc_to_st_migrator as C
-from twincat_migrator_base import (
+import migrator.cfc as C
+from migrator import (
     AssignNode, BoxNode, MigrationConfig, MigrationLogger, MigrationReport,
     NwlNetwork, OperandNode, TcFile, load_file,
 )
+from migrator.codegen import convert_networks_to_st
+from migrator.validation import build_generated_header, calculate_accuracy
+from migrator.xml_reader import _detect_pou_type
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "raw"
 
 
 # ===================================================================
@@ -200,7 +203,6 @@ class TestRealFixtureFassadenCheck:
     def test_generated_st_contains_eq_and_or(self, tc):
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bSunBld_Enable :=" in tc.generated_st
         assert "OR" in tc.generated_st
@@ -248,7 +250,6 @@ class TestRealFixtureSunBldSwi:
     def test_generated_st_has_fb_calls(self, tc):
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "TON_Halten(" in tc.generated_st
         assert "SR(" in tc.generated_st
@@ -258,14 +259,12 @@ class TestRealFixtureSunBldSwi:
     def test_negated_pins_produce_not(self, tc):
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "NOT " in tc.generated_st
 
     def test_sel_expression(self, tc):
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "SEL(" in tc.generated_st
 
@@ -488,7 +487,6 @@ class TestSTCodegen:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut := bSensor;" in tc.generated_st
 
@@ -508,7 +506,6 @@ class TestSTCodegen:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut := bA AND bB;" in tc.generated_st
 
@@ -526,7 +523,6 @@ class TestXMLWriter:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         tc.generated_st = "bOut := bSensor;\n"
         result = C.write_cfc_st_to_xml(tc)
@@ -570,10 +566,8 @@ class TestGeneratedHeader:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
-        from twincat_migrator_base import build_generated_header
-        header = build_generated_header("CFC", "test.TcPOU", "twincat_cfc_to_st_migrator")
+        header = build_generated_header("CFC", "test.TcPOU", C.CFC_TOOL_NAME)
         assert "AUTO-GENERATED from CFC" in header
         assert "MANUAL VERIFICATION REQUIRED" in header
 
@@ -638,7 +632,6 @@ class TestEdgeCases:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut := TRUE;" in tc.generated_st
 
@@ -654,7 +647,6 @@ class TestEdgeCases:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut := SR.Q1;" in tc.generated_st
 
@@ -928,7 +920,6 @@ class TestConnectionMarks:
         graph = C.parse_cfc_graph(tc)
         assert "MyLabel" in graph.mark_sources
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut := bSignal;" in tc.generated_st
         assert "(* unknown pin *)" not in tc.generated_st
@@ -953,7 +944,6 @@ class TestConnectionMarks:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bA OR bB" in tc.generated_st
         assert "(* unknown pin *)" not in tc.generated_st
@@ -977,7 +967,6 @@ class TestConnectionMarks:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "bOut1 := bSignal;" in tc.generated_st
         assert "bOut2 := bSignal;" in tc.generated_st
@@ -1018,7 +1007,6 @@ class TestSuperCall:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "SUPER^();" in tc.generated_st
 
@@ -1042,7 +1030,6 @@ class TestActionCall:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "MyAction();" in tc.generated_st
 
@@ -1069,7 +1056,6 @@ class TestNegatedOutputPin:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "NOT" in tc.generated_st
         assert "bA OR bB" in tc.generated_st
@@ -1090,7 +1076,6 @@ class TestNegatedOutputPin:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "NOT bSignal" in tc.generated_st
 
@@ -1119,7 +1104,6 @@ class TestSELSimplification:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "SEL(" not in tc.generated_st
         assert "bSwitch" in tc.generated_st
@@ -1143,7 +1127,6 @@ class TestSELSimplification:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "SEL(" not in tc.generated_st
         assert "NOT bSwitch" in tc.generated_st
@@ -1167,7 +1150,6 @@ class TestSELSimplification:
         tc = load_file(p)
         graph = C.parse_cfc_graph(tc)
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "SEL(bSwitch, nValA, nValB)" in tc.generated_st
 
@@ -1178,27 +1160,22 @@ class TestSELSimplification:
 
 class TestPOUTypeDetection:
     def test_comment_before_fb(self):
-        from twincat_migrator_base import _detect_pou_type
         decl = "// Some comment\nFUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
         assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
 
     def test_attribute_before_fb(self):
-        from twincat_migrator_base import _detect_pou_type
         decl = "{attribute 'qualified_only'}\nFUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
         assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
 
     def test_multiline_comments_before_program(self):
-        from twincat_migrator_base import _detect_pou_type
         decl = "(* multi-line comment *)\n// another comment\nPROGRAM MAIN\nVAR\nEND_VAR"
         assert _detect_pou_type(decl) == "PROGRAM"
 
     def test_empty_lines_before_function(self):
-        from twincat_migrator_base import _detect_pou_type
         decl = "\n\n\nFUNCTION F_Test : BOOL\nVAR_INPUT\nEND_VAR"
         assert _detect_pou_type(decl) == "FUNCTION"
 
     def test_direct_keyword_still_works(self):
-        from twincat_migrator_base import _detect_pou_type
         decl = "FUNCTION_BLOCK FB_Test\nVAR\nEND_VAR"
         assert _detect_pou_type(decl) == "FUNCTION_BLOCK"
 
@@ -1209,7 +1186,6 @@ class TestPOUTypeDetection:
 
 class TestAccuracyMetric:
     def test_accuracy_uses_item_count(self):
-        from twincat_migrator_base import calculate_accuracy, NwlNetwork
         tc = TcFile()
         tc.networks = [NwlNetwork(index=0, items=[
             AssignNode(outputs=[OperandNode(name="a")], rvalue=OperandNode(name="b")),
@@ -1223,7 +1199,6 @@ class TestAccuracyMetric:
         assert acc == 90.0, f"Expected 90.0 got {acc}"
 
     def test_accuracy_100_no_issues(self):
-        from twincat_migrator_base import calculate_accuracy, NwlNetwork
         tc = TcFile()
         tc.networks = [NwlNetwork(index=0, items=[
             AssignNode(outputs=[OperandNode(name="a")], rvalue=OperandNode(name="b")),
@@ -1274,7 +1249,6 @@ class TestSingularPins:
         graph = C.parse_cfc_graph(tc)
         assert 20 in graph.pins
         tc.networks = C.map_cfc_to_ir(graph, tc)
-        from twincat_migrator_base import convert_networks_to_st
         convert_networks_to_st(tc, MigrationConfig())
         assert "(* unknown pin *)" not in tc.generated_st
 

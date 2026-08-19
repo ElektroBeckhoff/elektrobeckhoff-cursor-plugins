@@ -1,0 +1,352 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="PresenceSimulation" Id="{a090af6b-8bf9-4c48-a9df-eee722a3d674}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PresenceSimulation
+VAR
+
+	fbWeeklyTimeSwitch : FB_WeeklyTimeSwitch;
+	fbSceneLight       : FB_IoT_Switch(P_IoT_Com.fbIoT_ComClient,0);
+	CTU                : CTU;
+	TON                : ARRAY[1..55] OF TON;
+	TP                 : ARRAY[1..55] OF TP;
+
+	bAnwesenheit_Tag_1_aktivieren : BOOL;
+	bAnwesenheit_Tag_2_aktivieren : BOOL;
+	bAnwesenheit_Tag_3_aktivieren : BOOL;
+	bAnwesenheit_Tag_4_aktivieren : BOOL;
+	bAnwesenheit_Tag_5_aktivieren : BOOL;
+
+	bAnwesenheit_1_Beleuchtung_1: BOOL;
+	bAnwesenheit_1_Beleuchtung_2: BOOL;
+	bAnwesenheit_1_Beleuchtung_3: BOOL;
+	bAnwesenheit_1_Beleuchtung_4: BOOL;
+	bAnwesenheit_1_Beleuchtung_5: BOOL;
+
+	bAnwesenheit_2_Beleuchtung_1: BOOL;
+	bAnwesenheit_2_Beleuchtung_2: BOOL;
+	bAnwesenheit_2_Beleuchtung_3: BOOL;
+	bAnwesenheit_2_Beleuchtung_4: BOOL;
+	bAnwesenheit_2_Beleuchtung_5: BOOL;
+
+	bAnwesenheit_3_Beleuchtung_1: BOOL;
+	bAnwesenheit_3_Beleuchtung_2: BOOL;
+	bAnwesenheit_3_Beleuchtung_3: BOOL;
+	bAnwesenheit_3_Beleuchtung_4: BOOL;
+	bAnwesenheit_3_Beleuchtung_5: BOOL;
+
+	bAnwesenheit_4_Beleuchtung_1: BOOL;
+	bAnwesenheit_4_Beleuchtung_2: BOOL;
+	bAnwesenheit_4_Beleuchtung_3: BOOL;
+	bAnwesenheit_4_Beleuchtung_4: BOOL;
+	bAnwesenheit_4_Beleuchtung_5: BOOL;
+
+	bAnwesenheit_5_Beleuchtung_1: BOOL;
+	bAnwesenheit_5_Beleuchtung_2: BOOL;
+	bAnwesenheit_5_Beleuchtung_3: BOOL;
+	bAnwesenheit_5_Beleuchtung_4: BOOL;
+	bAnwesenheit_5_Beleuchtung_5: BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* ============================================================================
+   AUTO-GENERATED from FBD/FUP by migrator.fbd
+   Source:           fbd_PresenceSimulation.TcPOU
+   Version:          1.0.0
+   Date:             2026-08-19 13:29:26
+   Accuracy:         100.00 %
+
+   WARNING: This code was automatically converted from a FBD/FUP implementation.
+   Statement order is derived from the execution order stored in the XML.
+   MANUAL VERIFICATION REQUIRED before productive use.
+   ============================================================================ *)
+
+(* FBD Network 1 *)
+fbWeeklyTimeSwitch(
+        bEnable          := TRUE,
+        tCurrentDateTime := gdtAktuelleUhrzeit,
+        tSwitchOnTime    := TOD#15:30:00,
+        tSwitchOffTime   := TOD#00:31:00,
+        bSunday          := TRUE,
+        bMonday          := TRUE,
+        bTuesday         := TRUE,
+        bWednesday       := TRUE,
+        bThursday        := TRUE,
+        bFriday          := TRUE,
+        bSaturday        := TRUE);
+
+(* FBD Network 2 *)
+fbSceneLight(bEnable := TRUE, sDisplayName := 'Anwesenheitssimulation', bToggle := bIn_8fach_Taster_Flur_OG_Taste_5);
+
+(* fbSceneLight output mappings *)
+gbAnwesenheitssimulation_einschalten := fbSceneLight.bSwitch;
+bOut_8fach_Taster_Flur_OG_RM_Taste_5 := fbSceneLight.bSwitch;
+
+(* FBD Network 3 *)
+TP[1](
+    IN := bDaemmerung,
+    PT := T#1s);
+TP[2](
+    IN := CTU.Q,
+    PT := T#1s);
+CTU(CU := TP[1].Q, RESET := TP[2].Q, PV := 5);
+
+(* FBD Network 4 *)
+bAnwesenheit_Tag_1_aktivieren := (CTU.CV = 1) AND bDaemmerung AND gbAnwesenheitssimulation_einschalten AND fbWeeklyTimeSwitch.bOutput;
+
+(* FBD Network 5 *)
+bAnwesenheit_Tag_2_aktivieren := (CTU.CV = 2) AND bDaemmerung AND gbAnwesenheitssimulation_einschalten AND fbWeeklyTimeSwitch.bOutput;
+
+(* FBD Network 6 *)
+bAnwesenheit_Tag_3_aktivieren := (CTU.CV = 3) AND bDaemmerung AND gbAnwesenheitssimulation_einschalten AND fbWeeklyTimeSwitch.bOutput;
+
+(* FBD Network 7 *)
+bAnwesenheit_Tag_4_aktivieren := (CTU.CV = 4) AND bDaemmerung AND gbAnwesenheitssimulation_einschalten AND fbWeeklyTimeSwitch.bOutput;
+
+(* FBD Network 8 *)
+bAnwesenheit_Tag_5_aktivieren := (CTU.CV = 5) AND bDaemmerung AND gbAnwesenheitssimulation_einschalten AND fbWeeklyTimeSwitch.bOutput;
+
+(* FBD Network 9 *)
+TON[11](
+    IN := bAnwesenheit_Tag_1_aktivieren,
+    PT := T#45m,
+    Q  => bAnwesenheit_1_Beleuchtung_1);
+
+(* FBD Network 10 *)
+TON[12](
+    IN := bAnwesenheit_Tag_1_aktivieren,
+    PT := T#47m);
+TP[12](
+    IN := TON[12].Q,
+    PT := T#90m,
+    Q  => bAnwesenheit_1_Beleuchtung_2);
+
+(* FBD Network 11 *)
+TON[13](
+    IN := bAnwesenheit_Tag_1_aktivieren,
+    PT := T#120m);
+TP[13](
+    IN := TON[13].Q,
+    PT := T#300m,
+    Q  => bAnwesenheit_1_Beleuchtung_3);
+
+(* FBD Network 12 *)
+TON[14](
+    IN := bAnwesenheit_Tag_1_aktivieren,
+    PT := T#150m);
+TP[14](
+    IN := TON[14].Q,
+    PT := T#220m,
+    Q  => bAnwesenheit_1_Beleuchtung_4);
+
+(* FBD Network 13 *)
+TON[15](
+    IN := bAnwesenheit_Tag_1_aktivieren,
+    PT := T#180m);
+TP[15](
+    IN := TON[15].Q,
+    PT := T#180m,
+    Q  => bAnwesenheit_1_Beleuchtung_5);
+
+(* FBD Network 14 *)
+
+(* FBD Network 15 *)
+
+(* FBD Network 16 *)
+TON[21](
+    IN := bAnwesenheit_Tag_2_aktivieren,
+    PT := T#180m,
+    Q  => bAnwesenheit_2_Beleuchtung_1);
+
+(* FBD Network 17 *)
+TON[22](
+    IN := bAnwesenheit_Tag_2_aktivieren,
+    PT := T#60m);
+TP[22](
+    IN := TON[22].Q,
+    PT := T#120m,
+    Q  => bAnwesenheit_2_Beleuchtung_2);
+
+(* FBD Network 18 *)
+TON[23](
+    IN := bAnwesenheit_Tag_2_aktivieren,
+    PT := T#144m);
+TP[23](
+    IN := TON[23].Q,
+    PT := T#140m,
+    Q  => bAnwesenheit_2_Beleuchtung_3);
+
+(* FBD Network 19 *)
+TON[24](
+    IN := bAnwesenheit_Tag_2_aktivieren,
+    PT := T#220m);
+TP[24](
+    IN := TON[24].Q,
+    PT := T#110m,
+    Q  => bAnwesenheit_2_Beleuchtung_4);
+
+(* FBD Network 20 *)
+TON[25](
+    IN := bAnwesenheit_Tag_2_aktivieren,
+    PT := T#260m);
+TP[25](
+    IN := TON[25].Q,
+    PT := T#135m,
+    Q  => bAnwesenheit_2_Beleuchtung_5);
+
+(* FBD Network 21 *)
+
+(* FBD Network 22 *)
+
+(* FBD Network 23 *)
+TON[31](
+    IN := bAnwesenheit_Tag_3_aktivieren,
+    PT := T#90m,
+    Q  => bAnwesenheit_3_Beleuchtung_1);
+
+(* FBD Network 24 *)
+TON[32](
+    IN := bAnwesenheit_Tag_3_aktivieren,
+    PT := T#50m);
+TP[32](
+    IN := TON[32].Q,
+    PT := T#110m,
+    Q  => bAnwesenheit_3_Beleuchtung_2);
+
+(* FBD Network 25 *)
+TON[33](
+    IN := bAnwesenheit_Tag_3_aktivieren,
+    PT := T#170m);
+TP[33](
+    IN := TON[33].Q,
+    PT := T#130m,
+    Q  => bAnwesenheit_3_Beleuchtung_3);
+
+(* FBD Network 26 *)
+TON[34](
+    IN := bAnwesenheit_Tag_3_aktivieren,
+    PT := T#190m);
+TP[34](
+    IN := TON[34].Q,
+    PT := T#160m,
+    Q  => bAnwesenheit_3_Beleuchtung_4);
+
+(* FBD Network 27 *)
+TON[35](
+    IN := bAnwesenheit_Tag_3_aktivieren,
+    PT := T#205m);
+TP[35](
+    IN := TON[35].Q,
+    PT := T#135m,
+    Q  => bAnwesenheit_3_Beleuchtung_5);
+
+(* FBD Network 28 *)
+
+(* FBD Network 29 *)
+
+(* FBD Network 30 *)
+TON[41](
+    IN := bAnwesenheit_Tag_4_aktivieren,
+    PT := T#45m,
+    Q  => bAnwesenheit_4_Beleuchtung_1);
+
+(* FBD Network 31 *)
+TON[42](
+    IN := bAnwesenheit_Tag_4_aktivieren,
+    PT := T#140m);
+TP[42](
+    IN := TON[42].Q,
+    PT := T#215m,
+    Q  => bAnwesenheit_4_Beleuchtung_2);
+
+(* FBD Network 32 *)
+TON[43](
+    IN := bAnwesenheit_Tag_4_aktivieren,
+    PT := T#160m);
+TP[43](
+    IN := TON[43].Q,
+    PT := T#185m,
+    Q  => bAnwesenheit_4_Beleuchtung_3);
+
+(* FBD Network 33 *)
+TON[44](
+    IN := bAnwesenheit_Tag_4_aktivieren,
+    PT := T#43m);
+TP[44](
+    IN := TON[44].Q,
+    PT := T#150m,
+    Q  => bAnwesenheit_4_Beleuchtung_4);
+
+(* FBD Network 34 *)
+TON[45](
+    IN := bAnwesenheit_Tag_4_aktivieren,
+    PT := T#205m);
+TP[45](
+    IN := TON[45].Q,
+    PT := T#150m,
+    Q  => bAnwesenheit_4_Beleuchtung_5);
+
+(* FBD Network 35 *)
+
+(* FBD Network 36 *)
+
+(* FBD Network 37 *)
+TON[51](
+    IN := bAnwesenheit_Tag_5_aktivieren,
+    PT := T#160m,
+    Q  => bAnwesenheit_5_Beleuchtung_1);
+
+(* FBD Network 38 *)
+TON[52](
+    IN := bAnwesenheit_Tag_5_aktivieren,
+    PT := T#60m);
+TP[52](
+    IN := TON[52].Q,
+    PT := T#120m,
+    Q  => bAnwesenheit_5_Beleuchtung_2);
+
+(* FBD Network 39 *)
+TON[53](
+    IN := bAnwesenheit_Tag_5_aktivieren,
+    PT := T#100m);
+TP[53](
+    IN := TON[53].Q,
+    PT := T#40m,
+    Q  => bAnwesenheit_5_Beleuchtung_3);
+
+(* FBD Network 40 *)
+TON[54](
+    IN := bAnwesenheit_Tag_5_aktivieren,
+    PT := T#220m);
+TP[54](
+    IN := TON[54].Q,
+    PT := T#180m,
+    Q  => bAnwesenheit_5_Beleuchtung_4);
+
+(* FBD Network 41 *)
+TON[55](
+    IN := bAnwesenheit_Tag_5_aktivieren,
+    PT := T#250m);
+TP[55](
+    IN := TON[55].Q,
+    PT := T#95m,
+    Q  => bAnwesenheit_5_Beleuchtung_5);
+
+(* FBD Network 42 *)
+
+(* FBD Network 43 *)
+gbLeuchte_1_einschalten := bAnwesenheit_1_Beleuchtung_1 OR bAnwesenheit_2_Beleuchtung_1 OR bAnwesenheit_3_Beleuchtung_1 OR bAnwesenheit_4_Beleuchtung_1 OR bAnwesenheit_5_Beleuchtung_1;
+
+(* FBD Network 44 *)
+gbLeuchte_2_einschalten := bAnwesenheit_1_Beleuchtung_2 OR bAnwesenheit_2_Beleuchtung_2 OR bAnwesenheit_3_Beleuchtung_2 OR bAnwesenheit_4_Beleuchtung_2 OR bAnwesenheit_5_Beleuchtung_2;
+
+(* FBD Network 45 *)
+gbLeuchte_3_einschalten := bAnwesenheit_1_Beleuchtung_3 OR bAnwesenheit_2_Beleuchtung_3 OR bAnwesenheit_3_Beleuchtung_3 OR bAnwesenheit_4_Beleuchtung_3 OR bAnwesenheit_5_Beleuchtung_3;
+
+(* FBD Network 46 *)
+gbLeuchte_4_einschalten := bAnwesenheit_1_Beleuchtung_4 OR bAnwesenheit_2_Beleuchtung_4 OR bAnwesenheit_3_Beleuchtung_4 OR bAnwesenheit_4_Beleuchtung_4 OR bAnwesenheit_5_Beleuchtung_4;
+
+(* FBD Network 47 *)
+gbLeuchte_5_einschalten := bAnwesenheit_1_Beleuchtung_5 OR bAnwesenheit_2_Beleuchtung_5 OR bAnwesenheit_3_Beleuchtung_5 OR bAnwesenheit_4_Beleuchtung_5 OR bAnwesenheit_5_Beleuchtung_5;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

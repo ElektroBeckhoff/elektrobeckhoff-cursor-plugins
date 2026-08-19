@@ -1,5 +1,5 @@
 """
-Tests for twincat_unified_migrator.py
+Tests for migrator.router (auto-detect FBD/CFC)
 
 Covers: type-detection routing, mixed-folder batch, error isolation,
 shared backup directory, combined report, CLI parameters, single-file
@@ -15,10 +15,8 @@ from pathlib import Path
 
 import pytest
 
-import twincat_unified_migrator as U
-from twincat_migrator_base import (
-    MigrationConfig, MigrationLogger, MigrationReport, load_file,
-)
+import migrator.router as U
+from migrator import MigrationConfig, MigrationLogger, MigrationReport, load_file
 from server import twincat_migrate
 
 
@@ -358,7 +356,7 @@ class TestReport:
         report = MigrationReport(False, tmp_path)
         cfg = MigrationConfig(input_path=str(d), dry_run=True)
 
-        from twincat_migrator_base import collect_input_files
+        from migrator import collect_input_files
         files = collect_input_files(cfg)
         for f in files:
             U.process_file(f, cfg, mlog, report)

@@ -1,0 +1,122 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.12">
+  <POU Name="FB_SunblindSwitch" Id="{436f5a44-af62-4093-bead-01c6c0938387}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SunblindSwitch
+VAR_INPUT
+	bEn        : BOOL;
+	bUp        : BOOL;
+	bDwn       : BOOL;
+	bPos_steht : BOOL;
+	bSet_Angle : BOOL;
+	nSlid_Pos  : INT;
+	nSlid_Angl : INT;
+	uiSwiOvrTi : UDINT;
+END_VAR
+VAR_OUTPUT
+	st_SunBld : ST_BA_SunBld;
+END_VAR
+VAR_IN_OUT
+	bClicked : BOOL;
+END_VAR
+VAR
+	TON_Halten          : TON;
+	SR                  : SR;
+	TON_Dwn_Reset       : TON;
+	FB_Value_Change     : FB_Value_Change;
+	FB_Value_Change2    : FB_Value_Change;
+	FB_Value_Write      : FB_Value_Write;
+	FB_Value_Write2     : FB_Value_Write;
+	FB_Value_Change_Hys : FB_Value_Change_Hys;
+	FB_Reset            : FB_Reset;
+	SR2                 : SR;
+	TON_Halten2         : TON;
+	TON_Up_Reset        : TON;
+	tSwiOvrTi           : TIME;
+
+	SR_ManMod                 : SR;
+	TON_Reset_Selbe_Taste_Dwn : TON;
+	TON_Reset_Selbe_Taste_Up  : TON;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* ============================================================================
+   AUTO-GENERATED from CFC by migrator.cfc
+   Source:           cfc_FB_SunblindSwitch.TcPOU
+   Version:          1.0.0
+   Date:             2026-08-19 13:29:26
+   Accuracy:         100.00 %
+
+   WARNING: This code was automatically converted from a CFC implementation.
+   Statement order is derived from the execution order stored in the XML.
+   MANUAL VERIFICATION REQUIRED before productive use.
+   ============================================================================ *)
+
+(* CFC Exec Order: 0 — FB_Value_Change_Hys *)
+FB_Value_Change_Hys(nValue := nSlid_Pos, nHys := 4);
+
+(* CFC Exec Order: 1 — FB_Value_Write *)
+FB_Value_Write(bOn := FB_Value_Change_Hys.bChanged, nInput := nSlid_Pos);
+
+(* CFC Exec Order: 2 — => st_SunBld.lrPos *)
+st_SunBld.lrPos := FB_Value_Write.lrOutput;
+
+(* CFC Exec Order: 4 — FB_Value_Write2 *)
+FB_Value_Write2(bOn := bPos_steht OR bSet_Angle, nInput := nSlid_Angl);
+
+(* CFC Exec Order: 5 — => st_SunBld.lrAngl *)
+st_SunBld.lrAngl := FB_Value_Write2.lrOutput;
+
+(* CFC Exec Order: 6 — => st_SunBld.bActv *)
+st_SunBld.bActv := bEn;
+
+(* CFC Exec Order: 7 — FB_Reset *)
+FB_Reset(bInput := bClicked);
+
+(* CFC Exec Order: 9 — TON_Halten *)
+TON_Halten(IN := bDwn AND NOT SR.Q1, PT := tSwiOvrTi);
+
+(* CFC Exec Order: 10 — FB_Value_Change *)
+FB_Value_Change(nValue := nSlid_Pos);
+
+(* CFC Exec Order: 11 — FB_Value_Change2 *)
+FB_Value_Change2(nValue := nSlid_Angl);
+
+(* CFC Exec Order: 15 — TON_Dwn_Reset *)
+TON_Dwn_Reset(IN := SR.Q1, PT := t#80s);
+
+(* CFC Exec Order: 16 — TON_Reset_Selbe_Taste_Dwn *)
+TON_Reset_Selbe_Taste_Dwn(IN := SR.Q1, PT := t#1s);
+
+(* CFC Exec Order: 19 — SR *)
+SR(SET1 := TON_Halten.Q, RESET := (bClicked OR (FB_Value_Change.bChanged OR FB_Value_Change2.bChanged)) OR TON_Dwn_Reset.Q OR bUp OR (bDwn AND TON_Reset_Selbe_Taste_Dwn.Q));
+
+(* CFC Exec Order: 21 — => st_SunBld.bManDwn *)
+st_SunBld.bManDwn := SEL(bDwn, SR.Q1, TRUE);
+
+(* CFC Exec Order: 23 — TON_Halten2 *)
+TON_Halten2(IN := bUp AND NOT SR2.Q1, PT := tSwiOvrTi);
+
+(* CFC Exec Order: 25 — TON_Up_Reset *)
+TON_Up_Reset(IN := SR.Q1, PT := t#80s);
+
+(* CFC Exec Order: 26 — TON_Reset_Selbe_Taste_Up *)
+TON_Reset_Selbe_Taste_Up(IN := SR2.Q1, PT := t#1s);
+
+(* CFC Exec Order: 29 — SR2 *)
+SR2(SET1 := TON_Halten2.Q, RESET := (bClicked OR (FB_Value_Change.bChanged OR FB_Value_Change2.bChanged)) OR TON_Up_Reset.Q OR bDwn OR (bUp AND TON_Reset_Selbe_Taste_Up.Q));
+
+(* CFC Exec Order: 31 — => st_SunBld.bManUp *)
+st_SunBld.bManUp := SEL(bUp, SR2.Q1, TRUE);
+
+(* CFC Exec Order: 33 — SR_ManMod *)
+SR_ManMod(SET1 := SEL(bDwn, SR.Q1, TRUE) OR SEL(bUp, SR2.Q1, TRUE), RESET := NOT bEn OR bClicked);
+
+(* CFC Exec Order: 34 — => st_SunBld.bManMod *)
+st_SunBld.bManMod := SR_ManMod.Q1;
+
+(* CFC Exec Order: 36 — => tSwiOvrTi *)
+tSwiOvrTi := UDINT_TO_TIME(uiSwiOvrTi);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

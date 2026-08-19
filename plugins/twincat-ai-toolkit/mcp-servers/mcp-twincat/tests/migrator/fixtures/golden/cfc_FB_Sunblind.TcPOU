@@ -1,0 +1,165 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="FB_Sunblind" Id="{02b3de1a-be3c-49a1-85d3-da39b4331585}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sunblind
+VAR_INPUT
+	nFassade               : INT;
+	bPraesenz_Nachlauf     : BOOL;
+	bTaster_Up             : BOOL;
+	bTaster_Down           : BOOL;
+	bSetPos                : BOOL;
+	nPosValue              : INT;
+	bSetAngl               : BOOL;
+	nAnglValue             : INT;
+	bEnable_SunPrtc_Thermo : BOOL;
+	bEMA_Mode              : BOOL;
+	rTemp_Ist              : REAL;
+	rTemp_Soll             : REAL;
+	rTemp_Hys              : REAL;
+END_VAR
+
+VAR_OUTPUT
+	bRaff_Up     : BOOL;
+	bRaff_Down   : BOOL;
+	lrRaff_Pos   : LREAL;
+	lrRaff_Angle : LREAL;
+	sModus       : STRING;
+	bRaff_ManMod : BOOL;
+END_VAR
+VAR
+	FB_BA_SunPrtc        : FB_BA_SunPrtc;
+	FB_BA_SunBldWthrPrtc : FB_BA_SunBldWthrPrtc;
+	FB_BA_SunBldPrioSwi8 : FB_BA_SunBldPrioSwi8;
+	FB_ManSwitch         : FB_ManSwitch;
+	FB_Abgleich_Raff     : FB_Abgleich_Raff;
+	FB_EB_SunBldSwi      : FB_EB_SunBldSwi;
+	FB_BA_SunBldActr     : FB_BA_SunBldActr;
+	FB_BA_BrtnsHysDly    : FB_BA_BrtnsHysDly;
+	FB_EMA               : FB_EMA;
+	FB_Thermo            : FB_Thermo;
+	FB_FassadenCheck     : FB_FassadenCheck;
+	FB_Prio_Auswertung   : FB_Prio_Auswertung;
+
+	nRaffPos     : INT;
+	nRaffAngl    : INT;
+	bClicked     : BOOL;
+	FB_Set_Value : FB_Set_Value;
+
+	TON_Man      : TON;
+	FB_LIGHT_Man : FB_LIGHT;
+	TP_Up        : TP;
+	TP_Down      : TP;
+	F_TRIG       : F_TRIG;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* ============================================================================
+   AUTO-GENERATED from CFC by migrator.cfc
+   Source:           cfc_FB_Sunblind.TcPOU
+   Version:          1.0.0
+   Date:             2026-08-19 13:29:26
+   Accuracy:         100.00 %
+
+   WARNING: This code was automatically converted from a CFC implementation.
+   Statement order is derived from the execution order stored in the XML.
+   MANUAL VERIFICATION REQUIRED before productive use.
+   ============================================================================ *)
+
+(* CFC Exec Order: 3 — FB_EMA *)
+FB_EMA(bEMA := bEMA_Scharf AND bEMA_Mode);
+
+(* CFC Exec Order: 4 — F_TRIG *)
+F_TRIG(CLK := bRaffstore_Sperrung);
+
+(* CFC Exec Order: 6 — FB_ManSwitch *)
+FB_ManSwitch(bTaster_Up := bTaster_Up OR bRaff_Zentral_EMA_Auf, bTaster_Down := bTaster_Down OR bRaff_Zentral_Runter, bSlider_Clicked := bClicked, bReset := F_TRIG.Q OR bRaff_Zentral_Reset);
+
+(* CFC Exec Order: 7 — FB_Abgleich_Raff *)
+FB_Abgleich_Raff(
+        lrActualPos         := FB_BA_SunBldActr.lrActlPos,
+        lrActualAngle       := FB_BA_SunBldActr.lrActlAngl,
+        st_SunBld_Stellwert := FB_BA_SunBldPrioSwi8.stSunBld,
+        nRaff_Pos           := nRaffPos,
+        nRaff_Angle         := nRaffAngl);
+
+(* CFC Exec Order: 8 — FB_EB_SunBldSwi *)
+FB_EB_SunBldSwi(
+        bEn        := FB_ManSwitch.bManMod_Enable,
+        bUp        := FB_ManSwitch.bRaff_Up,
+        bDwn       := FB_ManSwitch.bRaff_Down,
+        bPos_steht := FB_Abgleich_Raff.bPos_steht,
+        bSet_Angle := FB_Abgleich_Raff.bSet_Angle,
+        bClicked   := bClicked,
+        nSlid_Pos  := nRaffPos,
+        nSlid_Angl := nRaffAngl,
+        uiSwiOvrTi := st_SonnenschutzConfig.ui_SwitchOverTime);
+
+(* CFC Exec Order: 9 — FB_FassadenCheck *)
+FB_FassadenCheck(nFassade := nFassade);
+
+(* CFC Exec Order: 11 — FB_Thermo *)
+FB_Thermo(
+        bEnable          := FB_FassadenCheck.bSunBld_Enable AND st_SonnenschutzConfig.bThermoautomatik_Enable AND bEnable_SunPrtc_Thermo,
+        nFassade         := nFassade,
+        rTemperatur_Ist  := rTemp_Ist,
+        rTemperatur_Soll := rTemp_Soll,
+        rHysterese       := rTemp_Hys);
+
+(* CFC Exec Order: 12 — FB_BA_SunBldPrioSwi8 *)
+FB_BA_SunBldPrioSwi8(
+        stSunBld_Prio1 := FB_Raffstore_Global.FB_BA_SunBldWthrPrtc.stSunbld,
+        stSunBld_Prio2 := FB_EMA.ST_BA_SunBld,
+        stSunBld_Prio3 := FB_EB_SunBldSwi.st_SunBld,
+        stSunBld_Prio4 := FB_Thermo.ST_BA_SunBld,
+        stSunBld_Prio5 := (* unconnected *),
+        stSunBld_Prio6 := (* unconnected *),
+        stSunBld_Prio7 := (* unconnected *),
+        stSunBld_Prio8 := (* unconnected *));
+
+(* CFC Exec Order: 13 — FB_BA_SunBldActr *)
+FB_BA_SunBldActr(
+        bEn            := st_SonnenschutzConfig.bSunBld_Enable,
+        stSunbld       := FB_BA_SunBldPrioSwi8.stSunbld,
+        udiTiUp        := st_SonnenschutzConfig.uiRaffstore_TotalTimeUp,
+        udiTiDwn       := st_SonnenschutzConfig.uiRaffstore_TotalTimeDown,
+        udiTurnTiUp    := st_SonnenschutzConfig.uiTurningTimeUp,
+        udiTurnTiDwn   := st_SonnenschutzConfig.uiTurningTimeUp,
+        udiBckLshTiUp  := st_SonnenschutzConfig.uiBacklashTimeUp,
+        udiBckLshTiDwn := st_SonnenschutzConfig.uiBacklashTimeDown,
+        lrAnglLmtUp    := st_SonnenschutzConfig.iAngleLimitUp,
+        lrAnglLmtDwn   := st_SonnenschutzConfig.iAngleLimitDown);
+
+(* CFC Exec Order: 14 — => bRaff_Up *)
+bRaff_Up := FB_BA_SunBldActr.bUp;
+
+(* CFC Exec Order: 15 — => bRaff_Down *)
+bRaff_Down := FB_BA_SunBldActr.bDwn;
+
+(* CFC Exec Order: 16 — => lrRaff_Pos *)
+lrRaff_Pos := FB_BA_SunBldActr.lrActlPos;
+
+(* CFC Exec Order: 17 — => lrRaff_Angle *)
+lrRaff_Angle := FB_BA_SunBldActr.lrActlAngl;
+
+(* CFC Exec Order: 18 — FB_Prio_Auswertung *)
+FB_Prio_Auswertung(udiPrioritaet := FB_BA_SunBldPrioSwi8.udiActvPrio);
+
+(* CFC Exec Order: 19 — => sModus *)
+sModus := FB_Prio_Auswertung.sModus;
+
+(* CFC Exec Order: 21 — => bRaff_ManMod *)
+bRaff_ManMod := (FB_BA_SunBldPrioSwi8.udiActvPrio = 3);
+
+(* CFC Exec Order: 22 — FB_Set_Value *)
+FB_Set_Value(
+        bSetPos     := bSetPos,
+        nPosValue   := nPosValue,
+        bSetAngl    := bSetAngl,
+        nAnglValue  := nAnglValue,
+        nRaff_Pos   := nRaffPos,
+        nRaff_Angle := nRaffAngl,
+        bClicked    := bClicked);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

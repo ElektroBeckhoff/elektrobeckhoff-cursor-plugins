@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.7">
+  <POU Name="FB_FacadeCheck" Id="{01fbd164-cf6c-4b2b-9709-583bc2948adb}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_FacadeCheck
+VAR_INPUT
+	nFassade : INT;
+END_VAR
+VAR_OUTPUT
+	bSunBld_Enable          : BOOL;
+	lrFassaden_Orientierung : LREAL;
+END_VAR
+VAR
+END_VAR
+// lrFacadeOrientation_Nord
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* ============================================================================
+   AUTO-GENERATED from CFC by migrator.cfc
+   Source:           cfc_FB_FacadeCheck.TcPOU
+   Version:          1.0.0
+   Date:             2026-08-19 13:29:26
+   Accuracy:         100.00 %
+
+   WARNING: This code was automatically converted from a CFC implementation.
+   Statement order is derived from the execution order stored in the XML.
+   MANUAL VERIFICATION REQUIRED before productive use.
+   ============================================================================ *)
+
+(* CFC Exec Order: 9 — => bSunBld_Enable *)
+bSunBld_Enable := ((nFassade = 1) AND bPruefung_Range_Nord) OR ((nFassade = 2) AND bPruefung_Range_Ost) OR ((nFassade = 3) AND bPruefung_Range_Sued) OR ((nFassade = 4) AND bPruefung_Range_West);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
