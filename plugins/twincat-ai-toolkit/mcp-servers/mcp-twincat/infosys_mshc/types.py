@@ -38,6 +38,9 @@ class DocEntry:
     type: str
     component: str
     path: str
+    library: str = ""
+    parent: str = ""
+    qualified_name: str = ""
     description: str = ""
 
     def to_dict(self) -> Dict[str, str]:
@@ -46,6 +49,9 @@ class DocEntry:
             "type": self.type,
             "component": self.component,
             "path": self.path,
+            "library": self.library,
+            "parent": self.parent,
+            "qualified_name": self.qualified_name,
             "description": self.description,
         }
 
@@ -59,6 +65,9 @@ class SearchResultItem:
     component: str
     path: str
     score: int
+    library: str = ""
+    parent: str = ""
+    qualified_name: str = ""
     description: str = ""
     snippet: str = ""
 
@@ -70,6 +79,12 @@ class SearchResultItem:
             "path": self.path,
             "score": self.score,
         }
+        if self.library:
+            d["library"] = self.library
+        if self.parent:
+            d["parent"] = self.parent
+        if self.qualified_name:
+            d["qualified_name"] = self.qualified_name
         if self.description:
             d["description"] = self.description
         if self.snippet:
@@ -107,6 +122,9 @@ class PageResult:
     component: str
     type: str
     path: str
+    library: str = ""
+    parent: str = ""
+    qualified_name: str = ""
     description: str = ""
     syntax: str = ""
     inputs: List[ParamItem] = field(default_factory=list)
@@ -115,6 +133,13 @@ class PageResult:
     methods: List[MethodItem] = field(default_factory=list)
     requirements: Dict[str, str] = field(default_factory=dict)
     full_text: str = ""
+    truncated: bool = False
+    full_text_included: bool = False
+    total_full_text_chars: int = 0
+    methods_total: int = 0
+    methods_shown: int = 0
+    params_total: int = 0
+    params_shown: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         res: Dict[str, Any] = {
@@ -122,9 +147,16 @@ class PageResult:
             "component": self.component,
             "type": self.type,
             "path": self.path,
-            "description": self.description,
-            "syntax": self.syntax,
         }
+        if self.library:
+            res["library"] = self.library
+        if self.parent:
+            res["parent"] = self.parent
+        if self.qualified_name:
+            res["qualified_name"] = self.qualified_name
+        res["description"] = self.description
+        res["syntax"] = self.syntax
+
         if self.inputs:
             res["inputs"] = self.inputs
         if self.outputs:
@@ -136,4 +168,13 @@ class PageResult:
         if self.requirements:
             res["requirements"] = self.requirements
         res["full_text"] = self.full_text
+        res["truncated"] = self.truncated
+        res["full_text_included"] = self.full_text_included
+        res["total_full_text_chars"] = self.total_full_text_chars
+        if self.methods_total > 0:
+            res["methods_total"] = self.methods_total
+            res["methods_shown"] = self.methods_shown
+        if self.params_total > 0:
+            res["params_total"] = self.params_total
+            res["params_shown"] = self.params_shown
         return res

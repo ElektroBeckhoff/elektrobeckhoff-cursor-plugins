@@ -1,6 +1,6 @@
 ---
 name: twincat3-cmd-infosys
-description: Look up Beckhoff TwinCAT3 types/attributes â€” offline MSHC first, web InfoSys only as fallback.
+description: Look up Beckhoff TwinCAT3 types/attributes — offline MSHC first, web InfoSys only as fallback.
 ---
 
 # InfoSys Lookup
@@ -22,6 +22,6 @@ For attribute/pragma questions, also Read:
 
 ## Do
 
-1. Offline MSHC search/read first (`twincat_infosys_mshc_search` / `_read`).
+1. Offline MSHC search/read first (`twincat_infosys_mshc_search` / `_read`). Use `format="markdown"` for compact prompt formatting and `parent`/`library` for method disambiguation.
 2. Web fallback only after 0 offline results.
-3. Return signature, library requirement, and key parameters â€” cite source path/URL.
+3. Return signature, library requirement, and key parameters — cite source path/URL.

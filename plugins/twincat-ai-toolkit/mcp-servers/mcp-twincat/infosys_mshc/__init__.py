@@ -1,17 +1,23 @@
 """Offline InfoSys MSHC search and structured extraction for Beckhoff TwinCAT documentation."""
 
 from infosys_mshc.constants import (
+    DEFAULT_MAX_FULL_TEXT_CHARS,
+    DEFAULT_MAX_METHODS,
+    DEFAULT_MAX_PARAMS,
+    DEFAULT_MAX_RESPONSE_CHARS,
     FTS5_BODY_LIMIT,
     HELPLIB_ROOTS,
     LANG_FOLDER,
     MSHC_PATTERN,
     NOT_INSTALLED_MSG,
     READ_LIMIT,
+    SCHEMA_VERSION,
     SECTION_ALIASES,
     TYPE_PREFIXES,
 )
 from infosys_mshc.html_parser import (
     detect_type,
+    extract_library_and_parent,
     extract_methods,
     extract_requirements,
     extract_syntax,
@@ -21,6 +27,7 @@ from infosys_mshc.html_parser import (
     strip_tags,
 )
 from infosys_mshc.index import InfoSysMshcIndex
+from infosys_mshc.markdown import format_page_markdown, format_search_markdown
 from infosys_mshc.paths import (
     DEFAULT_MSHC_PATH,
     default_mshc_path,
@@ -64,14 +71,22 @@ __all__ = [
     "NOT_INSTALLED_MSG",
     "FTS5_BODY_LIMIT",
     "READ_LIMIT",
+    "SCHEMA_VERSION",
+    "DEFAULT_MAX_FULL_TEXT_CHARS",
+    "DEFAULT_MAX_METHODS",
+    "DEFAULT_MAX_PARAMS",
+    "DEFAULT_MAX_RESPONSE_CHARS",
     "strip_tags",
     "detect_type",
+    "extract_library_and_parent",
     "extract_syntax",
     "split_sections",
     "parse_param_table",
     "extract_methods",
     "extract_requirements",
     "parse_page",
+    "format_search_markdown",
+    "format_page_markdown",
     "fts5_sanitize",
     "score_entry",
     "search_auto",

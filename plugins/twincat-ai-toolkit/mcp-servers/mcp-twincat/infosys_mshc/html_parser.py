@@ -1,9 +1,13 @@
 """HTML parsing and structured content extraction for InfoSys MSHC pages."""
 
 import html
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Tuple
 
 from infosys_mshc.constants import (
+    DEFAULT_MAX_FULL_TEXT_CHARS,
+    DEFAULT_MAX_METHODS,
+    DEFAULT_MAX_PARAMS,
     RE_CODE_BLOCK,
     RE_DESCRIPTION_META,
     RE_DISPLAY_VERSION,
@@ -24,6 +28,7 @@ def strip_tags(text: str) -> str:
     text = text.replace("<br />", "\n").replace("<br/>", "\n").replace("<br>", "\n")
     text = RE_TAG.sub("", text)
     text = html.unescape(text)
+    text = text.replace("\xa0", " ").replace("\u00a0", " ").replace("\u200b", "").replace("\r", "")
     text = RE_MULTI_WS.sub(" ", text)
     lines = [line.strip() for line in text.splitlines()]
     text = "\n".join(lines)
@@ -34,11 +39,59 @@ def strip_tags(text: str) -> str:
 _strip_tags = strip_tags
 
 
-def detect_type(title: str) -> str:
-    """Detect IEC 61131-3 entity type from title prefix (e.g. FB_, ST_, E_)."""
+def detect_type(title: str, description: str = "", syntax: str = "") -> str:
+    """Detect IEC 61131-3 entity type from title, syntax block, or description."""
+    if not title:
+        return "article"
+
     for prefix, type_name in TYPE_PREFIXES.items():
         if title.startswith(prefix):
             return type_name
+
+    t_lower = title.lower().strip()
+    if t_lower.startswith("method ") or t_lower.startswith("methode ") or t_lower.startswith("m_"):
+        return "METHOD"
+    if t_lower.startswith("property ") or t_lower.startswith("eigenschaft ") or t_lower.startswith("p_"):
+        return "PROPERTY"
+    if t_lower.startswith("function block ") or t_lower.startswith("funktionsbaustein ") or t_lower.startswith("fb_"):
+        return "FUNCTION_BLOCK"
+    if t_lower.startswith("function ") or t_lower.startswith("funktion ") or t_lower.startswith("f_"):
+        return "FUNCTION"
+    if t_lower.startswith("interface ") or t_lower.startswith("schnittstelle ") or t_lower.startswith("i_"):
+        return "INTERFACE"
+    if t_lower.startswith("struct ") or t_lower.startswith("structure ") or t_lower.startswith("struktur ") or t_lower.startswith("st_"):
+        return "STRUCT"
+    if t_lower.startswith("enum ") or t_lower.startswith("enumeration ") or t_lower.startswith("aufzählung ") or t_lower.startswith("e_"):
+        return "ENUM"
+    if t_lower.startswith("type ") or t_lower.startswith("datentyp ") or t_lower.startswith("t_"):
+        return "TYPE"
+
+    if syntax:
+        s_upper = syntax.strip().upper()
+        if s_upper.startswith("METHOD "):
+            return "METHOD"
+        if s_upper.startswith("PROPERTY "):
+            return "PROPERTY"
+        if s_upper.startswith("FUNCTION_BLOCK "):
+            return "FUNCTION_BLOCK"
+        if s_upper.startswith("FUNCTION "):
+            return "FUNCTION"
+        if s_upper.startswith("TYPE "):
+            return "TYPE"
+        if s_upper.startswith("INTERFACE "):
+            return "INTERFACE"
+
+    if description:
+        d_lower = description.lower().strip()
+        if d_lower.startswith("this method ") or d_lower.startswith("diese methode "):
+            return "METHOD"
+        if d_lower.startswith("this property ") or d_lower.startswith("diese eigenschaft "):
+            return "PROPERTY"
+        if d_lower.startswith("this function block ") or d_lower.startswith("dieser funktionsbaustein "):
+            return "FUNCTION_BLOCK"
+        if d_lower.startswith("this function ") or d_lower.startswith("diese funktion "):
+            return "FUNCTION"
+
     return "article"
 
 
@@ -104,7 +157,7 @@ def parse_param_table(section_html: str) -> List[Dict[str, str]]:
         name = strip_tags(cells[0]).strip()
         typ = strip_tags(cells[1]).strip()
         desc = strip_tags(cells[2]).strip() if len(cells) > 2 else ""
-        if not name or name.lower() in ("name", "parameter"):
+        if not name or name.lower() in ("name", "parameter", "bezeichnung"):
             continue
         params.append({"name": name, "type": typ, "description": desc})
     return params
@@ -125,7 +178,7 @@ def extract_methods(section_html: str) -> List[Dict[str, str]]:
             continue
         name = strip_tags(cells[0]).strip()
         desc = strip_tags(cells[1]).strip() if len(cells) > 1 else ""
-        if not name or name.lower() in ("name", "method name", "methodenname"):
+        if not name or name.lower() in ("name", "method name", "methodenname", "bezeichnung"):
             continue
         methods.append({"name": name, "description": desc})
     if methods:
@@ -161,9 +214,9 @@ def extract_requirements(section_html: str) -> Dict[str, str]:
             reqs["library"] = val
         elif "twincat" in key and "version" in key:
             reqs["twincat_version"] = val
-        elif "development" in key or "engineering" in key:
+        elif "development" in key or "engineering" in key or "entwicklungsumgebung" in key:
             reqs["development_environment"] = val
-        elif "target" in key:
+        elif "target" in key or "zielplattform" in key:
             reqs["target_platform"] = val
     return reqs
 
@@ -171,14 +224,64 @@ def extract_requirements(section_html: str) -> Dict[str, str]:
 _extract_requirements = extract_requirements
 
 
-def parse_page(raw_html: str, html_path: str) -> Dict[str, Any]:
-    """Parse raw HTML page content into a structured dictionary."""
+def extract_library_and_parent(
+    title: str,
+    display_version: str = "",
+    component: str = "",
+    requirements: Dict[str, str] = None,
+) -> Tuple[str, str, str]:
+    """Extract library, parent symbol, and qualified_name from metadata and title."""
+    reqs = requirements or {}
+    library = ""
+    if reqs.get("library"):
+        library = reqs["library"].strip()
+    elif display_version:
+        library = display_version.split("(", 1)[0].strip()
+    elif component:
+        comp_lower = component.lower()
+        if "tc3_" in comp_lower:
+            idx = comp_lower.find("tc3_")
+            library = "Tc3_" + "".join(word.capitalize() for word in component[idx + 4:].split("_"))
+        elif "tc2_" in comp_lower:
+            idx = comp_lower.find("tc2_")
+            library = "Tc2_" + "".join(word.capitalize() for word in component[idx + 4:].split("_"))
+        else:
+            library = component
+
+    parent = ""
+    if "." in title:
+        parts = title.split(".", 1)
+        parent = parts[0].strip()
+    elif "::" in title:
+        parts = title.split("::", 1)
+        parent = parts[0].strip()
+
+    if parent and library:
+        qualified_name = f"{library}.{parent}.{title.split('.')[-1]}"
+    elif parent:
+        qualified_name = f"{parent}.{title.split('.')[-1]}"
+    elif library and title:
+        qualified_name = f"{library}.{title}"
+    else:
+        qualified_name = title
+
+    return library, parent, qualified_name
+
+
+def parse_page(
+    raw_html: str,
+    html_path: str,
+    include_full_text: bool = True,
+    max_full_text_chars: int = DEFAULT_MAX_FULL_TEXT_CHARS,
+    max_methods: int = DEFAULT_MAX_METHODS,
+    max_params: int = DEFAULT_MAX_PARAMS,
+) -> Dict[str, Any]:
+    """Parse raw HTML page content into a structured dictionary with token budget limits."""
     parts = html_path.split("/")
     component = parts[0] if len(parts) > 1 else ""
 
     title_m = RE_TITLE.search(raw_html)
     title = html.unescape(title_m.group(1)).strip() if title_m else ""
-    sym_type = detect_type(title)
 
     desc_m = RE_DESCRIPTION_META.search(raw_html)
     description = html.unescape(desc_m.group(1)).strip() if desc_m else ""
@@ -189,6 +292,7 @@ def parse_page(raw_html: str, html_path: str) -> Dict[str, Any]:
     )
 
     syntax = extract_syntax(raw_html)
+    sym_type = detect_type(title, description=description, syntax=syntax)
     sections = split_sections(raw_html)
 
     inputs = parse_param_table(sections.get("inputs", ""))
@@ -211,13 +315,57 @@ def parse_page(raw_html: str, html_path: str) -> Dict[str, Any]:
         if len(req_parts) > 1:
             requirements["twincat_version"] = req_parts[1].rstrip(")")
 
-    full_text = strip_tags(raw_html)
+    library, parent, qualified_name = extract_library_and_parent(
+        title, display_version, component, requirements
+    )
+
+    # Token & item limits
+    truncated = False
+    methods_total = len(methods)
+    methods_shown = methods_total
+    if methods_total > max_methods:
+        methods = methods[:max_methods]
+        methods_shown = len(methods)
+        truncated = True
+
+    params_total = len(inputs) + len(outputs) + len(parameters)
+    params_shown = params_total
+    if params_total > max_params:
+        if len(inputs) > max_params:
+            inputs = inputs[:max_params]
+            outputs = []
+            parameters = []
+        elif len(inputs) + len(outputs) > max_params:
+            outputs = outputs[:max_params - len(inputs)]
+            parameters = []
+        else:
+            rem = max_params - (len(inputs) + len(outputs))
+            parameters = parameters[:rem]
+        params_shown = len(inputs) + len(outputs) + len(parameters)
+        truncated = True
+
+    full_text_raw = strip_tags(raw_html)
+    total_full_text_chars = len(full_text_raw)
+
+    if include_full_text:
+        if total_full_text_chars > max_full_text_chars:
+            full_text = full_text_raw[:max_full_text_chars] + "\n... [truncated]"
+            truncated = True
+        else:
+            full_text = full_text_raw
+        full_text_included = True
+    else:
+        full_text = ""
+        full_text_included = False
 
     result: Dict[str, Any] = {
         "title": title,
         "component": component,
         "type": sym_type,
         "path": html_path,
+        "library": library,
+        "parent": parent,
+        "qualified_name": qualified_name,
         "description": description,
         "syntax": syntax,
     }
@@ -232,6 +380,16 @@ def parse_page(raw_html: str, html_path: str) -> Dict[str, Any]:
     if requirements:
         result["requirements"] = requirements
     result["full_text"] = full_text
+    result["truncated"] = truncated
+    result["full_text_included"] = full_text_included
+    result["total_full_text_chars"] = total_full_text_chars
+    if methods_total > 0:
+        result["methods_total"] = methods_total
+        result["methods_shown"] = methods_shown
+    if params_total > 0:
+        result["params_total"] = params_total
+        result["params_shown"] = params_shown
+
     return result
 
 

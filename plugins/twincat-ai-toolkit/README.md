@@ -11,7 +11,7 @@ AI rules, skills, commands, agents, and MCP build/runtime tools for **Beckhoff T
 | **Skills** (`skills/`) | Executable workflows; domain detail in `*-patterns.md` / `references/` |
 | **Commands** (`commands/`) | Slash entry points (`/twincat3-cmd-*`) with ordered Read-first lists |
 | **Agents** (`agents/`) | Specialized readonly subagents (review, audit, debug, …) |
-| **MCP** (`mcp-servers/mcp-twincat/`) | TcXaeShell COM automation + offline InfoSys `.mshc` (44 tools) |
+| **MCP** (`mcp-servers/mcp-twincat/`) | TcXaeShell COM automation + offline InfoSys `.mshc` (51 tools) |
 
 ### Token / load design
 
@@ -80,6 +80,8 @@ Coding rules applied automatically or on request (`rules/`).
 | `twincat3-mcp-build` | MCP build tools, validation, session, export scope, async export/format | — | — |
 | `twincat3-mcp-runtime` | UmRT / activate / runtime messages / ADS readiness and server IDs | — | — |
 | `twincat3-mcp-stweep` | STweep install/license gates; format file/folder vs project confirm | — | — |
+| `twincat3-mcp-format` | Python ST formatter MCP tools (`twincat_format_*`); no XAE | — | — |
+| `twincat3-mcp-autodocs` | Autodocs path contract: solution folder → repo root; `twincat_autodocs` only | — | — |
 | `twincat3-mcp-live-diagnostics` | Live ADS R/W via MCP; when to escalate to Python pyads | — | — |
 | `twincat3-mcp-infosys-mshc` | Offline InfoSys MSHC lookup — when and how to search/read | — | — |
 | `twincat3-migration-safety` | Unified FBD/CFC migration safety (preview-first, backup, TODOs) | — | — |
@@ -119,7 +121,8 @@ On-demand skills (`skills/`). Domain patterns often live in sibling `*-patterns.
 | `twincat3-new-version` | Ship gate orchestrator (see Key workflows) |
 | `twincat3-comment` | One-object comment pass (`(* *)`): FB / STRUCT / ENUM |
 | `twincat3-validate` | MCP CheckAllObjects validation (open → check → fix cycle) |
-| `twincat3-stweep-format` | STweep Format code via MCP (install/license gates) |
+| `twincat3-format` | Python ST formatter via MCP (default — no XAE) |
+| `twincat3-stweep-format` | STweep Format code via MCP (XAE + STweep license) |
 | `twincat3-pagefault-audit` | InfoSys-only page-fault / AV static audit |
 | `twincat3-live-diagnostics` | Live ADS via MCP; Python pyads for timed deep debug |
 | `twincat3-umrt-systemtest` | UmRT E2E: start, activate, runtime messages, ADS smoke |
@@ -127,6 +130,7 @@ On-demand skills (`skills/`). Domain patterns often live in sibling `*-patterns.
 | `twincat3-cfc-migrate` | CFC → ST (analyze, preview, migrate) |
 | `twincat3-migrate` | Unified FBD/CFC migration with auto-detection |
 | `twincat3-plcproj-sync` | PlcProject verify/sync (verify, dry-run, sync, GUID repair) |
+| `twincat3-autodocs` | Markdown API docs — solution folder → repo root (`twincat_autodocs` only) |
 
 ## Commands
 
@@ -137,13 +141,15 @@ Slash commands (`commands/`). Pattern: `twincat3-cmd-<topic>`. Each command list
 | `twincat3-cmd-new-version` | `twincat3-new-version` (+ atomic skills) | Full ship gate |
 | `twincat3-cmd-release` | `twincat3-release` (+ changelog) | User-chosen version + validate + export both |
 | `twincat3-cmd-comment` | `twincat3-comment` | One-object `(* *)` comment pass |
-| `twincat3-cmd-format` | `twincat3-stweep-format` | STweep Format code via MCP |
+| `twincat3-cmd-format` | `twincat3-format` | Python ST formatter via MCP (default) |
+| `twincat3-cmd-stweep-format` | `twincat3-stweep-format` | STweep Format code via MCP (XAE) |
 | `twincat3-cmd-pagefault-audit` | `twincat3-pagefault-audit` | InfoSys-only page-fault / AV audit |
 | `twincat3-cmd-online-test` | `twincat3-umrt-systemtest` | UmRT end-to-end online test |
 | `twincat3-cmd-live-diagnostics` | `twincat3-live-diagnostics` | Live ADS diagnose (PLC already online) |
 | `twincat3-cmd-validate` | `twincat3-validate` | MCP CheckAllObjects validation |
 | `twincat3-cmd-migrate` | `twincat3-migrate` (+ fup/cfc) | FBD/CFC → ST (preview-first) |
 | `twincat3-cmd-plcproj-sync` | `twincat3-plcproj-sync` | Verify/sync `.plcproj` vs disk |
+| `twincat3-cmd-autodocs` | `twincat3-autodocs` | Autodocs only — solution folder → repo root |
 | `twincat3-cmd-commit` | `twincat3-git-commit` | Thematic Conventional Commits (never push) |
 | `twincat3-cmd-changelog` | `twincat3-changelog` | Write `Versions/<ver>/changelog-<ver>.md` |
 | `twincat3-cmd-new-library` | `twincat3-new-library` | New PLC library scaffold |
@@ -174,7 +180,7 @@ Ship gate + comment: skills `twincat3-new-version` and `twincat3-comment` are th
 
 ## MCP Server
 
-Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requires Windows + TwinCAT XAE for XAE-backed tools. **44 tools** total.
+Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requires Windows + TwinCAT XAE for XAE-backed tools. **51 tools** total.
 
 ### Server IDs and discovery
 
@@ -185,7 +191,7 @@ Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requir
 
 - Discover schemas with **`GetMcpTools(server, …)`** — do not read tool JSON files as primary discovery.
 - Use **one** server per turn (avoid DTE/ROT races).
-- Details: rules `twincat3-mcp-build`, `twincat3-mcp-runtime`, `twincat3-mcp-stweep`, `twincat3-mcp-live-diagnostics`, `twincat3-mcp-infosys-mshc`.
+- Details: rules `twincat3-mcp-build`, `twincat3-mcp-runtime`, `twincat3-mcp-stweep`, `twincat3-mcp-format`, `twincat3-mcp-autodocs`, `twincat3-mcp-live-diagnostics`, `twincat3-mcp-infosys-mshc`.
 
 ### Tools by area
 
@@ -193,11 +199,12 @@ Build/runtime automation via TcXaeShell COM (`mcp-servers/mcp-twincat/`). Requir
 |------|-----------------|-------|
 | **Session / build** | `twincat_status`, `twincat_open`, `twincat_reload`, `twincat_check_all_objects`, `twincat_build`, `twincat_get_output_log`, `twincat_close` | Primary validate = CheckAllObjects |
 | **Export (async)** | `twincat_export_library`, `twincat_export_progress`, `twincat_export_check_artifacts` | Default `wait=false`; after `-32001` poll then disk-check before re-export |
-| **STweep format** | `twincat_stweep_status`, `twincat_format_code`, `twincat_format_progress`, `twincat_format_cancel` | Default `wait=false`; poll progress; dismiss reload dialogs via `twincat_dismiss_safe_dialogs` |
+| **STweep format (XAE)** | `twincat_stweep_status`, `twincat_stweep_format`, `twincat_stweep_format_progress`, `twincat_stweep_format_cancel` | Requires `twincat_open`; default `wait=false`; poll progress; dismiss reload dialogs via `twincat_dismiss_safe_dialogs` |
+| **Python format (no XAE)** | `twincat_format`, `twincat_format_progress`, `twincat_format_validate`, `twincat_format_config` | File-based; default formatter; also `python -m formatter` CLI |
 | **Target / activate** | `twincat_get_target`, `twincat_set_target`, `twincat_activate`, `twincat_start`, `twincat_task_*`, `twincat_io_*` | See `twincat3-mcp-runtime` |
 | **UmRT / PLC / messages** | `twincat_umrt_*`, `twincat_runtime_state`, `twincat_set_runtime_mode`, `twincat_plc_*`, `twincat_runtime_messages`, `twincat_verify_library_on_target`, `twincat_umrt_e2e` | Online-test path |
 | **ADS** | `twincat_ads_symbols`, `twincat_ads_read`, `twincat_ads_read_list`, `twincat_ads_write`, `twincat_ads_write_list` | Live-diagnostics path; writes need `confirm` |
-| **No XAE** | `twincat_plcproj_info`, `twincat_plcproj_verify`, `twincat_plcproj_sync`, `twincat_fup_migrate`, `twincat_cfc_migrate`, `twincat_migrate`, `twincat_infosys_mshc_search`, `twincat_infosys_mshc_read` | Disk / offline docs |
+| **No XAE** | `twincat_plcproj_info`, `twincat_plcproj_verify`, `twincat_plcproj_sync`, `twincat_fup_migrate`, `twincat_cfc_migrate`, `twincat_migrate`, `twincat_autodocs`, `twincat_infosys_mshc_search`, `twincat_infosys_mshc_read` | Disk / offline docs |
 
 **Export scope:** ship gate / release → both `.library` + `.compiled-library`. Online-test (if export needed) → `.library` only (`compiled_library=false`).
 
@@ -225,6 +232,49 @@ Common flags: `--dry-run`, `--analyze-only`, `--swap`, `--force`, `--recursive`,
 MCP equivalents (same backend): `twincat_fup_migrate`, `twincat_cfc_migrate`, `twincat_migrate`. Full flag reference: skills `twincat3-fup-migrate`, `twincat3-cfc-migrate`, `twincat3-migrate` → `cli-reference.md`.
 
 Migrates `.TcPOU` with NWL/CFC implementation only — not `.TcIO` (interfaces are declaration-only; code lives in implementing FBs).
+
+### Direct CLI (Python formatter, no XAE)
+
+From `mcp-servers/mcp-twincat/`:
+
+```bash
+cd plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+python -m formatter POUs/ --recursive
+python -m formatter FB_MyBlock.TcPOU --dry-run
+```
+
+MCP equivalents: `twincat_format`, `twincat_format_validate`, `twincat_format_config`. Command: `/twincat3-cmd-format`. Skill: `twincat3-format`.
+
+STweep (XAE): `/twincat3-cmd-stweep-format` → `twincat_stweep_format`, etc.
+
+### Direct CLI (autodocs, no XAE)
+
+Generate Markdown API docs from TwinCAT source (`.TcPOU`, `.TcDUT`, `.TcGVL`, `.TcIO`):
+
+```bash
+cd plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+python -m autodocs --input "C:/Project/<LibName>"
+# optional override: --output "C:/Project"
+```
+
+Writes `<repo-root>/docs/` (mirrored `.md` files), updates `README.md` TOC block and `docs/toc.md`.
+
+**Library repo contract:** `input` = `<repo-root>/<LibName>/` (solution folder). `output` optional — default auto-detects `<repo-root>` (README/.git walk). Docs always in `<repo-root>/docs/`. See rule `twincat3-mcp-autodocs`.
+
+MCP: `twincat_autodocs(input="<repo-root>/<LibName>")` — `output` optional. Command: `/twincat3-cmd-autodocs`. Skill: `twincat3-autodocs`.
+
+### Direct CLI (InfoSys MSHC offline docs, no XAE)
+
+Search and read Beckhoff offline documentation (.mshc):
+
+```bash
+cd plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+python -m infosys_mshc --search "FB_JsonDomParser"
+python -m infosys_mshc --search "AddJsonMember" --parent "FB_JsonDomParser" --format markdown
+python -m infosys_mshc --read "tcplclib_tc3_jsonxml/1033/4219231115.html" --format markdown
+```
+
+MCP equivalents: `twincat_infosys_mshc_search`, `twincat_infosys_mshc_read`. Command: `/twincat3-cmd-infosys`. Skill: `twincat3-infosys-mshc`.
 
 ### Requirements
 

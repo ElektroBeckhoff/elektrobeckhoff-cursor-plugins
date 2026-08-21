@@ -14,26 +14,31 @@ alwaysApply: false
 
 ## How to Search
 
-Tool-call shapes, modes (`auto` / `fulltext` / `symbol` / `title`), phrase/prefix examples, and `twincat_infosys_mshc_read` usage → skill `twincat3-infosys-mshc` (`skills/twincat3-infosys-mshc/SKILL.md`).
+Tool-call shapes, modes (`auto` / `fulltext` / `symbol` / `title`), optional filters (`library`, `parent`), formatting (`format="json"|"markdown"`), and `twincat_infosys_mshc_read` usage → skill `twincat3-infosys-mshc` (`skills/twincat3-infosys-mshc/SKILL.md`).
 
 | Situation | Mode / approach |
 |-----------|-----------------|
 | Known type name | default `auto` (`auto_read=true` → one call often enough) |
+| Method/Property with known parent | pass `parent="FB_..."` or `library="Tc3_..."` to disambiguate |
 | Concept known, name unknown | `fulltext` (BM25; all query words) |
 | Partial name | prefix in fulltext (e.g. `FB_Json*`) |
 | Exact phrase | quote the phrase in fulltext |
-| Only typed symbols (no articles) | `symbol` |
+| Only IEC symbols (FB, ST, E, I, F, M, P) | `symbol` |
+| Token-efficient prompt output | default (`format="markdown"`) |
 
 ## Search Strategy for Unknown Types
 
 1. Try the most specific query first (exact name if known)
-2. If 0 results: broaden to description keywords in fulltext mode
-3. If 0 results: try prefix search with type prefix (`FB_*`, `ST_*`, `E_*`)
-4. If still 0 results: fall back to online InfoSys (`twincat3-infosys-lookup` skill)
+2. If disambiguation is needed (e.g. `Reset`, `AddJsonMember`), provide `parent="FB_..."` or `library="..."`
+3. If 0 results: broaden to description keywords in fulltext mode
+4. If 0 results: try prefix search with type prefix (`FB_*`, `ST_*`, `E_*`, `M_*`, `P_*`)
+5. If still 0 results: fall back to online InfoSys (`twincat3-infosys-lookup` skill)
 
-## Fulltext Performance
+## Performance & Token Efficiency
 
 - Title/symbol search: <1ms (in-memory)
-- BM25 fulltext: 1-3ms (SQLite FTS5, pre-built index)
-- First-ever search: ~13s (builds FTS5 DB + JSON cache, persists in %TEMP%)
+- BM25 fulltext: 1-3ms (SQLite FTS5 Schema v2)
+- Page reads: <10ms via persistent ZipFile handle caching
+- Token budget: Structured output without body bloat (<500 tokens), saves >65% context
+- First-ever search: ~13s (builds FTS5 DB in %TEMP%/twincat-mcp-infosys-mshc)
 - Subsequent server restarts: ~0.2s (loads from cached DB)

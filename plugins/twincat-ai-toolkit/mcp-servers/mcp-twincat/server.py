@@ -29,7 +29,7 @@ _server_dir = os.path.dirname(os.path.abspath(__file__))
 if _server_dir not in sys.path:
     sys.path.insert(0, _server_dir)
 for _subdir in (
-    "migrator", "automation_interface", "plcproj", "infosys_mshc", "ads", "umrt",
+    "migrator", "automation_interface", "plcproj", "ads", "umrt",
 ):
     _p = os.path.join(_server_dir, _subdir)
     if _p not in sys.path:
@@ -53,7 +53,12 @@ from migrator.fbd import main as fup_main
 from migrator.cfc import main as cfc_main
 from twincat_plcproj_ops import main as plcproj_main, read_project_info
 from migrator.router import main as unified_main
-from twincat_infosys_mshc import InfoSysMshcIndex, resolve_mshc_path
+from infosys_mshc import (
+    InfoSysMshcIndex,
+    format_page_markdown,
+    format_search_markdown,
+    resolve_mshc_path,
+)
 
 mcp = FastMCP("TwinCAT")
 
@@ -536,7 +541,7 @@ def twincat_get_output_log() -> str:
 
 
 # ================================================================
-#  twincat_stweep_status / twincat_format_code  (STweep via XAE DTE)
+#  STweep format (XAE DTE) — twincat_stweep_* tools
 # ================================================================
 
 @mcp.tool()
@@ -549,13 +554,13 @@ def twincat_stweep_status(probe_license: bool = False) -> str:
       - DTE commands when twincat_open session exists
 
     License: by default NOT opened in the UI. Verified fail-fast on the first
-    twincat_format_code call. Optional probe_license=true opens STweep > License
+    twincat_stweep_format call. Optional probe_license=true opens STweep > License
     wizard briefly (reads STATIC status only; never returns activation keys).
 
     Response: success, installed, version, install_paths[], commands{},
     commands_loaded, dte_attached, license_ok, license_state, license_detail,
     license_days_remain, license_days_total, ready, message,
-    format_progress{} (live job snapshot; also via twincat_format_progress)."""
+    format_progress{} (live job snapshot; also via twincat_stweep_format_progress)."""
 
     try:
         return _json(_get_bridge().get_stweep_status(
@@ -566,10 +571,10 @@ def twincat_stweep_status(probe_license: bool = False) -> str:
 
 
 @mcp.tool()
-def twincat_format_progress() -> str:
+def twincat_stweep_format_progress() -> str:
     """Poll live STweep format job progress (no STA / safe while formatting).
 
-    Use after twincat_format_code(..., wait=false) for large folders/projects.
+    Use after twincat_stweep_format(..., wait=false) for large folders/projects.
     Also works during a blocking wait=true call if the client can poll in parallel.
 
     Response: running, phase (idle|starting|formatting|done|error|canceled),
@@ -583,11 +588,11 @@ def twincat_format_progress() -> str:
 
 
 @mcp.tool()
-def twincat_format_cancel() -> str:
+def twincat_stweep_format_cancel() -> str:
     """Cancel a running multi-file STweep format job.
 
     Sets a cancel flag; the job stops after the current file finishes
-    (does not hard-kill mid-Formatcode). Poll twincat_format_progress until
+    (does not hard-kill mid-Formatcode). Poll twincat_stweep_format_progress until
     running=false / phase=canceled. Safe while STA is busy."""
 
     try:
@@ -597,7 +602,7 @@ def twincat_format_cancel() -> str:
 
 
 @mcp.tool()
-def twincat_format_code(
+def twincat_stweep_format(
     path: str = "",
     recursive: bool = True,
     timeout_seconds: int = 300,
@@ -612,7 +617,7 @@ def twincat_format_code(
     uses PlcFolder/SPSOrdner.Formatcode once. Automation cannot Select SE
     items (UIHierarchyItemMarshaler.Select missing on TcXaeShell), so MCP
     walks files and runs editor Formatcode after OpenFile, then closes the
-    document. Cancel with twincat_format_cancel (between files).
+    document. Cancel with twincat_stweep_format_cancel (between files).
 
     Preflight (same session as twincat_open, no license window):
       - STweep installed on disk
@@ -629,7 +634,7 @@ def twincat_format_code(
       - path to the PLC project root directory (folder containing .plcproj)
 
     wait=false (default): start in background (method=async_started) and poll
-    twincat_format_progress until running=false. wait=true only for short sync
+    twincat_stweep_format_progress until running=false. wait=true only for short sync
     checks; if timeout_seconds>90, wait is coerced to async (Cursor idle -32001).
     Per-file editor Formatcode availability is capped (~8s) then folder fallback
     or fail — never spins for the full job timeout.
@@ -1909,7 +1914,7 @@ def _format_after_migrate(
     analyze_only: bool,
     exit_code: int,
 ) -> dict:
-    """Run twincat_format_st on migration output files.
+    """Run Python formatter on migration output files.
 
     Returns a dict with formatting summary to attach to the migration result.
     Silently returns an empty dict if no formatting is needed or possible.
@@ -2312,6 +2317,117 @@ def twincat_migrate(
     fmt = _format_after_migrate(input, output, swap, force, dry_run, analyze_only, exit_code)
     result.update(fmt)
     return _json(result)
+
+
+# ================================================================
+#  twincat_autodocs  (pure Python -- no COM / no XAE needed)
+# ================================================================
+
+@mcp.tool()
+def twincat_autodocs(
+    input: str,
+    output: str = "",
+    write_log: bool = False,
+    toc_timestamp: bool = False,
+) -> str:
+    """Generate Markdown API docs from TwinCAT source (.TcPOU/.TcDUT/.TcGVL/.TcIO).
+
+    Writes mirrored .md under <output>/docs/, updates README.md TOC block
+    and docs/toc.md. Does not require TcXaeShell.
+
+    Args:
+        input: REQUIRED. Solution folder (or repo root) containing TwinCAT sources.
+        output: Optional repo/project root. Default: auto-detect from input
+            (walk up for README.md / .git, else parent of input). Docs always
+            land in <resolved-root>/docs/."""
+
+    from pathlib import Path
+
+    from autodocs.paths import resolve_output_root
+    from autodocs.pipeline import process_folder
+
+    input_path = Path(input)
+
+    if not input_path.exists():
+        return _json({
+            "success": False,
+            "error": f"Input path does not exist: {input}",
+            "files_created": [],
+            "skipped_hidden": 0,
+            "errors": 1,
+            "duration_sec": 0.0,
+            "output": "",
+            "repo_root": "",
+            "log": "",
+        })
+    if not input_path.is_dir():
+        return _json({
+            "success": False,
+            "error": f"Input path is not a directory: {input}",
+            "files_created": [],
+            "skipped_hidden": 0,
+            "errors": 1,
+            "duration_sec": 0.0,
+            "output": "",
+            "repo_root": "",
+            "log": "",
+        })
+
+    try:
+        output_path = resolve_output_root(input_path, output or None)
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "error": str(exc),
+            "files_created": [],
+            "skipped_hidden": 0,
+            "errors": 1,
+            "duration_sec": 0.0,
+            "output": "",
+            "repo_root": "",
+            "log": "",
+        })
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    repo_root = str(output_path)
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            report = process_folder(
+                input_path,
+                output_path,
+                verbose=True,
+                write_log=write_log,
+                include_toc_timestamp=toc_timestamp,
+            )
+    except Exception as exc:
+        return _json({
+            "success": False,
+            "error": str(exc),
+            "files_created": [],
+            "skipped_hidden": 0,
+            "errors": 1,
+            "duration_sec": 0.0,
+            "output": "",
+            "repo_root": repo_root,
+            "log": buf.getvalue(),
+        })
+
+    log_text = buf.getvalue()
+    if report.log_lines:
+        log_text = "\n".join(report.log_lines)
+
+    return _json({
+        "success": report.success,
+        "files_created": report.files_created,
+        "skipped_hidden": report.skipped_hidden,
+        "errors": report.errors,
+        "duration_sec": report.duration_sec,
+        "output": report.output,
+        "repo_root": repo_root,
+        "log": log_text,
+    })
 
 
 # ================================================================
@@ -2731,11 +2847,14 @@ def twincat_infosys_mshc_search(
     limit: int = 10,
     mode: str = "auto",
     auto_read: bool = True,
+    library: str = "",
+    parent: str = "",
+    format: str = "markdown",
 ) -> str:
     """Search the local Beckhoff InfoSys offline documentation (.mshc).
 
     Searches the locally installed TwinCAT 3 documentation archive
-    (~55k pages) for FB_, ST_, E_, I_, F_ symbols, articles, attributes,
+    (~55k pages) for FB_, ST_, E_, I_, F_, M_, P_ symbols, articles, attributes,
     and any documentation content.
 
     language: "en" (default) for English docs, "de" for German docs.
@@ -2743,36 +2862,56 @@ def twincat_infosys_mshc_search(
     Modes:
       - auto (default): exact title > prefix > substring > BM25 fulltext
       - title: title-only matching
-      - symbol: title-only, filtered to FB_/ST_/E_/I_/F_ types
+      - symbol: title-only, filtered to IEC symbols (FB, ST, E, I, F, M, P)
       - fulltext: BM25-ranked keyword search (SQLite FTS5), fast (~1-3ms)
 
-    Fulltext supports multi-word queries ("read Modbus input registers"),
-    prefix search ("FB_Json*"), and exact phrases ('"input registers"').
+    Optional filters:
+      - library: filter to a specific library (e.g. "Tc3_JsonXml", "Tc3_IotBase")
+      - parent: filter to a specific parent symbol (e.g. "FB_JsonDomParser")
+
+    Output format:
+      - format: "markdown" (default, token-efficient table/codeblock layout) or "json"
 
     auto_read (default True): When the top result scores 100,
-    automatically reads the full page and includes structured content
-    (syntax, inputs, outputs, methods, requirements) in the response.
+    automatically reads the page structure (syntax, inputs, outputs, methods, requirements)
+    without full text bloat to preserve LLM token budget.
 
     Requires TwinCAT 3 offline documentation installed via
     Help > Add and Remove Help Content in TcXaeShell."""
 
     try:
         idx = _get_infosys_mshc(language, file_path)
-        result = idx.search(query, limit=limit, mode=mode)
-        if (auto_read
-                and result.get("count") >= 1
-                and result["results"][0].get("score") == 100):
+        result = idx.search(
+            query,
+            limit=limit,
+            mode=mode,
+            library=library,
+            parent=parent,
+        )
+        if (
+            auto_read
+            and result.get("count", 0) >= 1
+            and result["results"][0].get("score") == 100
+        ):
             top = result["results"][0]
             try:
-                page = idx.read_page(top["path"])
+                page = idx.read_page(top["path"], include_full_text=False)
                 result["auto_read"] = page
             except Exception:
                 pass
-        return _json(result)
+
+        if format == "json":
+            return _json(result)
+        return format_search_markdown(result)
     except FileNotFoundError as exc:
-        return _json({"success": False, "error": str(exc)})
+        err_code = "MSHC_NOT_INSTALLED" if "not found" in str(exc).lower() else "PAGE_NOT_FOUND"
+        if format == "json":
+            return _json({"success": False, "error_code": err_code, "error": str(exc)})
+        return f"**Error [{err_code}]:** {exc}"
     except Exception as exc:
-        return _json({"success": False, "error": str(exc)})
+        if format == "json":
+            return _json({"success": False, "error_code": "INTERNAL_ERROR", "error": str(exc)})
+        return f"**Error [INTERNAL_ERROR]:** {exc}"
 
 
 @mcp.tool()
@@ -2780,22 +2919,227 @@ def twincat_infosys_mshc_read(
     path: str,
     language: str = "en",
     file_path: str = "",
+    include_full_text: bool = False,
+    format: str = "markdown",
 ) -> str:
     """Read a specific page from the local Beckhoff InfoSys offline documentation (.mshc).
 
-    Returns structured content including title, description, syntax block,
+    Returns structured content including title, library, parent symbol, syntax block,
     VAR_INPUT/VAR_OUTPUT tables, methods list, and requirements.
 
     language: "en" (default) for English docs, "de" for German docs.
+    include_full_text: default False to save tokens (<500 tokens). Set True for full unparsed body.
+    format: "markdown" (default, token-efficient layout) or "json".
 
     Use twincat_infosys_mshc_search first to find the internal path,
-    then pass it here to read the full page content."""
+    then pass it here to read the page content."""
 
     try:
         idx = _get_infosys_mshc(language, file_path)
-        return _json(idx.read_page(path))
+        page = idx.read_page(path, include_full_text=include_full_text)
+        if format == "json":
+            return _json(page)
+        return format_page_markdown(page)
     except FileNotFoundError as exc:
+        err_code = "MSHC_NOT_INSTALLED" if "not found" in str(exc).lower() else "PAGE_NOT_FOUND"
+        if format == "json":
+            return _json({"success": False, "error_code": err_code, "error": str(exc)})
+        return f"**Error [{err_code}]:** {exc}"
+    except Exception as exc:
+        if format == "json":
+            return _json({"success": False, "error_code": "INTERNAL_ERROR", "error": str(exc)})
+        return f"**Error [INTERNAL_ERROR]:** {exc}"
+
+
+# ================================================================
+#  Python ST formatter (file-based, no COM) — twincat_format_* tools
+# ================================================================
+
+import threading
+
+_format_lock = threading.Lock()
+_format_progress: dict = {}
+
+
+@mcp.tool()
+def twincat_format(
+    path: str,
+    recursive: bool = True,
+    dry_run: bool = False,
+    validate: bool = True,
+    format_xml: bool = True,
+    sort_elements: bool = False,
+    config_path: str = "",
+    region: str = "all",
+    member: str = "",
+    member_filter: str = "",
+    project: str = "",
+) -> str:
+    """Format TwinCAT3 ST files (*.TcPOU, *.TcDUT, *.TcGVL, *.TcIO).
+
+    Pure Python file-based formatter ÔÇö no XAE/COM needed.
+    Formats ST code (indentation, alignment, wrapping, keywords) AND
+    XML structure (attribute order, element sorting, CDATA handling).
+
+    path: file or directory to format
+    recursive: recurse into subdirectories (default True)
+    dry_run: report changes without writing (default False)
+    validate: run XML validation checks (default True)
+    format_xml: format XML structure (default True)
+    sort_elements: sort XML elements alphabetically (default False; opt-in)
+    config_path: custom .stformat.json config file path (optional)
+    region: "all" (default), "declaration", or "implementation" ÔÇö limit to specific code sections
+    member: specific Method/Action/Property name to format (e.g. "M_Init")
+    member_filter: "all_methods", "all_actions", or "all_properties" ÔÇö format only that member type
+    project: path to .sln or .plcproj ÔÇö discovers all TwinCAT files (overrides path)"""
+
+    from formatter.config import load_config, config_to_dict
+    from formatter.file_processor import discover_files, discover_project_files, process_batch
+    from formatter.types import FormatRegion, FormatScope, MemberFilter as MF
+
+    global _format_progress
+    with _format_lock:
+        _format_progress = {"status": "running", "path": path, "files_done": 0, "files_total": 0}
+
+    try:
+        cfg = load_config(config_path=config_path or None, project_root=path if os.path.isdir(path) else os.path.dirname(path))
+
+        # Build scope
+        scope = None
+        fmt_region = FormatRegion(region) if region != "all" else FormatRegion.ALL
+        mf = None
+        if member_filter:
+            mf = MF(member_filter)
+        if fmt_region != FormatRegion.ALL or member or mf:
+            scope = FormatScope(region=fmt_region, member_filter=mf, member_name=member)
+
+        # Discover files
+        if project:
+            files = discover_project_files(project)
+        else:
+            files = discover_files([path], recursive=recursive)
+
+        with _format_lock:
+            _format_progress["files_total"] = len(files)
+
+        if not files:
+            return _json({"success": True, "message": "No formattable files found", "files": 0})
+
+        batch = process_batch(
+            files, cfg,
+            dry_run=dry_run,
+            validate=validate,
+            format_st=True,
+            format_xml=format_xml,
+            sort_xml=sort_elements,
+            scope=scope,
+        )
+
+        with _format_lock:
+            _format_progress = {"status": "done", "files_done": batch.total, "files_total": batch.total}
+
+        results_list = []
+        for r in batch.results:
+            entry = {"file": os.path.basename(r.path), "changed": r.changed, "success": r.success}
+            if r.errors:
+                entry["errors"] = list(r.errors)
+            if r.warnings:
+                entry["warnings"] = list(r.warnings)
+            if r.diff:
+                entry["diff"] = r.diff
+            results_list.append(entry)
+
+        return _json({
+            "success": batch.errors == 0,
+            "total": batch.total,
+            "formatted": batch.formatted,
+            "unchanged": batch.unchanged,
+            "errors": batch.errors,
+            "dry_run": dry_run,
+            "results": results_list,
+        })
+    except Exception as exc:
+        with _format_lock:
+            _format_progress = {"status": "error", "error": str(exc)}
         return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_format_progress() -> str:
+    """Poll the progress of a running twincat_format operation."""
+    with _format_lock:
+        return _json(_format_progress)
+
+
+@mcp.tool()
+def twincat_format_validate(
+    path: str,
+    recursive: bool = True,
+    config_path: str = "",
+) -> str:
+    """Validate TwinCAT3 XML files without formatting.
+
+    Checks: GUID format/uniqueness, Name match, required elements,
+    SpecialFunc values, FolderPath consistency, interface rules.
+
+    path: file or directory to validate
+    recursive: recurse into subdirectories (default True)
+    config_path: custom config file path (optional)"""
+
+    from formatter.config import load_config
+    from formatter.file_processor import discover_files, process_batch
+
+    try:
+        cfg = load_config(config_path=config_path or None, project_root=path if os.path.isdir(path) else os.path.dirname(path))
+        files = discover_files([path], recursive=recursive)
+
+        if not files:
+            return _json({"success": True, "message": "No files to validate", "files": 0})
+
+        batch = process_batch(
+            files, cfg,
+            dry_run=True,
+            validate=True,
+            format_st=False,
+            format_xml=False,
+        )
+
+        issues_list = []
+        for issue in batch.validation_issues:
+            issues_list.append({
+                "level": issue.level,
+                "file": os.path.basename(issue.file),
+                "line": issue.line,
+                "rule": issue.rule,
+                "message": issue.message,
+            })
+
+        return _json({
+            "success": len([i for i in batch.validation_issues if i.level == "error"]) == 0,
+            "total_files": batch.total,
+            "issues": issues_list,
+        })
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+@mcp.tool()
+def twincat_format_config(
+    project_path: str = "",
+    config_path: str = "",
+) -> str:
+    """Show the active formatter configuration.
+
+    Shows merged config (defaults + user overrides from .stformat.json).
+
+    project_path: project root to search for .stformat.json (optional)
+    config_path: explicit config file to load (optional)"""
+
+    from formatter.config import load_config, config_to_dict
+
+    try:
+        cfg = load_config(config_path=config_path or None, project_root=project_path or None)
+        return _json({"success": True, "config": config_to_dict(cfg)})
     except Exception as exc:
         return _json({"success": False, "error": str(exc)})
 

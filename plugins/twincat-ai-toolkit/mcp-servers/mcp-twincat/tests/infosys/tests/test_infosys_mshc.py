@@ -152,17 +152,32 @@ class TestInfoSysMshcMissing:
 
 @skip_no_mshc
 class TestMcpToolWrappers:
-    def test_search_tool(self):
+    def test_search_tool_markdown_default(self):
         from server import twincat_infosys_mshc_search
-        raw = twincat_infosys_mshc_search(query="FB_IotMqttClient")
+        md = twincat_infosys_mshc_search(query="FB_IotMqttClient")
+        assert "### InfoSys Search: `FB_IotMqttClient`" in md
+        assert "FB_IotMqttClient" in md
+
+    def test_search_tool_json(self):
+        from server import twincat_infosys_mshc_search
+        raw = twincat_infosys_mshc_search(query="FB_IotMqttClient", format="json")
         data = json.loads(raw)
         assert data["count"] >= 1
         assert data["results"][0]["title"] == "FB_IotMqttClient"
 
-    def test_read_tool(self):
+    def test_read_tool_markdown_default(self):
+        from server import twincat_infosys_mshc_read
+        md = twincat_infosys_mshc_read(
+            path="tf6701_tc3_iot_communication_mqtt/1033/3391835403.html"
+        )
+        assert "## `FB_IotMqttClient`" in md
+        assert "FUNCTION_BLOCK" in md
+
+    def test_read_tool_json(self):
         from server import twincat_infosys_mshc_read
         raw = twincat_infosys_mshc_read(
-            path="tf6701_tc3_iot_communication_mqtt/1033/3391835403.html"
+            path="tf6701_tc3_iot_communication_mqtt/1033/3391835403.html",
+            format="json",
         )
         data = json.loads(raw)
         assert data["title"] == "FB_IotMqttClient"
@@ -171,7 +186,7 @@ class TestMcpToolWrappers:
     def test_search_missing_file(self):
         from server import twincat_infosys_mshc_search
         raw = twincat_infosys_mshc_search(
-            query="test", file_path=r"C:\nonexistent.mshc"
+            query="test", file_path=r"C:\nonexistent.mshc", format="json"
         )
         data = json.loads(raw)
         assert data.get("success") is False
