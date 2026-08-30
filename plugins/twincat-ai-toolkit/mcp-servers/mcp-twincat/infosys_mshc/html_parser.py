@@ -33,13 +33,14 @@ NOISE_PARAM_NAMES = {
     "name", "parameter", "bezeichnung", "eingang", "ausgang",
     "return parameter", "rückgabeparameter", "meaning", "bedeutung",
     "hinweis", "notice", "description", "beschreibung", "wert", "value",
-    "typ", "type", "daten", "datentyp",
+    "typ", "type", "daten", "datentyp", "constant", "konstante",
 }
 
 
 def strip_tags(text: str) -> str:
     """Strip HTML tags, unescape HTML entities, and normalize whitespace."""
     text = text.replace("<br />", "\n").replace("<br/>", "\n").replace("<br>", "\n")
+    text = re.sub(r'</?(?:p|div|li|tr|td|th|h[1-6])[^>]*>', ' ', text, flags=re.IGNORECASE)
     text = RE_TAG.sub("", text)
     text = html.unescape(text)
     text = text.replace("\xa0", " ").replace("\u00a0", " ").replace("\u200b", "").replace("\r", "")
@@ -257,6 +258,13 @@ def parse_param_table(section_html: str) -> List[Dict[str, str]]:
             continue
         if " " in name and not name.startswith("_"):
             continue
+
+        if len(cells) == 2 and not desc:
+            clean_t = typ.strip()
+            if (len(clean_t.split()) > 2 and not clean_t.upper().startswith(("POINTER TO", "REFERENCE TO", "ARRAY [", "ARRAY["))) or clean_t.endswith((".", ";", ":")):
+                continue
+            if clean_t.lower() in ("description", "beschreibung", "meaning", "bedeutung", "hinweis", "notice", "wert", "value"):
+                continue
 
         params.append({"name": name, "type": typ, "description": desc})
     return params

@@ -865,3 +865,13 @@ class TestSyntaxErrorDiagnostics:
         _, _, diags = parse_implementation(code)
         assert any(d.code == "TC-EXPR-002" for d in diags)
 
+    def test_missing_semicolon_after_assignment_diagnostics(self):
+        code = "a := 10 b := 20;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-STMT-003" for d in diags)
+
+    def test_invalid_statement_expression_diagnostics(self):
+        code = "a * 2;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-STMT-005" for d in diags)
+

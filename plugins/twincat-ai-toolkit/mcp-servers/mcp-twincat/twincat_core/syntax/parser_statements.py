@@ -238,6 +238,25 @@ class StatementParser:
                 end_span = semi.span
             else:
                 end_span = expr.span
+                if self.peek().type not in (
+                    TokenType.EOF,
+                    TokenType.KEYWORD_END_IF,
+                    TokenType.KEYWORD_END_FOR,
+                    TokenType.KEYWORD_END_WHILE,
+                    TokenType.KEYWORD_END_REPEAT,
+                    TokenType.KEYWORD_END_CASE,
+                    TokenType.KEYWORD_ELSIF,
+                    TokenType.KEYWORD_ELSE,
+                    TokenType.KEYWORD_UNTIL,
+                ):
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Syntax error: ';' expected before '{self.peek().value}'",
+                            span=self.peek().span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-STMT-003",
+                        )
+                    )
 
             total_span = SourceSpan.merge(expr.span, end_span)
             if not self._is_valid_assignment_target(expr.left):
@@ -266,6 +285,25 @@ class StatementParser:
                 end_span = semi.span
             else:
                 end_span = val_expr.span
+                if self.peek().type not in (
+                    TokenType.EOF,
+                    TokenType.KEYWORD_END_IF,
+                    TokenType.KEYWORD_END_FOR,
+                    TokenType.KEYWORD_END_WHILE,
+                    TokenType.KEYWORD_END_REPEAT,
+                    TokenType.KEYWORD_END_CASE,
+                    TokenType.KEYWORD_ELSIF,
+                    TokenType.KEYWORD_ELSE,
+                    TokenType.KEYWORD_UNTIL,
+                ):
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Syntax error: ';' expected before '{self.peek().value}'",
+                            span=self.peek().span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-STMT-003",
+                        )
+                    )
 
             total_span = SourceSpan.merge(expr.span, end_span)
             if not self._is_valid_assignment_target(expr):
@@ -290,6 +328,26 @@ class StatementParser:
             if self.peek().type == TokenType.SEMICOLON:
                 semi = self.advance()
                 end_span = semi.span
+            else:
+                if self.peek().type not in (
+                    TokenType.EOF,
+                    TokenType.KEYWORD_END_IF,
+                    TokenType.KEYWORD_END_FOR,
+                    TokenType.KEYWORD_END_WHILE,
+                    TokenType.KEYWORD_END_REPEAT,
+                    TokenType.KEYWORD_END_CASE,
+                    TokenType.KEYWORD_ELSIF,
+                    TokenType.KEYWORD_ELSE,
+                    TokenType.KEYWORD_UNTIL,
+                ):
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Syntax error: ';' expected before '{self.peek().value}'",
+                            span=self.peek().span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-STMT-003",
+                        )
+                    )
 
             total_span = SourceSpan.merge(expr.span, end_span)
             stmt = CallStmt(span=total_span, call=expr)
@@ -306,7 +364,18 @@ class StatementParser:
             # Standalone expression / statement
             if isinstance(expr, ErrorExpr):
                 return ErrorStmt(span=total_span, raw_text=expr.raw_text), CstNode(kind=CstNodeKind.ERROR_NODE, span=total_span)
-            stmt = CallStmt(span=total_span, call=CallExpr(span=total_span, callee=expr))
+
+            if not isinstance(expr, (CallExpr, IdentifierExpr)):
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=f"Syntax error: '{getattr(expr, 'name', '') or getattr(expr, 'op', '') or 'expression'}' is not a valid statement",
+                        span=total_span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-STMT-005",
+                    )
+                )
+
+            stmt = CallStmt(span=total_span, call=CallExpr(span=total_span, callee=expr) if not isinstance(expr, CallExpr) else expr)
             return stmt, CstNode(kind=CstNodeKind.STATEMENT_BLOCK, span=total_span)
 
     # -------------------------------------------------------------------------

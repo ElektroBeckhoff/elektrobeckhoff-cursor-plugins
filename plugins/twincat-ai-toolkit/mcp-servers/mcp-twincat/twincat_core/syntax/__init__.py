@@ -54,13 +54,15 @@ from .lexer import Lexer, tokenize_st
 from .parser import parse_declaration, parse_implementation, validate_st_syntax_in_xml
 from .parser_declarations import DeclarationParser
 from .parser_statements import StatementParser
-from .span import Position, SourceSpan
+from .span import Position, SourceSpan, line_col_to_offset, offset_to_line_col
 from .tokens import Token, TokenChannel, TokenType
 
 __all__ = [
     # Span & Position
     "Position",
     "SourceSpan",
+    "offset_to_line_col",
+    "line_col_to_offset",
     # Diagnostics
     "DiagnosticSeverity",
     "SyntaxDiagnostic",

@@ -12,7 +12,7 @@ from ..semantic.diagnostics import run_semantic_analysis
 from ..semantic.scopes import Scope
 from ..semantic.symbols import Symbol, SymbolKind
 from ..syntax.lexer import tokenize_st
-from ..syntax.span import Position, SourceSpan
+from ..syntax.span import Position, SourceSpan, line_col_to_offset, offset_to_line_col
 from ..syntax.tokens import Token, TokenType
 from ..xml.types import CdataKind, CdataSpan
 from .utils import (
@@ -118,12 +118,8 @@ def resolve_symbol_at_cursor(
         return None
 
     raw_text = indexed.xml_doc.raw_text
-    lines = raw_text.splitlines(keepends=True)
-    if pos.line < 1 or pos.line > len(lines):
-        return None
-
     # Calculate 0-based character offset in full file
-    target_offset = sum(len(l) for l in lines[: pos.line - 1]) + max(0, pos.col - 1)
+    target_offset = line_col_to_offset(raw_text, pos.line, pos.col)
 
     # Check if target_offset falls within a CDATA span
     matched_span = None
@@ -354,7 +350,37 @@ def handle_implementation(
 
         return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
 
-    # 4. Case: Action -> find ACTION_IMPLEMENTATION span
+    # 4. Case: Property (either on POU or Interface)
+    if sym.kind == SymbolKind.PROPERTY:
+        indexed = index.get_file(sym.file_path)
+        if indexed and indexed.file_path.suffix.lower() == ".tcio":
+            # Interface property -> find all implementing properties across FBs
+            itf_name = indexed.xml_doc.root_object_name.lower()
+            p_name = sym.name.lower()
+            locations = []
+            for other_indexed in index.indexed_files.values():
+                if other_indexed.file_path.suffix.lower() == ".tcpou":
+                    type_desc = index.type_index.get_type(other_indexed.xml_doc.root_object_name, context_path=file_path)
+                    if type_desc and any(itf.lower() == itf_name for itf in type_desc.implements_names):
+                        for span in other_indexed.xml_doc.cdata_spans:
+                            if span.kind in (CdataKind.PROPERTY_GET_IMPLEMENTATION, CdataKind.PROPERTY_SET_IMPLEMENTATION) and span.parent_name.lower() == p_name:
+                                locations.append(cdata_span_to_lsp_location(span, other_indexed.xml_doc.raw_text, other_indexed.file_path))
+            if locations:
+                return locations if len(locations) > 1 else locations[0]
+            return None
+
+        # Regular POU Property -> find its PROPERTY_GET_IMPLEMENTATION / PROPERTY_SET_IMPLEMENTATION spans
+        if indexed:
+            locations = []
+            for span in indexed.xml_doc.cdata_spans:
+                if span.kind in (CdataKind.PROPERTY_GET_IMPLEMENTATION, CdataKind.PROPERTY_SET_IMPLEMENTATION) and span.parent_name.lower() == sym.name.lower():
+                    locations.append(cdata_span_to_lsp_location(span, indexed.xml_doc.raw_text, sym.file_path))
+            if locations:
+                return locations if len(locations) > 1 else locations[0]
+
+        return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
+
+    # 5. Case: Action -> find ACTION_IMPLEMENTATION span
     if sym.kind == SymbolKind.ACTION:
         indexed = index.get_file(sym.file_path)
         if indexed:
@@ -363,7 +389,7 @@ def handle_implementation(
                     return cdata_span_to_lsp_location(span, indexed.xml_doc.raw_text, sym.file_path)
         return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
 
-    # 5. Case: POU / FB / Function / Program -> find POU_IMPLEMENTATION span
+    # 6. Case: POU / FB / Function / Program -> find POU_IMPLEMENTATION span
     if sym.kind in (SymbolKind.POU, SymbolKind.FUNCTION_BLOCK, SymbolKind.FUNCTION, SymbolKind.PROGRAM):
         indexed = index.get_file(sym.file_path)
         if indexed:
@@ -372,7 +398,7 @@ def handle_implementation(
                 return cdata_span_to_lsp_location(impl_span, indexed.xml_doc.raw_text, sym.file_path)
         return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
 
-    # 6. Case: Variable / Instance / Field / Parameter -> resolve type's implementation
+    # 7. Case: Variable / Instance / Field / Parameter -> resolve type's implementation
     if sym.kind in (SymbolKind.VARIABLE, SymbolKind.CONSTANT, SymbolKind.STRUCT_FIELD) and sym.type_ref:
         type_desc = index.type_index.get_type(sym.type_ref, context_path=file_path)
         if type_desc and type_desc.file_path and type_desc.file_path.exists():
@@ -396,9 +422,77 @@ def handle_implementation(
                     if impl_span:
                         return cdata_span_to_lsp_location(impl_span, indexed.xml_doc.raw_text, type_desc.file_path)
                 return lsp.Location(uri=path_to_uri(type_desc.file_path), range=span_to_range(type_desc.symbol.span if type_desc.symbol else sym.span))
+            elif type_desc.kind in (SymbolKind.STRUCT, SymbolKind.ENUM, SymbolKind.UNION, SymbolKind.ALIAS):
+                indexed = index.get_file(type_desc.file_path)
+                if indexed:
+                    decl_span = indexed.xml_doc.get_declaration_span()
+                    if decl_span:
+                        return cdata_span_to_lsp_location(decl_span, indexed.xml_doc.raw_text, type_desc.file_path)
+                return lsp.Location(uri=path_to_uri(type_desc.file_path), range=span_to_range(type_desc.symbol.span if type_desc.symbol else sym.span))
+
+        return None
 
     # 7. Default fallback
     return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
+
+
+def handle_type_definition(
+    index: WorkspaceIndex, params: lsp.TypeDefinitionParams
+) -> Optional[lsp.Location]:
+    """Handle textDocument/typeDefinition request.
+
+    Navigates to the type definition of a variable, constant, field, parameter,
+    or the type declaration itself (POU, Struct DUT, Enum DUT, Interface).
+    """
+    file_path = uri_to_path(params.text_document.uri)
+    pos = position_from_lsp(params.position)
+
+    sym = resolve_symbol_at_cursor(index, file_path, pos)
+    if not sym:
+        return None
+
+    type_to_find = sym.type_ref or sym.name
+    type_desc = index.type_index.get_type(type_to_find, context_path=file_path)
+    if type_desc and type_desc.file_path and type_desc.file_path.exists():
+        indexed = index.get_file(type_desc.file_path)
+        if indexed:
+            decl_span = indexed.xml_doc.get_declaration_span()
+            if decl_span:
+                return cdata_span_to_lsp_location(decl_span, indexed.xml_doc.raw_text, type_desc.file_path)
+        return lsp.Location(
+            uri=path_to_uri(type_desc.file_path),
+            range=span_to_range(type_desc.symbol.span if type_desc.symbol and type_desc.symbol.span else sym.span),
+        )
+
+    if sym.file_path and sym.file_path.exists() and sym.span:
+        return lsp.Location(uri=path_to_uri(sym.file_path), range=span_to_range(sym.span))
+
+    return None
+
+
+def _format_iec_decl_block(lines: list[str]) -> str:
+    """Format and column-align ST declaration lines using the project's ST formatter engine."""
+    if not lines:
+        return ""
+    try:
+        from formatter.st_alignment import align_declarations
+        return "\n".join(align_declarations(lines))
+    except Exception:
+        return "\n".join(lines)
+
+
+def _format_var_block(title: str, symbols: Sequence[Symbol], is_struct: bool = False) -> list[str]:
+    """Format a variable block (VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT, STRUCT) with clean indentation and comments."""
+    if not symbols:
+        return []
+    res = [title]
+    for s in symbols:
+        comm = f" // {' '.join(s.doc_comment.split())}" if s.doc_comment else ""
+        init_part = f" := {s.initial_value}" if s.initial_value else ""
+        res.append(f"    {s.name} : {s.type_ref or 'BOOL'}{init_part};{comm}")
+    if not is_struct:
+        res.append("END_VAR")
+    return res
 
 
 def format_hover_for_symbol(
@@ -432,41 +526,43 @@ def format_hover_for_symbol(
 
         st_decl = [header]
         if type_desc and type_desc.fields:
-            inputs: list[str] = []
-            outputs: list[str] = []
-            for f in type_desc.fields.values():
-                comm = f" // {f.doc_comment}" if f.doc_comment else ""
-                line_f = f"    {f.name} : {f.type_ref or 'BOOL'};{comm}"
-                f_name_lower = f.name.lower()
-                if f_name_lower.startswith(("berror", "bdone", "bbusy", "hrerror", "eerror", "q", "et")):
-                    outputs.append(line_f)
-                else:
-                    inputs.append(line_f)
+            # ONLY public interface: VAR_INPUT, VAR_IN_OUT, VAR_OUTPUT (internal VAR is excluded)
+            inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
+
+            # Fallback for external library types from InfoSys where var_block_type might be default
+            if not inputs and not in_outs and not outputs and type_desc.is_external:
+                for f in type_desc.fields.values():
+                    f_name_lower = f.name.lower()
+                    if f_name_lower.startswith(("berror", "bdone", "bbusy", "hrerror", "eerror", "q", "et")):
+                        outputs.append(f)
+                    else:
+                        inputs.append(f)
 
             if inputs:
-                st_decl.append("VAR_INPUT")
-                st_decl.extend(inputs)
-                st_decl.append("END_VAR")
+                st_decl.extend(_format_var_block("VAR_INPUT", inputs))
+            if in_outs:
+                st_decl.extend(_format_var_block("VAR_IN_OUT", in_outs))
             if outputs:
-                st_decl.append("VAR_OUTPUT")
-                st_decl.extend(outputs)
-                st_decl.append("END_VAR")
+                st_decl.extend(_format_var_block("VAR_OUTPUT", outputs))
 
-        lines.append(f"```iecst\n" + "\n".join(st_decl) + "\n```")
+        lines.append(f"```iecst\n" + _format_iec_decl_block(st_decl) + "\n```")
 
     elif sym.kind == SymbolKind.STRUCT:
         st_decl = [f"TYPE {sym.name} :", "STRUCT"]
         if type_desc and type_desc.fields:
             for f in type_desc.fields.values():
-                comm = f" // {f.doc_comment}" if f.doc_comment else ""
-                st_decl.append(f"    {f.name} : {f.type_ref or 'INT'};{comm}")
+                comm = f" // {' '.join(f.doc_comment.split())}" if f.doc_comment else ""
+                init_part = f" := {f.initial_value}" if f.initial_value else ""
+                st_decl.append(f"    {f.name} : {f.type_ref or 'INT'}{init_part};{comm}")
         st_decl.extend(["END_STRUCT", "END_TYPE"])
-        lines.append(f"```iecst\n" + "\n".join(st_decl) + "\n```")
+        lines.append(f"```iecst\n" + _format_iec_decl_block(st_decl) + "\n```")
 
     elif sym.kind == SymbolKind.ENUM:
         members_str = ", ".join(type_desc.enum_members.keys()) if type_desc and type_desc.enum_members else "..."
         st_decl = [f"TYPE {sym.name} :", f"    ({members_str});", "END_TYPE"]
-        lines.append(f"```iecst\n" + "\n".join(st_decl) + "\n```")
+        lines.append(f"```iecst\n" + _format_iec_decl_block(st_decl) + "\n```")
 
     elif sym.kind == SymbolKind.INTERFACE:
         header = f"INTERFACE {sym.name}"
@@ -475,23 +571,61 @@ def format_hover_for_symbol(
         lines.append(f"```iecst\n{header}\n```")
 
     elif sym.kind == SymbolKind.FUNCTION:
-        ret_type = sym.type_ref or (type_desc.base_type_name if type_desc else "BOOL")
+        ret_type = (
+            type_desc.base_type_name
+            if (type_desc and type_desc.base_type_name)
+            else (sym.type_ref if sym.type_ref and sym.type_ref.upper() != sym.name.upper() else "BOOL")
+        )
         st_decl = [f"FUNCTION {sym.name} : {ret_type}"]
         if type_desc and type_desc.fields:
-            st_decl.append("VAR_INPUT")
-            for f in type_desc.fields.values():
-                comm = f" // {f.doc_comment}" if f.doc_comment else ""
-                st_decl.append(f"    {f.name} : {f.type_ref or 'BOOL'};{comm}")
-            st_decl.append("END_VAR")
-        lines.append(f"```iecst\n" + "\n".join(st_decl) + "\n```")
+            inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
+            if not inputs and not in_outs and not outputs:
+                inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() != "VAR"]
+
+            if inputs:
+                st_decl.extend(_format_var_block("VAR_INPUT", inputs))
+            if in_outs:
+                st_decl.extend(_format_var_block("VAR_IN_OUT", in_outs))
+            if outputs:
+                st_decl.extend(_format_var_block("VAR_OUTPUT", outputs))
+        lines.append(f"```iecst\n" + _format_iec_decl_block(st_decl) + "\n```")
 
     elif sym.kind == SymbolKind.METHOD:
+        access_str = f"{sym.access} " if sym.access and sym.access.upper() != "PUBLIC" else ""
         ret_type = f" : {sym.type_ref}" if sym.type_ref else ""
-        lines.append(f"```iecst\nMETHOD {sym.name}{ret_type}\n```")
+        st_decl = [f"METHOD {access_str}{sym.name}{ret_type}"]
+
+        # Resolve method parameters from scope if available
+        method_params: list[Symbol] = []
+        if sym.file_path:
+            pou_scope = index.symbol_table.get_file_pou_scope(sym.file_path)
+            if not pou_scope and sym.parent_symbol:
+                pou_scope = index.symbol_table.find_pou_scope(sym.parent_symbol.name, context_path=sym.file_path)
+            if pou_scope:
+                for child in pou_scope.children:
+                    if child.owner_symbol and child.owner_symbol.name.lower() == sym.name.lower():
+                        method_params = list(child.symbols.values())
+                        break
+
+        if method_params:
+            inputs = [p for p in method_params if (p.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [p for p in method_params if (p.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [p for p in method_params if (p.var_block_type or "").upper() == "VAR_OUTPUT"]
+            if inputs:
+                st_decl.extend(_format_var_block("VAR_INPUT", inputs))
+            if in_outs:
+                st_decl.extend(_format_var_block("VAR_IN_OUT", in_outs))
+            if outputs:
+                st_decl.extend(_format_var_block("VAR_OUTPUT", outputs))
+
+        lines.append(f"```iecst\n" + _format_iec_decl_block(st_decl) + "\n```")
 
     elif sym.kind == SymbolKind.PROPERTY:
+        access_str = f"{sym.access} " if sym.access and sym.access.upper() != "PUBLIC" else ""
         ret_type = f" : {sym.type_ref}" if sym.type_ref else ""
-        lines.append(f"```iecst\nPROPERTY {sym.name}{ret_type}\n```")
+        lines.append(f"```iecst\nPROPERTY {access_str}{sym.name}{ret_type}\n```")
 
     else:
         # Variable / Field / Constant / Alias
@@ -499,11 +633,34 @@ def format_hover_for_symbol(
         kind_str = sym.kind.value.upper()
         lines.append(f"```iecst\n({kind_str}) {sym.name}{type_str}\n```")
 
+        # If variable is an FB instance, also render the FB's public signature block
+        if type_desc and type_desc.kind in (SymbolKind.FUNCTION_BLOCK, SymbolKind.POU) and type_desc.fields:
+            inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
+            if inputs or in_outs or outputs:
+                fb_sub = [f"FUNCTION_BLOCK {type_desc.name}"]
+                if inputs:
+                    fb_sub.extend(_format_var_block("VAR_INPUT", inputs))
+                if in_outs:
+                    fb_sub.extend(_format_var_block("VAR_IN_OUT", in_outs))
+                if outputs:
+                    fb_sub.extend(_format_var_block("VAR_OUTPUT", outputs))
+                lines.append(f"```iecst\n" + _format_iec_decl_block(fb_sub) + "\n```")
+
     # 2. Metadata details (Type summary & Library origin)
     meta_parts: list[str] = []
-    if type_desc:
-        if type_desc.namespace:
-            meta_parts.append(f"**Library:** `{type_desc.namespace}`")
+    parent_desc = None
+    if sym.parent_symbol:
+        parent_desc = index.type_index.get_type(sym.parent_symbol.name, context_path=file_path)
+
+    eff_lib = (type_desc.namespace if type_desc and type_desc.namespace else None) or (parent_desc.namespace if parent_desc and parent_desc.namespace else None)
+    if eff_lib:
+        meta_parts.append(f"**Library:** `{eff_lib}`")
+
+    if sym.kind in (SymbolKind.METHOD, SymbolKind.PROPERTY, SymbolKind.ACTION) and sym.parent_symbol:
+        meta_parts.append(f"**Defined in:** `{sym.parent_symbol.name}`")
+    elif type_desc:
         if sym.kind not in (
             SymbolKind.POU,
             SymbolKind.FUNCTION_BLOCK,
@@ -520,8 +677,13 @@ def format_hover_for_symbol(
     if meta_parts:
         lines.append(" | ".join(meta_parts))
 
-    # 3. Properties and Methods summary if available
-    if type_desc:
+    # 3. Properties and Methods summary if available on POU/FB/Interface
+    if type_desc and sym.kind in (
+        SymbolKind.POU,
+        SymbolKind.FUNCTION_BLOCK,
+        SymbolKind.INTERFACE,
+        SymbolKind.VARIABLE,
+    ):
         if type_desc.properties:
             lines.append("**Properties:**\n" + "\n".join(f"- `{p.name}`" + (f" : `{p.type_ref}`" if p.type_ref else "") for p in type_desc.properties.values()))
         if type_desc.methods:
@@ -568,8 +730,7 @@ def handle_completion(
     indexed = index.get_file(file_path)
     raw_text = indexed.xml_doc.raw_text if indexed else (file_path.read_text(encoding="utf-8") if file_path.exists() else "")
 
-    lines = raw_text.splitlines(keepends=True)
-    target_offset = sum(len(l) for l in lines[: params.position.line]) + params.position.character
+    target_offset = line_col_to_offset(raw_text, pos.line, pos.col)
 
     matched_span = None
     if indexed:
@@ -849,20 +1010,22 @@ def handle_formatting(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_p = Path(tmpdir) / file_path.name
-        tmp_p.write_text(text_to_format, encoding="utf-8")
+        tmp_p.write_bytes(text_to_format.encode("utf-8"))
 
-        res = process_file(str(tmp_p), config, format_xml=False, dry_run=False)
+        res = process_file(str(tmp_p), config, format_xml=True, dry_run=False)
         if not res.success or not res.changed:
             return []
 
-        formatted_text = tmp_p.read_text(encoding="utf-8")
+        formatted_bytes = tmp_p.read_bytes()
+        formatted_text = formatted_bytes.decode("utf-8-sig" if formatted_bytes.startswith(b"\xef\xbb\xbf") else "utf-8")
 
     # Compute full document range
-    num_lines = text_to_format.count("\n") + 1
-    last_line_len = len(text_to_format.splitlines()[-1]) if text_to_format else 0
+    lines = text_to_format.splitlines()
+    line_count = len(lines)
+    last_line_len = len(lines[-1]) if lines else 0
     full_range = lsp.Range(
         start=lsp.Position(line=0, character=0),
-        end=lsp.Position(line=num_lines, character=last_line_len),
+        end=lsp.Position(line=max(0, line_count - 1), character=last_line_len),
     )
 
     return [lsp.TextEdit(range=full_range, new_text=formatted_text)]
@@ -882,84 +1045,3 @@ def get_diagnostics_for_file(
     diags.extend(semantic_diags)
 
     return [diagnostic_to_lsp(d) for d in diags]
-
-
-def handle_virtual_st_get(
-    index: WorkspaceIndex, uri: str
-) -> dict:
-    """Project XML document to Virtual ST string with section mappings."""
-    from ..projection.virtual_st import VirtualStDocument
-
-    file_path = uri_to_path(uri)
-    indexed = index.get_file(file_path)
-    if indexed:
-        vdoc = VirtualStDocument.from_xml_document(indexed.xml_doc)
-    else:
-        vdoc = VirtualStDocument.from_file(file_path)
-
-    sections_info = []
-    for sec in vdoc.source_map.sections:
-        sections_info.append({
-            "sectionIndex": sec.section_index,
-            "kind": sec.kind.value,
-            "label": sec.label,
-            "virtStartLine": sec.virt_start_line,
-            "virtEndLine": sec.virt_end_line,
-            "xmlStartLine": sec.xml_content_start_line,
-            "xmlEndLine": sec.xml_content_end_line,
-        })
-
-    return {
-        "uri": uri,
-        "virtualSt": vdoc.virtual_st,
-        "sections": sections_info,
-    }
-
-
-def handle_virtual_st_save(
-    index: WorkspaceIndex, uri: str, virtual_st: str
-) -> dict:
-    """Synchronize edited Virtual ST content back to XML document and update index."""
-    from ..projection.virtual_st import VirtualStDocument
-
-    file_path = uri_to_path(uri)
-    indexed = index.get_file(file_path)
-    if indexed:
-        vdoc = VirtualStDocument.from_xml_document(indexed.xml_doc)
-    else:
-        vdoc = VirtualStDocument.from_file(file_path)
-
-    new_xml = vdoc.apply_virtual_st_changes(virtual_st)
-    index.update_file(file_path, text=new_xml)
-
-    return {
-        "uri": uri,
-        "success": True,
-        "newXml": new_xml,
-    }
-
-
-def handle_virtual_st_map_location(
-    index: WorkspaceIndex, uri: str, line: int, col: int, direction: str = "toXml"
-) -> dict:
-    """Map cursor position between Virtual ST and physical XML document."""
-    from ..projection.virtual_st import VirtualStDocument
-
-    file_path = uri_to_path(uri)
-    indexed = index.get_file(file_path)
-    if indexed:
-        vdoc = VirtualStDocument.from_xml_document(indexed.xml_doc)
-    else:
-        vdoc = VirtualStDocument.from_file(file_path)
-
-    if direction == "toXml":
-        out_line, out_col = vdoc.source_map.map_virtual_to_xml(line, col)
-    else:
-        out_line, out_col = vdoc.source_map.map_xml_to_virtual(line, col)
-
-    return {
-        "uri": uri,
-        "line": out_line,
-        "col": out_col,
-        "direction": direction,
-    }

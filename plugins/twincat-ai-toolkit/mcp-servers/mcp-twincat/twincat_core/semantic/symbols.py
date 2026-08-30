@@ -48,6 +48,7 @@ class Symbol:
     address: Optional[str] = None
     qualified_only: bool = False
     is_abstract: bool = False
+    var_block_type: str = "VAR"
 
     @property
     def display_name(self) -> str:

@@ -613,8 +613,8 @@ def twincat_extension_install(force: bool = True) -> str:
     """Install or update the TwinCAT 3 Structured Text VS Code / Cursor extension from local VSIX.
 
     Builds or packages the .vsix package from the local repository if necessary, then invokes
-    the editor CLI ('cursor' or 'code') to install/update the extension with syntax highlighting,
-    virtual ST projection, and language server capabilities.
+    the editor CLI ('cursor' or 'code') to install/update the extension with syntax highlighting
+    and language server capabilities.
     """
     try:
         return _json(extension_ops.install_extension(force=force))

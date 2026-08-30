@@ -18,9 +18,7 @@ from .handlers import (
     handle_formatting,
     handle_hover,
     handle_implementation,
-    handle_virtual_st_get,
-    handle_virtual_st_map_location,
-    handle_virtual_st_save,
+    handle_type_definition,
 )
 from .utils import uri_to_path
 
@@ -80,6 +78,7 @@ class TwinCatLanguageServer(LanguageServer):
                     ),
                     document_formatting_provider=True,
                     definition_provider=True,
+                    type_definition_provider=True,
                     implementation_provider=True,
                     hover_provider=True,
                     completion_provider=lsp.CompletionOptions(
@@ -130,6 +129,10 @@ class TwinCatLanguageServer(LanguageServer):
         def on_definition(params: lsp.DefinitionParams) -> Optional[lsp.Location]:
             return handle_definition(self.workspace_index, params)
 
+        @self.feature(lsp.TEXT_DOCUMENT_TYPE_DEFINITION)
+        def on_type_definition(params: lsp.TypeDefinitionParams) -> Optional[lsp.Location]:
+            return handle_type_definition(self.workspace_index, params)
+
         @self.feature(lsp.TEXT_DOCUMENT_IMPLEMENTATION)
         def on_implementation(params: lsp.ImplementationParams) -> Optional[lsp.Location]:
             return handle_implementation(self.workspace_index, params)
@@ -145,25 +148,6 @@ class TwinCatLanguageServer(LanguageServer):
         @self.feature(lsp.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
         def on_document_symbol(params: lsp.DocumentSymbolParams) -> list[lsp.DocumentSymbol]:
             return handle_document_symbol(self.workspace_index, params)
-
-        @self.feature("twincat/virtualSt/get")
-        def on_virtual_st_get(params: Any) -> dict:
-            uri = _get_param(params, "uri", "")
-            return handle_virtual_st_get(self.workspace_index, uri)
-
-        @self.feature("twincat/virtualSt/save")
-        def on_virtual_st_save(params: Any) -> dict:
-            uri = _get_param(params, "uri", "")
-            virtual_st = _get_param(params, "virtualSt", "") or _get_param(params, "virtual_st", "")
-            return handle_virtual_st_save(self.workspace_index, uri, virtual_st)
-
-        @self.feature("twincat/virtualSt/mapLocation")
-        def on_virtual_st_map_location(params: Any) -> dict:
-            uri = _get_param(params, "uri", "")
-            line = int(_get_param(params, "line", 1))
-            col = int(_get_param(params, "col", 1))
-            direction = _get_param(params, "direction", "toXml")
-            return handle_virtual_st_map_location(self.workspace_index, uri, line, col, direction)
 
     def _publish_diagnostics(self, uri: str, file_path: Path) -> None:
         """Publish diagnostics to client for given file."""

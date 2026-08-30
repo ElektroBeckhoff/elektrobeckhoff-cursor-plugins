@@ -149,6 +149,27 @@ class TestInfoSysMshcMissing:
         with pytest.raises(FileNotFoundError, match="MSHC file not found"):
             idx.search("test")
 
+    def test_infosys_type_provider_graceful_when_not_installed(self, monkeypatch):
+        from twincat_core.semantic.infosys_provider import InfoSysTypeProvider
+        import infosys_mshc.paths as paths
+
+        # Simulate offline InfoSys not installed on system
+        monkeypatch.setattr(paths, "resolve_mshc_path", lambda *args, **kwargs: r"C:\nonexistent\not_installed.mshc")
+
+        provider = InfoSysTypeProvider()
+        # First lookup triggers one-time check
+        res = provider.lookup_type("TON")
+        assert res is None
+        assert provider._init_attempted is True
+        assert provider._index is None
+        assert provider._cache.get("ton") is None
+
+        # Subsequent lookups return immediately from cache in 0ms without hitting disk
+        res2 = provider.lookup_type("TON")
+        assert res2 is None
+        res3 = provider.lookup_type("FB_FileOpen")
+        assert res3 is None
+
 
 @skip_no_mshc
 class TestMcpToolWrappers:

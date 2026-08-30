@@ -281,9 +281,9 @@ class SymbolResolver:
 
         if isinstance(expr, LiteralExpr):
             if expr.literal_type == "INT_LITERAL":
-                return "INT"
+                return "ANY_INT"
             if expr.literal_type == "REAL_LITERAL":
-                return "LREAL" if "e" in expr.value.lower() else "REAL"
+                return "ANY_REAL" if "e" not in expr.value.lower() else "LREAL"
             if expr.literal_type == "BOOL_LITERAL":
                 return "BOOL"
             if expr.literal_type == "STRING_LITERAL":
@@ -298,10 +298,18 @@ class SymbolResolver:
                     return "LTIME"
                 if prefix == "DT":
                     return "DATE_AND_TIME"
+                if prefix == "TOD":
+                    return "TOD"
+                if prefix == "LTOD":
+                    return "LTOD"
+                if prefix == "D":
+                    return "DATE"
+                if prefix == "LD":
+                    return "LDATE"
                 if prefix in ("16", "8", "2"):
-                    return "DWORD"
+                    return "ANY_INT"
                 return prefix
-            return "INT"
+            return "ANY_INT"
 
         if isinstance(expr, IdentifierExpr):
             upper_name = expr.name.upper()
@@ -358,20 +366,66 @@ class SymbolResolver:
                     return "UDINT"
                 if upper_callee in ("LOWER_BOUND", "UPPER_BOUND"):
                     return "DINT"
-                if upper_callee in ("__ISVALIDREF",):
+                if upper_callee in ("__ISVALIDREF", "__QUERYINTERFACE", "__QUERYPOINTER"):
                     return "BOOL"
-                if upper_callee in ("__QUERYINTERFACE", "__QUERYPOINTER"):
-                    return "HRESULT"
                 if upper_callee in ("__POUNAME", "__POSITION"):
                     return "STRING"
                 if upper_callee in ("CONCAT", "MID", "LEFT", "RIGHT", "INSERT", "DELETE", "REPLACE"):
                     return "STRING"
                 if upper_callee in ("WCONCAT", "WMID", "WLEFT", "WRIGHT", "WINSERT", "WDELETE", "WREPLACE"):
                     return "WSTRING"
-                if upper_callee in ("ABS", "SQRT", "LN", "LOG", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC", "ROUND", "FLOOR", "CEIL"):
+                if upper_callee in ("ABS", "SQRT", "LN", "LOG", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC", "ROUND", "FLOOR", "CEIL", "EXPT"):
                     if expr.args:
                         return self.infer_expression_type(expr.args[0].value, current_scope) or "LREAL"
                     return "LREAL"
+                if upper_callee == "SEL":
+                    if len(expr.args) >= 3:
+                        return self.infer_expression_type(expr.args[1].value, current_scope) or self.infer_expression_type(expr.args[2].value, current_scope)
+                    elif len(expr.args) >= 2:
+                        return self.infer_expression_type(expr.args[1].value, current_scope)
+                    return "ANY"
+                if upper_callee == "MUX":
+                    if len(expr.args) >= 2:
+                        choice_types = [self.infer_expression_type(a.value, current_scope) for a in expr.args[1:]]
+                        if any(t == "LREAL" for t in choice_types if t):
+                            return "LREAL"
+                        if any(t == "REAL" for t in choice_types if t):
+                            return "REAL"
+                        if any(t == "ANY_REAL" for t in choice_types if t):
+                            return "ANY_REAL"
+                        first_t = next((t for t in choice_types if t and t not in ("ANY_INT", "ANY_REAL", "ANY")), None)
+                        return first_t or choice_types[0] or "ANY"
+                    return "ANY"
+                if upper_callee == "LIMIT":
+                    if len(expr.args) >= 2:
+                        return self.infer_expression_type(expr.args[1].value, current_scope) or self.infer_expression_type(expr.args[0].value, current_scope)
+                    elif expr.args:
+                        return self.infer_expression_type(expr.args[0].value, current_scope)
+                    return "ANY_NUM"
+                if upper_callee in ("MIN", "MAX"):
+                    if expr.args:
+                        arg_types = [self.infer_expression_type(a.value, current_scope) for a in expr.args]
+                        if any(t == "LREAL" for t in arg_types if t):
+                            return "LREAL"
+                        if any(t == "REAL" for t in arg_types if t):
+                            return "REAL"
+                        if any(t == "ANY_REAL" for t in arg_types if t):
+                            return "ANY_REAL"
+                        first_t = next((t for t in arg_types if t and t not in ("ANY_INT", "ANY_REAL", "ANY")), None)
+                        return first_t or arg_types[0] or "ANY_NUM"
+                    return "ANY_NUM"
+                if upper_callee in ("SHL", "SHR", "ROL", "ROR"):
+                    if expr.args:
+                        return self.infer_expression_type(expr.args[0].value, current_scope) or "ANY_BIT"
+                    return "ANY_BIT"
+                if upper_callee == "ADR":
+                    if expr.args:
+                        target_t = self.infer_expression_type(expr.args[0].value, current_scope)
+                        if target_t:
+                            return f"POINTER TO {target_t}"
+                    return "PVOID"
+                if upper_callee == "ADRINST":
+                    return "PVOID"
 
                 # 2. Scope-resolved functions / methods / POUs
                 func_sym = self.resolve_identifier(expr.callee.name, current_scope)
@@ -385,22 +439,46 @@ class SymbolResolver:
 
         if isinstance(expr, BinaryExpr):
             op = expr.op.upper()
-            if op in ("=", "<>", "<", ">", "<=", ">=", "AND", "OR", "XOR", "NOT"):
+            if op in ("=", "<>", "<", ">", "<=", ">="):
                 return "BOOL"
             if op in (":=", "REF=", "?="):
                 return self.infer_expression_type(expr.right, current_scope) or self.infer_expression_type(expr.left, current_scope)
+            if op in ("AND", "OR", "XOR"):
+                left_t = self.infer_expression_type(expr.left, current_scope)
+                right_t = self.infer_expression_type(expr.right, current_scope)
+                clean_l = self.type_index.clean_type_name(left_t).upper() if left_t else ""
+                clean_r = self.type_index.clean_type_name(right_t).upper() if right_t else ""
+                # Bitwise operations on BYTE, WORD, DWORD, LWORD or integer types
+                if clean_l and clean_l not in ("BOOL", "BIT", "ANY_INT"):
+                    return clean_l
+                if clean_r and clean_r not in ("BOOL", "BIT", "ANY_INT"):
+                    return clean_r
+                if clean_l == "ANY_INT" or clean_r == "ANY_INT":
+                    return "ANY_INT"
+                return "BOOL"
             if op in ("+", "-", "*", "/", "MOD", "EXPT"):
                 left_t = self.infer_expression_type(expr.left, current_scope)
                 right_t = self.infer_expression_type(expr.right, current_scope)
-                if (left_t and left_t.upper() == "LREAL") or (right_t and right_t.upper() == "LREAL"):
+                clean_l = self.type_index.clean_type_name(left_t).upper() if left_t else ""
+                clean_r = self.type_index.clean_type_name(right_t).upper() if right_t else ""
+                if clean_l == "LREAL" or clean_r == "LREAL":
                     return "LREAL"
-                if (left_t and left_t.upper() == "REAL") or (right_t and right_t.upper() == "REAL"):
+                if clean_l == "REAL" or clean_r == "REAL":
                     return "REAL"
-                return left_t or right_t or "LREAL"
+                if clean_l and clean_l not in ("ANY_INT", "ANY_REAL", "ANY"):
+                    return clean_l
+                if clean_r and clean_r not in ("ANY_INT", "ANY_REAL", "ANY"):
+                    return clean_r
+                return left_t or right_t or "INT"
             return None
 
         if isinstance(expr, UnaryExpr):
             if expr.op.upper() == "NOT":
+                operand_t = self.infer_expression_type(expr.operand, current_scope)
+                if operand_t:
+                    clean_op = self.type_index.clean_type_name(operand_t).upper()
+                    if clean_op not in ("BOOL", "BIT"):
+                        return clean_op
                 return "BOOL"
             return self.infer_expression_type(expr.operand, current_scope)
 

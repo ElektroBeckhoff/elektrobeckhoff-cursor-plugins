@@ -246,6 +246,60 @@ class DeclarationParser:
 
         return ast_node, cst_nodes
 
+    def _parse_type_specifier(self) -> tuple[str, SourceSpan]:
+        type_tokens: list[str] = []
+        bracket_depth = 0
+        paren_depth = 0
+        start_span = self.peek().span
+        end_span = start_span
+
+        VAR_STOP_TYPES = (
+            TokenType.KEYWORD_VAR,
+            TokenType.KEYWORD_VAR_INPUT,
+            TokenType.KEYWORD_VAR_OUTPUT,
+            TokenType.KEYWORD_VAR_IN_OUT,
+            TokenType.KEYWORD_VAR_TEMP,
+            TokenType.KEYWORD_VAR_STAT,
+            TokenType.KEYWORD_VAR_CONFIG,
+            TokenType.KEYWORD_VAR_GLOBAL,
+            TokenType.KEYWORD_VAR_EXTERNAL,
+            TokenType.KEYWORD_END_FUNCTION,
+            TokenType.KEYWORD_END_METHOD,
+            TokenType.KEYWORD_END_PROPERTY,
+            TokenType.KEYWORD_END_FUNCTION_BLOCK,
+            TokenType.KEYWORD_END_PROGRAM,
+            TokenType.KEYWORD_EXTENDS,
+            TokenType.KEYWORD_IMPLEMENTS,
+            TokenType.SEMICOLON,
+        )
+
+        while not self.is_eof():
+            t_peek = self.peek()
+            if t_peek.type == TokenType.BRACKET_OPEN:
+                bracket_depth += 1
+            elif t_peek.type == TokenType.BRACKET_CLOSE:
+                if bracket_depth > 0:
+                    bracket_depth -= 1
+            elif t_peek.type == TokenType.PAREN_OPEN:
+                paren_depth += 1
+            elif t_peek.type == TokenType.PAREN_CLOSE:
+                if paren_depth > 0:
+                    paren_depth -= 1
+            elif bracket_depth == 0 and paren_depth == 0:
+                if t_peek.type in VAR_STOP_TYPES:
+                    break
+
+            t = self.advance()
+            type_tokens.append(t.value)
+            end_span = t.span
+
+        raw_type = " ".join(type_tokens).strip()
+        raw_type = re.sub(r'\s*\(\s*', '(', raw_type)
+        raw_type = re.sub(r'\s*\)', ')', raw_type)
+        raw_type = re.sub(r'\s*\[\s*', '[', raw_type)
+        raw_type = re.sub(r'\s*\]', ']', raw_type)
+        return raw_type, SourceSpan.merge(start_span, end_span)
+
     # =========================================================================
     # POU Declaration
     # =========================================================================
@@ -284,9 +338,7 @@ class DeclarationParser:
         return_type = None
         if pou_type == "FUNCTION" and self.peek().type == TokenType.COLON:
             self.advance()
-            ret_type_tok = self.advance()
-            return_type = ret_type_tok.value
-            end_span = ret_type_tok.span
+            return_type, end_span = self._parse_type_specifier()
 
         # EXTENDS
         extends_name = None
@@ -326,13 +378,14 @@ class DeclarationParser:
             end_kw = self.advance()
             end_span = end_kw.span
 
+        pou_comment = self._extract_doc_comment(start_tok.span)
+
         first_token = self.all_tokens[0] if self.all_tokens else None
         if first_token and first_token.span.start.offset < start_span.start.offset:
             start_span = first_token.span
 
         total_span = SourceSpan.merge(start_span, end_span)
         pragmas = self._extract_pragmas(total_span)
-        pou_comment = self._extract_doc_comment(start_span)
 
         if pou_type == "FUNCTION" and return_type is None:
             self.diagnostics.append(
@@ -401,9 +454,7 @@ class DeclarationParser:
         return_type = None
         if self.peek().type == TokenType.COLON:
             self.advance()
-            ret_tok = self.advance()
-            return_type = ret_tok.value
-            end_span = ret_tok.span
+            return_type, end_span = self._parse_type_specifier()
 
         var_blocks, var_csts = self.parse_all_var_blocks()
         if var_blocks:
@@ -462,9 +513,7 @@ class DeclarationParser:
         type_name = ""
         if self.peek().type == TokenType.COLON:
             self.advance()
-            type_tok = self.advance()
-            type_name = type_tok.value
-            end_span = type_tok.span
+            type_name, end_span = self._parse_type_specifier()
 
         var_blocks, var_csts = self.parse_all_var_blocks()
         if var_blocks:

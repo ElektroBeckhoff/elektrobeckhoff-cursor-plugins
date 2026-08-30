@@ -7,6 +7,7 @@ from .handlers import (
     handle_formatting,
     handle_hover,
     handle_implementation,
+    handle_type_definition,
 )
 from .server import TwinCatLanguageServer, create_lsp_server
 from .utils import (
@@ -34,6 +35,7 @@ __all__ = [
     "diagnostic_to_lsp",
     "symbol_to_document_symbol",
     "handle_definition",
+    "handle_type_definition",
     "handle_implementation",
     "handle_hover",
     "handle_completion",

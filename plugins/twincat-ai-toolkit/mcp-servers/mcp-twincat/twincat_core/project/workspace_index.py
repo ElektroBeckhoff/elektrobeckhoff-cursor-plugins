@@ -28,7 +28,7 @@ from ..syntax.ast import (
 from ..syntax.cst import CstNode
 from ..syntax.diagnostics import SyntaxDiagnostic
 from ..syntax.parser import parse_declaration, parse_implementation
-from ..syntax.span import SourceSpan
+from ..syntax.span import SourceSpan, offset_to_line_col
 from ..xml.reader import read_tc_xml, read_tc_xml_file
 from ..xml.types import CdataKind, CdataSpan, TcXmlDocument
 from .plcproj_parser import parse_plcproj_file
@@ -121,6 +121,7 @@ class WorkspaceIndex:
         active_pou_scope: Optional[Scope] = None
         active_pou_type_desc: Optional[TypeDescriptor] = None
         method_scopes: dict[str, Scope] = {}
+        property_scopes: dict[str, Scope] = {}
         implementation_statements: list[tuple[CdataSpan, Scope, list[Statement]]] = []
 
         default_span = SourceSpan.from_bounds(1, 1, 0, 1, 1, 0)
@@ -128,6 +129,11 @@ class WorkspaceIndex:
         for span in xml_doc.cdata_spans:
             if not span.content.strip():
                 continue
+
+            cdata_start_line, cdata_start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
+            line_offset = cdata_start_line - 1
+            col_offset = cdata_start_col - 1
+            char_offset = span.content_start
 
             # 1. Top-Level POU / DUT / GVL / ITF Declarations
             if span.kind in (
@@ -138,11 +144,14 @@ class WorkspaceIndex:
             ):
                 ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
-                all_diags.extend(diags)
+                all_diags.extend(
+                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                    for d in diags
+                )
                 if top_level_ast is None:
                     top_level_ast = ast_node
 
-                node_span = ast_node.span if ast_node else default_span
+                node_span = ast_node.span.offset_by(line_offset, col_offset, char_offset) if ast_node and ast_node.span else default_span
 
                 if isinstance(ast_node, PouDecl):
                     kind_map = {
@@ -197,7 +206,7 @@ class WorkspaceIndex:
                             v_sym = Symbol(
                                 name=v.name,
                                 kind=SymbolKind.VARIABLE,
-                                span=v.span,
+                                span=v.span.offset_by(line_offset, col_offset, char_offset) if v.span else node_span,
                                 file_path=path,
                                 type_ref=v.type_name,
                                 is_constant=v_block.is_constant or v.is_constant,
@@ -207,6 +216,7 @@ class WorkspaceIndex:
                                 address=v.address,
                                 parent_symbol=pou_sym,
                                 doc_comment=v.comment,
+                                var_block_type=v_block.block_type.upper() if getattr(v_block, "block_type", None) else "VAR",
                             )
                             active_pou_scope.define(v_sym)
                             type_desc.add_field(v_sym)
@@ -238,12 +248,13 @@ class WorkspaceIndex:
                             f_sym = Symbol(
                                 name=f.name,
                                 kind=SymbolKind.STRUCT_FIELD,
-                                span=f.span,
+                                span=f.span.offset_by(line_offset, col_offset, char_offset) if f.span else node_span,
                                 file_path=path,
                                 type_ref=f.type_name,
                                 initial_value=f.initial_value,
                                 parent_symbol=type_sym,
                                 doc_comment=f.comment,
+                                var_block_type="STRUCT_FIELD",
                             )
                             s_desc.add_field(f_sym)
                             declared_symbols.append(f_sym)
@@ -261,7 +272,7 @@ class WorkspaceIndex:
                             m_sym = Symbol(
                                 name=m.name,
                                 kind=SymbolKind.ENUM_MEMBER,
-                                span=m.span,
+                                span=m.span.offset_by(line_offset, col_offset, char_offset) if m.span else node_span,
                                 file_path=path,
                                 type_ref=name,
                                 initial_value=m.value,
@@ -283,7 +294,7 @@ class WorkspaceIndex:
                             f_sym = Symbol(
                                 name=f.name,
                                 kind=SymbolKind.STRUCT_FIELD,
-                                span=f.span,
+                                span=f.span.offset_by(line_offset, col_offset, char_offset) if f.span else node_span,
                                 file_path=path,
                                 type_ref=f.type_name,
                                 parent_symbol=type_sym,
@@ -346,7 +357,7 @@ class WorkspaceIndex:
                         v_sym = Symbol(
                             name=v.name,
                             kind=SymbolKind.VARIABLE,
-                            span=v.span,
+                            span=v.span.offset_by(line_offset, col_offset, char_offset) if v.span else node_span,
                             file_path=path,
                             type_ref=v.type_name,
                             is_constant=ast_node.is_constant or v.is_constant,
@@ -355,6 +366,7 @@ class WorkspaceIndex:
                             initial_value=v.initial_value,
                             parent_symbol=gvl_sym,
                             doc_comment=v.comment,
+                            var_block_type="VAR_GLOBAL",
                         )
                         gvl_scope.define(v_sym)
                         declared_symbols.append(v_sym)
@@ -363,9 +375,12 @@ class WorkspaceIndex:
             elif span.kind == CdataKind.METHOD_DECLARATION:
                 ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
-                all_diags.extend(diags)
+                all_diags.extend(
+                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                    for d in diags
+                )
 
-                node_span = ast_node.span if ast_node else default_span
+                node_span = ast_node.span.offset_by(line_offset, col_offset, char_offset) if ast_node and ast_node.span else default_span
 
                 if isinstance(ast_node, MethodDecl) and active_pou_scope:
                     m_name = ast_node.name or span.parent_name or "Method"
@@ -391,11 +406,12 @@ class WorkspaceIndex:
                             mv_sym = Symbol(
                                 name=v.name,
                                 kind=SymbolKind.VARIABLE,
-                                span=v.span,
+                                span=v.span.offset_by(line_offset, col_offset, char_offset) if v.span else node_span,
                                 file_path=path,
                                 type_ref=v.type_name,
                                 parent_symbol=m_sym,
                                 doc_comment=v.comment,
+                                var_block_type=v_block.block_type.upper() if getattr(v_block, "block_type", None) else "VAR",
                             )
                             m_scope.define(mv_sym)
                             declared_symbols.append(mv_sym)
@@ -404,9 +420,12 @@ class WorkspaceIndex:
             elif span.kind == CdataKind.PROPERTY_DECLARATION:
                 ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
-                all_diags.extend(diags)
+                all_diags.extend(
+                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                    for d in diags
+                )
 
-                node_span = ast_node.span if ast_node else default_span
+                node_span = ast_node.span.offset_by(line_offset, col_offset, char_offset) if ast_node and ast_node.span else default_span
 
                 if isinstance(ast_node, PropertyDecl) and active_pou_scope:
                     p_name = ast_node.name or span.parent_name or "Property"
@@ -425,30 +444,66 @@ class WorkspaceIndex:
                         active_pou_type_desc.add_property(prop_sym)
                     declared_symbols.append(prop_sym)
 
+                    p_scope = self.symbol_table.create_method_scope(prop_sym, active_pou_scope, path)
+                    property_scopes[p_name.lower()] = p_scope
+
+            elif span.kind in (CdataKind.PROPERTY_GET_DECLARATION, CdataKind.PROPERTY_SET_DECLARATION):
+                ast_node, cst_nodes, diags = parse_declaration(span.content)
+                all_cst_nodes.extend(cst_nodes)
+                all_diags.extend(
+                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                    for d in diags
+                )
+                node_span = ast_node.span.offset_by(line_offset, col_offset, char_offset) if ast_node and ast_node.span else default_span
+                p_name = span.parent_name or "Property"
+                p_scope = property_scopes.get(p_name.lower())
+                if p_scope and ast_node:
+                    v_blocks = [ast_node] if isinstance(ast_node, VarBlock) else getattr(ast_node, "var_blocks", [])
+                    for v_block in v_blocks:
+                        for v in v_block.variables:
+                            pv_sym = Symbol(
+                                name=v.name,
+                                kind=SymbolKind.VARIABLE,
+                                span=v.span.offset_by(line_offset, col_offset, char_offset) if v.span else node_span,
+                                file_path=path,
+                                type_ref=v.type_name,
+                                parent_symbol=p_scope.owner_symbol,
+                                doc_comment=v.comment,
+                                var_block_type=v_block.block_type.upper() if getattr(v_block, "block_type", None) else "VAR",
+                            )
+                            p_scope.define(pv_sym)
+                            declared_symbols.append(pv_sym)
+
             # 4. Implementation Bodies (POU, Method, Action, Property)
             elif span.is_implementation:
                 stmts, cst_nodes, diags = parse_implementation(span.content)
                 all_cst_nodes.extend(cst_nodes)
-                all_diags.extend(diags)
+                all_diags.extend(
+                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                    for d in diags
+                )
 
                 impl_scope = active_pou_scope or self.symbol_table.global_scope
                 if span.kind == CdataKind.METHOD_IMPLEMENTATION and span.parent_name:
                     m_scope = method_scopes.get(span.parent_name.lower())
                     if m_scope:
                         impl_scope = m_scope
+                elif span.kind in (CdataKind.PROPERTY_GET_IMPLEMENTATION, CdataKind.PROPERTY_SET_IMPLEMENTATION) and span.parent_name:
+                    p_scope = property_scopes.get(span.parent_name.lower())
+                    if p_scope:
+                        impl_scope = p_scope
 
                 implementation_statements.append((span, impl_scope, stmts))
 
                 if span.kind == CdataKind.ACTION_IMPLEMENTATION and active_pou_scope and span.parent_name:
-                    lines_before = xml_doc.raw_text[:span.content_start].splitlines(keepends=True)
-                    start_line = max(1, len(lines_before))
-                    start_col = max(1, len(lines_before[-1])) if lines_before else 1
+                    start_line, start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
+                    end_line, end_col = offset_to_line_col(xml_doc.raw_text, span.content_end)
                     action_span = SourceSpan.from_bounds(
                         start_line=start_line,
                         start_col=start_col,
                         start_offset=span.content_start,
-                        end_line=start_line + span.content.count("\n"),
-                        end_col=1,
+                        end_line=end_line,
+                        end_col=end_col,
                         end_offset=span.content_end,
                     )
                     action_sym = Symbol(

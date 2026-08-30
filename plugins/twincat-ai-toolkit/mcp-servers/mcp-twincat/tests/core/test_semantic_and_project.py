@@ -19,6 +19,7 @@ from twincat_core.semantic import (
 )
 from twincat_core.syntax import (
     BinaryExpr,
+    CallArg,
     CallExpr,
     IdentifierExpr,
     LiteralExpr,
@@ -233,7 +234,7 @@ class TestSemanticResolution:
 
         # 1. Literal expression
         lit_int = LiteralExpr(span=dummy_span, value="42", literal_type="INT_LITERAL")
-        assert resolver.infer_expression_type(lit_int, sym_table.global_scope) == "INT"
+        assert resolver.infer_expression_type(lit_int, sym_table.global_scope) == "ANY_INT"
 
         # 2. Instance member access (fbSensor1.fMeasurement)
         access_expr = MemberAccessExpr(
@@ -281,7 +282,7 @@ class TestSemanticResolution:
             callee=IdentifierExpr(span=dummy_span, name="__QUERYINTERFACE"),
             args=[],
         )
-        assert resolver.infer_expression_type(query_itf_call, sym_table.global_scope) == "HRESULT"
+        assert resolver.infer_expression_type(query_itf_call, sym_table.global_scope) == "BOOL"
 
         is_valid_ref_call = CallExpr(
             span=dummy_span,
@@ -289,6 +290,42 @@ class TestSemanticResolution:
             args=[],
         )
         assert resolver.infer_expression_type(is_valid_ref_call, sym_table.global_scope) == "BOOL"
+
+        # 6. Variadic MIN, MAX, MUX with 2, 3, 5+ arguments
+        min_multi_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="MIN"),
+            args=[
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="10", literal_type="INT_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="20", literal_type="INT_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="3.14", literal_type="REAL_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="5", literal_type="INT_LITERAL")),
+            ],
+        )
+        assert resolver.infer_expression_type(min_multi_call, sym_table.global_scope) == "ANY_REAL"
+
+        max_multi_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="MAX"),
+            args=[
+                CallArg(span=dummy_span, value=access_expr),  # REAL
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="0.0", literal_type="REAL_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="100.0", literal_type="REAL_LITERAL")),
+            ],
+        )
+        assert resolver.infer_expression_type(max_multi_call, sym_table.global_scope) == "REAL"
+
+        mux_multi_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="MUX"),
+            args=[
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="0", literal_type="INT_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="10", literal_type="INT_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="20", literal_type="INT_LITERAL")),
+                CallArg(span=dummy_span, value=LiteralExpr(span=dummy_span, value="30", literal_type="INT_LITERAL")),
+            ],
+        )
+        assert resolver.infer_expression_type(mux_multi_call, sym_table.global_scope) == "ANY_INT"
 
 
 # =========================================================================
@@ -793,6 +830,141 @@ END_VAR
 
         diags = run_semantic_analysis(ws, pou_file)
         assert any(d.code == "TC-SEM-006" and "Initial value" in d.message for d in diags)
+
+    def test_semantic_bitwise_operations_and_untyped_literals_zero_diagnostics(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_BitwiseAndLiterals.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_BitwiseAndLiterals" Id="{12345678-1234-1234-1234-123456789012}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_BitwiseAndLiterals
+VAR
+    dwMask     : DWORD := 16#0000_0000;
+    nFreq_Hz   : UINT := 50;
+    nBatches   : UDINT := 0;
+    hrCode     : HRESULT := 16#8000_0000;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+dwMask := dwMask OR 16#0000_0001;
+dwMask := dwMask AND 16#FFFF_FFFE;
+nBatches := nBatches + 1;
+hrCode := 0;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 0, f"Expected 0 diagnostics for bitwise operations and untyped literals, found: {diags}"
+
+    def test_semantic_interface_and_class_inheritance_conformance(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        # 1. Base interface
+        itf_base = tmp_path / "I_Base.TcIO"
+        itf_base.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Base" Id="{10000000-0000-0000-0000-000000000001}">
+    <Declaration><![CDATA[INTERFACE I_Base
+METHOD M_Base : BOOL
+END_METHOD]]></Declaration>
+  </Itf>
+</TcPlcObject>""", encoding="utf-8")
+
+        # 2. Extended interface
+        itf_ext = tmp_path / "I_Ext.TcIO"
+        itf_ext.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Ext" Id="{10000000-0000-0000-0000-000000000002}">
+    <Declaration><![CDATA[INTERFACE I_Ext EXTENDS I_Base
+METHOD M_Ext : BOOL
+END_METHOD]]></Declaration>
+  </Itf>
+</TcPlcObject>""", encoding="utf-8")
+
+        # 3. Base class implementing I_Base
+        fb_base = tmp_path / "FB_Base.TcPOU"
+        fb_base.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Base" Id="{10000000-0000-0000-0000-000000000003}">
+    <Declaration><![CDATA[FUNCTION_BLOCK ABSTRACT FB_Base IMPLEMENTS I_Base]]></Declaration>
+    <Method Name="M_Base" Id="{10000000-0000-0000-0000-000000000004}">
+      <Declaration><![CDATA[METHOD M_Base : BOOL]]></Declaration>
+      <Implementation><![CDATA[M_Base := TRUE;]]></Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        # 4. Derived class extending FB_Base and implementing I_Ext
+        fb_derived = tmp_path / "FB_Derived.TcPOU"
+        fb_derived.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Derived" Id="{10000000-0000-0000-0000-000000000005}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Derived EXTENDS FB_Base IMPLEMENTS I_Ext]]></Declaration>
+    <Method Name="M_Ext" Id="{10000000-0000-0000-0000-000000000006}">
+      <Declaration><![CDATA[METHOD M_Ext : BOOL]]></Declaration>
+      <Implementation><![CDATA[M_Ext := TRUE;]]></Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        # 5. Consumer testing polymorphic assignments and __QUERYINTERFACE
+        fb_test = tmp_path / "FB_Test.TcPOU"
+        fb_test.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Test" Id="{10000000-0000-0000-0000-000000000007}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Test
+VAR
+    ipBase        : I_Base;
+    ipExt         : I_Ext;
+    fbDev         : FB_Derived;
+    bQuerySuccess : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+ipBase := fbDev;
+ipBase := ipExt;
+bQuerySuccess := __QUERYINTERFACE(ipBase, ipExt);
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(itf_base)
+        ws.update_file(itf_ext)
+        ws.update_file(fb_base)
+        ws.update_file(fb_derived)
+        ws.update_file(fb_test)
+
+        diags = run_semantic_analysis(ws, fb_test)
+        assert len(diags) == 0, f"Expected 0 diagnostics for polymorphic assignments and __QUERYINTERFACE, found: {diags}"
+
+    def test_semantic_analysis_catches_undeclared_identifier(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_UndeclaredTest.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_UndeclaredTest" Id="{10000000-0000-0000-0000-000000000099}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_UndeclaredTest
+VAR
+    nSum : INT;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+nSum := nUnknownVar + 10;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+        diags = run_semantic_analysis(ws, pou_file)
+        assert any(d.code == "TC-SEM-008" and "nUnknownVar" in d.message for d in diags)
 
 
 

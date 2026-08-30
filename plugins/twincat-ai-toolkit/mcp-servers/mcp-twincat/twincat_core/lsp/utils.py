@@ -10,7 +10,7 @@ import lsprotocol.types as lsp
 
 from ..semantic.symbols import Symbol, SymbolKind
 from ..syntax.diagnostics import DiagnosticSeverity, SyntaxDiagnostic
-from ..syntax.span import Position, SourceSpan
+from ..syntax.span import Position, SourceSpan, offset_to_line_col
 from ..xml.types import CdataSpan
 
 
@@ -119,13 +119,8 @@ def symbol_to_document_symbol(sym: Symbol) -> lsp.DocumentSymbol:
 
 def cdata_span_to_lsp_location(span: CdataSpan, raw_text: str, file_path: Path) -> lsp.Location:
     """Convert a CdataSpan in raw XML text to an LSP Location pointing to the content body."""
-    lines_before = raw_text[:span.content_start].splitlines(keepends=True)
-    start_line = max(1, len(lines_before))
-    start_col = len(lines_before[-1]) + 1 if (lines_before and not lines_before[-1].endswith(("\n", "\r"))) else 1
-
-    lines_content = span.content.splitlines(keepends=True)
-    end_line = start_line + max(0, len(lines_content) - 1)
-    end_col = len(lines_content[-1]) + 1 if lines_content else start_col
+    start_line, start_col = offset_to_line_col(raw_text, span.content_start)
+    end_line, end_col = offset_to_line_col(raw_text, span.content_end)
 
     src_span = SourceSpan.from_bounds(
         start_line=start_line,

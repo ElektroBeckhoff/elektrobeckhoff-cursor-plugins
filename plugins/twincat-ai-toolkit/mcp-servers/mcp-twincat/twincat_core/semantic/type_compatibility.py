@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional, Set
 from .symbols import SymbolKind
 
 if TYPE_CHECKING:
-    from .type_index import TypeIndex
+    from .type_index import TypeDescriptor, TypeIndex
 
 
 class TypeCheckResultKind(StrEnum):
@@ -45,6 +45,7 @@ BIT_STRINGS: dict[str, tuple[int, int]] = {
     "WORD": (16, 2),
     "DWORD": (32, 3),
     "LWORD": (64, 4),
+    "HRESULT": (32, 3),
 }
 
 FLOATS: dict[str, tuple[int, int]] = {
@@ -111,6 +112,69 @@ def _clean_type_str(type_str: str) -> str:
     return t.upper()
 
 
+def _implements_interface(
+    s_desc: Any,
+    target_itf_name: str,
+    type_index: Any,
+    context_path: Optional[Path] = None,
+    visited: Optional[set[str]] = None,
+) -> bool:
+    """Check if a symbol/type implements or extends target interface directly or transitively."""
+    if visited is None:
+        visited = set()
+    s_name_lower = s_desc.name.lower()
+    if s_name_lower in visited:
+        return False
+    visited.add(s_name_lower)
+
+    target_lower = target_itf_name.lower()
+
+    # 1. Direct implements / extends interface list
+    for itf in s_desc.implements_names:
+        if itf.lower() == target_lower:
+            return True
+        itf_desc = type_index.get_type(itf, context_path=context_path)
+        if itf_desc and _implements_interface(itf_desc, target_itf_name, type_index, context_path, visited):
+            return True
+
+    # 2. Check base class (extends_name)
+    if s_desc.extends_name:
+        base_desc = type_index.get_type(s_desc.extends_name, context_path=context_path)
+        if base_desc and _implements_interface(base_desc, target_itf_name, type_index, context_path, visited):
+            return True
+
+    return False
+
+
+def _inherits_from_class(
+    s_desc: Any,
+    target_class_name: str,
+    type_index: Any,
+    context_path: Optional[Path] = None,
+    visited: Optional[set[str]] = None,
+) -> bool:
+    """Check if a POU inherits from a target class directly or transitively (multi-level EXTENDS)."""
+    if visited is None:
+        visited = set()
+    s_name_lower = s_desc.name.lower()
+    if s_name_lower in visited:
+        return False
+    visited.add(s_name_lower)
+
+    target_lower = target_class_name.lower()
+    curr = s_desc.extends_name
+    while curr:
+        if curr.lower() == target_lower:
+            return True
+        curr_desc = type_index.get_type(curr, context_path=context_path)
+        if not curr_desc or curr_desc.name.lower() in visited:
+            break
+        visited.add(curr_desc.name.lower())
+        curr = curr_desc.extends_name
+
+    return False
+
+
 def check_type_assignment(
     target_type: Optional[str],
     source_type: Optional[str],
@@ -127,20 +191,113 @@ def check_type_assignment(
     if not t_clean or not s_clean:
         return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
-    # 1. Generic & Wildcard types (ANY, PVOID, __SYSTEM.*)
+    # 1. Generic & Wildcard types (ANY, ANY_TYPE, PVOID, __SYSTEM.*)
     if (
-        t_clean in GENERIC_TYPES
-        or s_clean in GENERIC_TYPES
+        t_clean in ("ANY", "ANY_TYPE", "PVOID")
+        or s_clean in ("ANY", "ANY_TYPE", "PVOID")
         or t_clean.startswith("__SYSTEM.")
         or s_clean.startswith("__SYSTEM.")
     ):
         return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
+    # Unwrap ALIAS / Subrange types if needed
+    if type_index:
+        t_desc = type_index.get_type(t_clean, context_path=context_path)
+        if t_desc and t_desc.kind == SymbolKind.ALIAS and t_desc.base_type_name:
+            unwrapped_t = _clean_type_str(t_desc.base_type_name)
+            if unwrapped_t and unwrapped_t != t_clean:
+                t_clean = unwrapped_t
+
+        s_desc = type_index.get_type(s_clean, context_path=context_path)
+        if s_desc and s_desc.kind == SymbolKind.ALIAS and s_desc.base_type_name:
+            unwrapped_s = _clean_type_str(s_desc.base_type_name)
+            if unwrapped_s and unwrapped_s != s_clean:
+                s_clean = unwrapped_s
+
     # 2. Identical types
     if t_clean == s_clean:
         return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
-    # 3. Pointers & References
+    all_ints = {**SIGNED_INTS, **UNSIGNED_INTS, **BIT_STRINGS}
+
+    # 2b. Literal & Polymorphic Integer Types (ANY_INT, ANY_BIT, ANY_NUM)
+    if s_clean in ("ANY_INT", "INT_LITERAL", "ANY_NUM", "ANY_BIT"):
+        if t_clean in all_ints or t_clean in FLOATS or t_clean in ("ANY_INT", "ANY_NUM", "ANY_BIT", "ANY_REAL"):
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if t_clean.startswith("POINTER TO") or t_clean == "POINTER":
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if t_clean in BOOLEAN_TYPES:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot convert integer literal to '{target_type}'",
+                code="TC-SEM-006",
+            )
+        if t_clean in STRING_TYPES:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot convert integer literal to '{target_type}' without TO_STRING()",
+                code="TC-SEM-006",
+            )
+        return TypeCheckResult(
+            TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+            message=f"Cannot convert integer literal to '{target_type}'",
+            code="TC-SEM-006",
+        )
+
+    if s_clean in ("ANY_REAL", "REAL_LITERAL"):
+        if t_clean in FLOATS or t_clean in ("ANY_REAL", "ANY_NUM"):
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if t_clean in all_ints:
+            return TypeCheckResult(
+                TypeCheckResultKind.NARROWING_WARNING,
+                message=f"Implicit conversion from floating point literal to integer '{target_type}': fractional part will be truncated",
+                code="TC-SEM-007",
+            )
+        if t_clean in BOOLEAN_TYPES:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot convert floating point literal to '{target_type}'",
+                code="TC-SEM-006",
+            )
+        if t_clean in STRING_TYPES:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot convert floating point literal to '{target_type}' without TO_STRING()",
+                code="TC-SEM-006",
+            )
+        return TypeCheckResult(
+            TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+            message=f"Cannot convert floating point literal to '{target_type}'",
+            code="TC-SEM-006",
+        )
+
+    if t_clean in ("ANY_INT", "ANY_NUM", "ANY_BIT"):
+        if s_clean in all_ints:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if s_clean in FLOATS:
+            return TypeCheckResult(
+                TypeCheckResultKind.NARROWING_WARNING,
+                message=f"Implicit conversion from floating point '{source_type}' to integer: fractional part will be truncated",
+                code="TC-SEM-007",
+            )
+        return TypeCheckResult(
+            TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+            message=f"Cannot convert type '{source_type}' to '{target_type}'",
+            code="TC-SEM-006",
+        )
+
+    # 3. References & Pointers
+    if t_clean.startswith("REFERENCE TO") or t_clean == "REFERENCE":
+        target_inner = t_clean[12:].strip() if t_clean.startswith("REFERENCE TO") else "ANY"
+        if s_clean.startswith("REFERENCE TO"):
+            source_inner = s_clean[12:].strip()
+            return check_type_assignment(target_inner, source_inner, type_index, context_path)
+        return check_type_assignment(target_inner, s_clean, type_index, context_path)
+
+    if s_clean.startswith("REFERENCE TO") or s_clean == "REFERENCE":
+        source_inner = s_clean[12:].strip() if s_clean.startswith("REFERENCE TO") else "ANY"
+        return check_type_assignment(t_clean, source_inner, type_index, context_path)
+
     if t_clean.startswith("POINTER TO") or t_clean == "POINTER":
         if s_clean in ("PVOID", "0", "NULL", "16#0") or s_clean.startswith("POINTER TO"):
             if s_clean in ("PVOID", "0", "NULL", "16#0") or t_clean == "POINTER TO BYTE" or s_clean == "POINTER TO BYTE":
@@ -174,14 +331,15 @@ def check_type_assignment(
         s_desc = type_index.get_type(s_clean, context_path=context_path)
 
         if t_desc and s_desc:
-            # Target is Interface, Source is POU implementing it
-            if t_desc.kind == SymbolKind.INTERFACE and s_desc.kind in (SymbolKind.POU, SymbolKind.FUNCTION_BLOCK):
-                if t_clean.lower() in [i.lower() for i in s_desc.implements_names]:
+            # Target is Interface, Source is POU or Interface implementing/extending it
+            if t_desc.kind == SymbolKind.INTERFACE:
+                if _implements_interface(s_desc, t_clean, type_index, context_path):
                     return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
-            # Target is base FB, Source is derived FB (EXTENDS)
-            if s_desc.extends_name and s_desc.extends_name.upper() == t_clean:
-                return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+            # Target is base FB / POU, Source is derived FB (EXTENDS multi-level)
+            if t_desc.kind in (SymbolKind.POU, SymbolKind.FUNCTION_BLOCK):
+                if _inherits_from_class(s_desc, t_clean, type_index, context_path):
+                    return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
     # 5. Booleans
     if t_clean in BOOLEAN_TYPES:

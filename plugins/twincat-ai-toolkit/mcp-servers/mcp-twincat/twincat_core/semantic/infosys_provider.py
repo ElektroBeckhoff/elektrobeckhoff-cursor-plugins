@@ -36,8 +36,16 @@ class InfoSysTypeProvider:
 
         self._init_attempted = True
         try:
+            import os
             from infosys_mshc import InfoSysMshcIndex
-            self._index = InfoSysMshcIndex()
+            from infosys_mshc.paths import resolve_mshc_path
+
+            mshc_path = resolve_mshc_path()
+            if not mshc_path or not os.path.isfile(mshc_path):
+                logger.debug(f"InfoSys MSHC archive not installed or not found at: {mshc_path}")
+                return None
+
+            self._index = InfoSysMshcIndex(mshc_path=mshc_path)
             return self._index
         except Exception as e:
             logger.debug(f"InfoSys MSHC archive unavailable: {e}")
@@ -152,12 +160,22 @@ class InfoSysTypeProvider:
                 is_external=True,
             )
 
-            # 2. Add fields (Inputs, Outputs, Parameters, Struct Fields)
+            # 2. Create root symbol for the type
+            root_sym = Symbol(
+                name=title,
+                kind=kind,
+                span=DEFAULT_SPAN,
+                type_ref=ret_type if kind == SymbolKind.FUNCTION else title,
+                doc_comment=description or f"Beckhoff library entity {title} ({library_name})",
+            )
+            desc.symbol = root_sym
+
+            # 3. Add fields (Inputs, Outputs, Parameters, Struct Fields)
             inputs = page.get("inputs", []) or []
             outputs = page.get("outputs", []) or []
             params = page.get("parameters", []) or []
 
-            for p in inputs + outputs + params:
+            for p in inputs:
                 p_name = p.get("name", "").strip() if isinstance(p, dict) else getattr(p, "name", "").strip()
                 p_type = p.get("type", "BOOL").strip() if isinstance(p, dict) else getattr(p, "type", "BOOL").strip()
                 p_desc = p.get("description", "") if isinstance(p, dict) else getattr(p, "description", "")
@@ -168,10 +186,44 @@ class InfoSysTypeProvider:
                         span=DEFAULT_SPAN,
                         type_ref=p_type,
                         doc_comment=p_desc,
+                        parent_symbol=root_sym,
+                        var_block_type="VAR_INPUT" if kind != SymbolKind.STRUCT else "STRUCT_FIELD",
                     )
                     desc.add_field(sym)
 
-            # 3. Fallback for fields from syntax block if table was empty
+            for p in outputs:
+                p_name = p.get("name", "").strip() if isinstance(p, dict) else getattr(p, "name", "").strip()
+                p_type = p.get("type", "BOOL").strip() if isinstance(p, dict) else getattr(p, "type", "BOOL").strip()
+                p_desc = p.get("description", "") if isinstance(p, dict) else getattr(p, "description", "")
+                if p_name:
+                    sym = Symbol(
+                        name=p_name,
+                        kind=SymbolKind.VARIABLE if kind != SymbolKind.STRUCT else SymbolKind.STRUCT_FIELD,
+                        span=DEFAULT_SPAN,
+                        type_ref=p_type,
+                        doc_comment=p_desc,
+                        parent_symbol=root_sym,
+                        var_block_type="VAR_OUTPUT" if kind != SymbolKind.STRUCT else "STRUCT_FIELD",
+                    )
+                    desc.add_field(sym)
+
+            for p in params:
+                p_name = p.get("name", "").strip() if isinstance(p, dict) else getattr(p, "name", "").strip()
+                p_type = p.get("type", "BOOL").strip() if isinstance(p, dict) else getattr(p, "type", "BOOL").strip()
+                p_desc = p.get("description", "") if isinstance(p, dict) else getattr(p, "description", "")
+                if p_name:
+                    sym = Symbol(
+                        name=p_name,
+                        kind=SymbolKind.VARIABLE if kind != SymbolKind.STRUCT else SymbolKind.STRUCT_FIELD,
+                        span=DEFAULT_SPAN,
+                        type_ref=p_type,
+                        doc_comment=p_desc,
+                        parent_symbol=root_sym,
+                        var_block_type="VAR_INPUT" if kind != SymbolKind.STRUCT else "STRUCT_FIELD",
+                    )
+                    desc.add_field(sym)
+
+            # 4. Fallback for fields from syntax block if table was empty
             if not desc.fields and syntax:
                 from ..syntax.parser import parse_declaration
                 try:
@@ -187,6 +239,8 @@ class InfoSysTypeProvider:
                                     kind=SymbolKind.VARIABLE if kind != SymbolKind.STRUCT else SymbolKind.STRUCT_FIELD,
                                     span=DEFAULT_SPAN,
                                     type_ref=v.type_name,
+                                    parent_symbol=root_sym,
+                                    var_block_type=vb.block_type.upper() if getattr(vb, "block_type", None) else "VAR",
                                 )
                                 desc.add_field(sym)
                     elif ast and getattr(ast, "definition", None) and hasattr(ast.definition, "fields"):
@@ -196,12 +250,14 @@ class InfoSysTypeProvider:
                                 kind=SymbolKind.STRUCT_FIELD,
                                 span=DEFAULT_SPAN,
                                 type_ref=f.type_name,
+                                parent_symbol=root_sym,
+                                var_block_type="STRUCT_FIELD",
                             )
                             desc.add_field(sym)
                 except Exception:
                     pass
 
-            # 4. Add methods
+            # 5. Add methods
             methods = page.get("methods", []) or []
             for m in methods:
                 m_name = m.get("name", "").strip() if isinstance(m, dict) else getattr(m, "name", "").strip()
@@ -214,10 +270,11 @@ class InfoSysTypeProvider:
                         span=DEFAULT_SPAN,
                         type_ref=m_sig if m_sig else None,
                         doc_comment=m_desc,
+                        parent_symbol=root_sym,
                     )
                     desc.add_method(m_sym)
 
-            # 5. Add properties
+            # 6. Add properties
             properties = page.get("properties", []) or []
             for prop in properties:
                 prop_name = prop.get("name", "").strip() if isinstance(prop, dict) else getattr(prop, "name", "").strip()
@@ -230,17 +287,9 @@ class InfoSysTypeProvider:
                         span=DEFAULT_SPAN,
                         type_ref=prop_type,
                         doc_comment=prop_desc,
+                        parent_symbol=root_sym,
                     )
                     desc.add_property(p_sym)
-
-            # 6. Create root symbol for the type
-            desc.symbol = Symbol(
-                name=title,
-                kind=kind,
-                span=DEFAULT_SPAN,
-                type_ref=ret_type if kind == SymbolKind.FUNCTION else title,
-                doc_comment=description or f"Beckhoff library entity {title} ({library_name})",
-            )
 
             self._cache[key] = desc
             return desc
