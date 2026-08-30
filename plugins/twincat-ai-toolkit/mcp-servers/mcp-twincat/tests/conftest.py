@@ -13,7 +13,6 @@ setup_migrator_paths()
 for _subdir in (
     "automation_interface",
     "plcproj",
-    "infosys_mshc",
     "ads",
     "umrt",
     "systemtest",

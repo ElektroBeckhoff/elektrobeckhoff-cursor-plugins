@@ -5,9 +5,18 @@ import unittest
 
 
 REQUIRED_TOOLS = {
-    "twincat_format_code",
+    # STweep (XAE)
+    "twincat_stweep_format",
+    "twincat_stweep_format_progress",
+    "twincat_stweep_format_cancel",
+    # Python formatter (no XAE)
+    "twincat_format",
     "twincat_format_progress",
-    "twincat_format_cancel",
+    "twincat_format_validate",
+    "twincat_format_config",
+    # Autodocs (no XAE)
+    "twincat_autodocs",
+    # Export / session
     "twincat_export_library",
     "twincat_export_progress",
     "twincat_export_check_artifacts",
@@ -21,12 +30,10 @@ class TestMcpToolRegistration(unittest.TestCase):
         import server as srv
 
         names = set()
-        # FastMCP stores tools in _tool_manager._tools (name -> Tool)
         mgr = getattr(srv.mcp, "_tool_manager", None)
         if mgr is not None:
             tools = getattr(mgr, "_tools", None) or {}
             names.update(tools.keys())
-        # Fallback: public attribute used by some versions
         if not names and hasattr(srv.mcp, "_tools"):
             names.update(getattr(srv.mcp, "_tools", {}).keys())
         missing = REQUIRED_TOOLS - names
