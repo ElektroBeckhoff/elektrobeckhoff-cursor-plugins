@@ -1,0 +1,196 @@
+{
+  "name": "TwinCAT 3 XAE (Light)",
+  "type": "light",
+  "colors": {
+    "editor.background": "#FFFFFF",
+    "editor.foreground": "#000000",
+    "editorLineNumber.foreground": "#2B91AF",
+    "editorLineNumber.activeForeground": "#000000",
+    "editorCursor.foreground": "#000000",
+    "editor.selectionBackground": "#ADD6FF",
+    "editor.inactiveSelectionBackground": "#E5EBF1",
+    "editor.selectionHighlightBackground": "#EBF1F7",
+    "editor.wordHighlightBackground": "#EBF1F7",
+    "editor.findMatchBackground": "#A8AC94",
+    "editor.findMatchHighlightBackground": "#EAEAE3",
+    "editorIndentGuide.background1": "#D3D3D3",
+    "editorIndentGuide.activeBackground1": "#939393",
+    "editorWhitespace.foreground": "#BFBFBF",
+    "editorBracketMatch.background": "#DBDBDB",
+    "editorBracketMatch.border": "#B0B0B0"
+  },
+  "tokenColors": [
+    {
+      "name": "TwinCAT ST Keywords",
+      "scope": [
+        "keyword.control",
+        "keyword.declaration",
+        "keyword.other",
+        "keyword.operator.logical",
+        "storage.modifier",
+        "keyword.operator.memory"
+      ],
+      "settings": {
+        "foreground": "#0000FF"
+      }
+    },
+    {
+      "name": "TwinCAT Primitive Data Types",
+      "scope": [
+        "storage.type.primitive",
+        "storage.type.container"
+      ],
+      "settings": {
+        "foreground": "#0000FF"
+      }
+    },
+    {
+      "name": "TwinCAT User Defined Types / DUTs / FBs / Structs / Enums",
+      "scope": [
+        "entity.name.type",
+        "storage.type.user",
+        "storage.type.alias",
+        "support.type",
+        "entity.name.type.class.fb",
+        "entity.name.type.struct",
+        "entity.name.type.enum",
+        "entity.name.type.interface",
+        "entity.name.type.alias",
+        "entity.name.type.gvl",
+        "entity.name.type.library.fb"
+      ],
+      "settings": {
+        "foreground": "#2B91AF"
+      }
+    },
+    {
+      "name": "TwinCAT Variables and Parameters",
+      "scope": [
+        "variable.other",
+        "variable.other.readwrite",
+        "variable.parameter",
+        "variable.other.property"
+      ],
+      "settings": {
+        "foreground": "#001080"
+      }
+    },
+    {
+      "name": "TwinCAT Comments",
+      "scope": [
+        "comment",
+        "comment.line",
+        "comment.block"
+      ],
+      "settings": {
+        "foreground": "#008000"
+      }
+    },
+    {
+      "name": "TwinCAT Strings",
+      "scope": [
+        "string.quoted",
+        "string.quoted.single",
+        "string.quoted.double"
+      ],
+      "settings": {
+        "foreground": "#A31515"
+      }
+    },
+    {
+      "name": "TwinCAT Escape Characters",
+      "scope": [
+        "constant.character.escape"
+      ],
+      "settings": {
+        "foreground": "#EE0000"
+      }
+    },
+    {
+      "name": "TwinCAT Booleans",
+      "scope": [
+        "constant.language.boolean",
+        "constant.language.null"
+      ],
+      "settings": {
+        "foreground": "#0000FF"
+      }
+    },
+    {
+      "name": "TwinCAT Numbers and Literals",
+      "scope": [
+        "constant.numeric"
+      ],
+      "settings": {
+        "foreground": "#000000"
+      }
+    },
+    {
+      "name": "TwinCAT Pragmas / Attributes",
+      "scope": [
+        "meta.preprocessor",
+        "keyword.other.pragma"
+      ],
+      "settings": {
+        "foreground": "#808080"
+      }
+    },
+    {
+      "name": "TwinCAT Hardware IO Direct Addresses",
+      "scope": [
+        "variable.other.direct-address"
+      ],
+      "settings": {
+        "foreground": "#AF00DB"
+      }
+    },
+    {
+      "name": "TwinCAT Function / Method Calls",
+      "scope": [
+        "entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#74531F"
+      }
+    },
+    {
+      "name": "TwinCAT Language Variables (THIS, SUPER)",
+      "scope": [
+        "variable.language.this-super"
+      ],
+      "settings": {
+        "foreground": "#0000FF"
+      }
+    },
+    {
+      "name": "TwinCAT XML Tags",
+      "scope": [
+        "entity.name.tag",
+        "punctuation.definition.tag"
+      ],
+      "settings": {
+        "foreground": "#800000"
+      }
+    },
+    {
+      "name": "TwinCAT XML Attributes",
+      "scope": [
+        "entity.other.attribute-name"
+      ],
+      "settings": {
+        "foreground": "#FF0000"
+      }
+    },
+    {
+      "name": "TwinCAT XML CDATA & Envelope",
+      "scope": [
+        "string.unquoted.cdata.xml",
+        "meta.tag.preprocessor.xml"
+      ],
+      "settings": {
+        "foreground": "#808080"
+      }
+    }
+  ]
+}

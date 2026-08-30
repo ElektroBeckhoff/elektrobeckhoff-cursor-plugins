@@ -1,0 +1,44 @@
+{
+  "fileTypes": [],
+  "injectionSelector": "L:text.xml",
+  "patterns": [
+    {
+      "include": "#twincat-cdata-block"
+    }
+  ],
+  "repository": {
+    "twincat-cdata-block": {
+      "begin": "(<)(Declaration|ST|Implementation|Interface|Action|Method|Property|Get|Set)(>)\\s*",
+      "end": "\\s*(</)(\\2)(>)$",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.xml" },
+        "2": { "name": "entity.name.tag.localname.xml" },
+        "3": { "name": "punctuation.definition.tag.xml" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.xml" },
+        "2": { "name": "entity.name.tag.localname.xml" },
+        "3": { "name": "punctuation.definition.tag.xml" }
+      },
+      "patterns": [
+        {
+          "begin": "\\s*(<!\\[CDATA\\[)\\s*",
+          "end": "\\s*(\\]\\]>)",
+          "beginCaptures": {
+            "1": { "name": "string.unquoted.cdata.xml" }
+          },
+          "endCaptures": {
+            "1": { "name": "string.unquoted.cdata.xml" }
+          },
+          "contentName": "meta.embedded.block.iecst",
+          "patterns": [
+            {
+              "include": "source.iecst"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "scopeName": "xml.iecst.codeblock"
+}

@@ -1,0 +1,247 @@
+{
+  "name": "twincat-iecst",
+  "displayName": "TwinCAT 3 Structured Text & Tooling",
+  "description": "TwinCAT 3 Structured Text language support, LSP integration, and Virtual ST projection powered by twincat_core.",
+  "version": "0.1.0",
+  "publisher": "ElektroBeckhoff",
+  "author": "elektrobeckhoff",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ElektroBeckhoff/elektrobeckhoff-cursor-plugins"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "twincat",
+    "beckhoff",
+    "plc",
+    "structured text",
+    "iec61131-3",
+    "iecst"
+  ],
+  "activationEvents": [
+    "onLanguage:iecst",
+    "workspaceContains:**/*.plcproj",
+    "workspaceContains:**/*.TcPOU",
+    "workspaceContains:**/*.TcDUT",
+    "workspaceContains:**/*.TcGVL"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "iecst",
+        "aliases": [
+          "Structured Text",
+          "IEC 61131-3 ST",
+          "TwinCAT ST",
+          "iecst"
+        ],
+        "extensions": [
+          ".TcPOU",
+          ".TcGVL",
+          ".TcDUT",
+          ".TcIO",
+          ".TcTTO",
+          ".st",
+          ".iecst"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "iecst",
+        "scopeName": "source.iecst",
+        "path": "./syntaxes/iecst.tmLanguage.json"
+      },
+      {
+        "scopeName": "xml.iecst.codeblock",
+        "path": "./syntaxes/xml.iecst.codeblock.json",
+        "injectTo": [
+          "text.xml"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.iecst": "iecst"
+        }
+      }
+    ],
+    "themes": [
+      {
+        "label": "TwinCAT 3 XAE (Light)",
+        "uiTheme": "vs",
+        "path": "./themes/twincat-xae-light.json"
+      },
+      {
+        "label": "TwinCAT 3 XAE (Dark)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/twincat-xae-dark.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "twincat.openVirtualSt",
+        "title": "TwinCAT: Open Virtual ST View",
+        "category": "TwinCAT"
+      },
+      {
+        "command": "twincat.saveVirtualSt",
+        "title": "TwinCAT: Save Virtual ST to XML",
+        "category": "TwinCAT"
+      },
+      {
+        "command": "twincat.restartServer",
+        "title": "TwinCAT: Restart Language Server",
+        "category": "TwinCAT"
+      },
+      {
+        "command": "twincat.ai.pagefaultAudit",
+        "title": "TwinCAT AI: Pagefault & Safety Audit",
+        "category": "TwinCAT AI"
+      },
+      {
+        "command": "twincat.ai.codeReview",
+        "title": "TwinCAT AI: Code Review (IEC 61131-3 & OOP)",
+        "category": "TwinCAT AI"
+      },
+      {
+        "command": "twincat.ai.addComments",
+        "title": "TwinCAT AI: Add Comments (* *)",
+        "category": "TwinCAT AI"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "twincat.ai.submenu",
+        "label": "TwinCAT AI"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "twincat.openVirtualSt",
+          "when": "resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i",
+          "group": "navigation@1"
+        },
+        {
+          "command": "twincat.saveVirtualSt",
+          "when": "resourceScheme == twincat-st",
+          "group": "1_modification@1"
+        },
+        {
+          "submenu": "twincat.ai.submenu",
+          "when": "resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || editorLangId == iecst || resourceScheme == twincat-st",
+          "group": "1_modification@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "submenu": "twincat.ai.submenu",
+          "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i",
+          "group": "7_modification"
+        },
+        {
+          "command": "twincat.openVirtualSt",
+          "when": "resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i",
+          "group": "navigation@1"
+        }
+      ],
+      "twincat.ai.submenu": [
+        {
+          "command": "twincat.ai.pagefaultAudit",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "twincat.ai.codeReview",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "twincat.ai.addComments",
+          "group": "1_actions@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "twincat.openVirtualSt",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "twincat.saveVirtualSt",
+          "when": "resourceScheme == twincat-st"
+        },
+        {
+          "command": "twincat.restartServer"
+        },
+        {
+          "command": "twincat.ai.pagefaultAudit",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "twincat.ai.codeReview",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "twincat.ai.addComments",
+          "when": "editorIsOpen"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "TwinCAT 3 Language Server",
+      "properties": {
+        "twincat.server.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable running twincat_core.lsp"
+        },
+        "twincat.server.extraPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional PYTHONPATH directories for twincat_core module lookup"
+        },
+        "twincat.server.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the TwinCAT Language Server"
+        },
+        "twincat.format.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable document formatting via twincat_core"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "package": "vsce package --no-dependencies -o twincat-iecst.vsix"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  }
+}
