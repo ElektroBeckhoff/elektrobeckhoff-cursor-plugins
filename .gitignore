@@ -14,6 +14,9 @@ out/
 **/out/
 .coverage
 *.egg-info/
+*.log
+.logs/
+**/.logs/
 
 # Allow pre-bundled VS Code extension assets so extension works without Node/NPM
 !plugins/twincat-ai-toolkit/vscode-extension/dist/**
