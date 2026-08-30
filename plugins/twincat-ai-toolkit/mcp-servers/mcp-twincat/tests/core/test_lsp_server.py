@@ -679,6 +679,36 @@ class TestLspServerIntegration:
         assert "bFault : BOOL := FALSE;" in save_res["newXml"]
         assert 'Id="{11111111-2222-3333-4444-555555555555}"' in save_res["newXml"]
 
+    def test_lsp_server_custom_features_with_object_params(self, tmp_path):
+        """Verify that server feature handlers accept pygls Object instances (without .get() method)."""
+        pou_file = tmp_path / "FB_LspObjectParam.TcPOU"
+        pou_file.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        server = TwinCatLanguageServer()
+        server.workspace_index.update_file(pou_file)
+        uri = path_to_uri(pou_file)
+
+        class PyglsObject:
+            """Simulates pygls Object without .get() method."""
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+
+        # 1. on_virtual_st_get with object param
+        on_get = server.protocol.fm.features["twincat/virtualSt/get"]
+        res_get = on_get(PyglsObject(uri=uri))
+        assert "FUNCTION_BLOCK FB_Motor" in res_get["virtualSt"]
+
+        # 2. on_virtual_st_map_location with object param
+        on_map = server.protocol.fm.features["twincat/virtualSt/mapLocation"]
+        res_map = on_map(PyglsObject(uri=uri, line=1, col=1, direction="toXml"))
+        assert res_map["line"] >= 1
+
+        # 3. on_virtual_st_save with object param
+        on_save = server.protocol.fm.features["twincat/virtualSt/save"]
+        res_save = on_save(PyglsObject(uri=uri, virtualSt=res_get["virtualSt"]))
+        assert res_save["success"] is True
+
     def test_lsp_definition_fixture_isolation(self, tmp_path):
         """Verify Go to Definition inside a fixture file navigates to sibling fixture file, not solution."""
         sol_dir = tmp_path / "solution" / "plc_proj"
