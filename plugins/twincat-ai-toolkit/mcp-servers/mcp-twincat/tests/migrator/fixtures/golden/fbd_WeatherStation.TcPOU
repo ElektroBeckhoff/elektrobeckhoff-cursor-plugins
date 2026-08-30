@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
-  <POU Name="WeatherStation" Id="{66a666a9-cc0c-41fa-a3df-165bf63a5494}" SpecialFunc="None">
+  <POU Name="WeatherStation" Id="{f2f16823-af4f-46d6-a58f-303587e6d558}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM WeatherStation
 VAR
 	fbThiesWSC11       : FB_ThiesWSC11;
@@ -15,20 +15,22 @@ VAR
 	fbCalcSunPosition             : FB_CalcSunPosition;
 	fbThresholdswitch_Beschattung : ARRAY[1..4] OF FB_Thresholdswitch;
 	R_TRIG                        : ARRAY[1..4] OF R_TRIG;
-	TOF                           : ARRAY[1..4] OF TOF;
-	bTest_West                    : BOOL := FALSE;
-	bTest_Sued                    : BOOL := FALSE;
-	bTest_Osten                   : BOOL := FALSE;
-	bTestSafetyPosition           : BOOL := FALSE;
-	bTestSafetyPositionMarkise    : BOOL := FALSE;
-	bTest                         : BOOL;
-END_VAR]]></Declaration>
+;
+	TOF                        : ARRAY[1..4] OF TOF;
+	bTest_West                 : BOOL := FALSE;
+	bTest_Sued                 : BOOL := FALSE;
+	bTest_Osten                : BOOL := FALSE;
+	bTestSafetyPosition        : BOOL := FALSE;
+	bTestSafetyPositionMarkise : BOOL := FALSE;
+	bTest                      : BOOL;
+END_VAR
+]]></Declaration>
     <Implementation>
       <ST><![CDATA[(* ============================================================================
    AUTO-GENERATED from FBD/FUP by migrator.fbd
    Source:           fbd_WeatherStation.TcPOU
    Version:          1.0.0
-   Date:             2026-08-19 13:29:26
+   Date:             2026-08-28 16:25:10
    Accuracy:         100.00 %
    Type Mismatches:  1 !
 
@@ -42,15 +44,15 @@ A_Sonnenposition();
 
 (* FBD Network 2 *)
 fbThiesWSC11(
-        tUpdateZeit                := T#1s,
+        tUpdateZeit                := T#1S,
         iMittelungsintervallWind   := 0,
         bWingeschwindigkeitLedEin  := FALSE,
         bDaemmerungMittelwert      := TRUE,
         iNordKorrekturWindrichtung := 0,
         iStationshoeheUeberNN      := 90,
         bResetWSC11                := bResetWSC11,
-        tRegenVerzoegerung         := T#5s,
-        tStoermeldeVerzoegerung    := T#15s,
+        tRegenVerzoegerung         := T#5S,
+        tStoermeldeVerzoegerung    := T#15S,
         TXBuffer                   := TxBufferWetter,
         RXBuffer                   := RxBufferWetter,
         stDaten                    => stDatenWetterstation (* TYPE MISMATCH: ST_WSC11Daten -> ThiesWSC11.ST_WSC11Daten *));
@@ -63,75 +65,75 @@ fbEB_Time(
         bUseExtTime    := TRUE,
         dtExtTime      := fbThiesWSC11Time.dtMEZ,
         bSetTimeManual := bSetTimeManual,
-        tSyncCycletime := T#15m,
+        tSyncCycletime := T#15M,
         dtSystemtime   => gdtAktuelleUhrzeit);
 
 (* FBD Network 5 *)
 fbThresholdSwitch[5](
-    fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
-    fLowerLimit      := 10,
-    fUpperLimit      := 13,
-    tLowerLimitDelay := T#2m,
-    tUpperLimitDelay := T#5s);
+        fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
+        fLowerLimit      := 10,
+        fUpperLimit      := 13,
+        tLowerLimitDelay := T#2M,
+        tUpperLimitDelay := T#5S);
 gbSafetyPosition := fbThresholdSwitch[5].bSwitchingSignal OR bTestSafetyPosition;
 
 (* FBD Network 6 *)
 fbThresholdSwitch[6](
-    fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
-    fLowerLimit      := 4,
-    fUpperLimit      := 6,
-    tLowerLimitDelay := T#2m,
-    tUpperLimitDelay := T#5s);
+        fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
+        fLowerLimit      := 4,
+        fUpperLimit      := 6,
+        tLowerLimitDelay := T#2M,
+        tUpperLimitDelay := T#5S);
 gbSafetyPositionMarkise := fbThresholdSwitch[6].bSwitchingSignal OR bTestSafetyPositionMarkise;
 
 (* FBD Network 7 *)
 fbThresholdSwitch[7](
-    fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
-    fLowerLimit      := 4,
-    fUpperLimit      := 6,
-    tLowerLimitDelay := T#2m,
-    tUpperLimitDelay := T#5s,
-    bSwitchingSignal => gbSafetyPositionVolant);
+        fSignal          := stDatenWetterstation.rWindgeschwindigkeit_ms,
+        fLowerLimit      := 4,
+        fUpperLimit      := 6,
+        tLowerLimitDelay := T#2M,
+        tUpperLimitDelay := T#5S,
+        bSwitchingSignal => gbSafetyPositionVolant);
 
 (* FBD Network 8: Jalousien und Raffstore nur in diesem Zeitraum bei Dämmerung herunter fahren *)
 fbWeeklyTimeSwitch[1](
-    bEnable          := TRUE,
-    tCurrentDateTime := gdtAktuelleUhrzeit,
-    tSwitchOnTime    := TOD#16:00:00,
-    tSwitchOffTime   := TOD#23:59:59,
-    bSunday          := TRUE,
-    bMonday          := TRUE,
-    bTuesday         := TRUE,
-    bWednesday       := TRUE,
-    bThursday        := TRUE,
-    bFriday          := TRUE,
-    bSaturday        := TRUE);
+        bEnable          := TRUE,
+        tCurrentDateTime := gdtAktuelleUhrzeit,
+        tSwitchOnTime    := TOD#16:00:00,
+        tSwitchOffTime   := TOD#23:59:59,
+        bSunday          := TRUE,
+        bMonday          := TRUE,
+        bTuesday         := TRUE,
+        bWednesday       := TRUE,
+        bThursday        := TRUE,
+        bFriday          := TRUE,
+        bSaturday        := TRUE);
 
 (* FBD Network 9: Nur in diesem Zeitraum die Dämmerung aktivieren *)
 fbWeeklyTimeSwitch[2](
-    bEnable          := TRUE,
-    tCurrentDateTime := gdtAktuelleUhrzeit,
-    tSwitchOnTime    := TOD#16:00:00,
-    tSwitchOffTime   := TOD#9:00:00,
-    bSunday          := TRUE,
-    bMonday          := TRUE,
-    bTuesday         := TRUE,
-    bWednesday       := TRUE,
-    bThursday        := TRUE,
-    bFriday          := TRUE,
-    bSaturday        := TRUE);
+        bEnable          := TRUE,
+        tCurrentDateTime := gdtAktuelleUhrzeit,
+        tSwitchOnTime    := TOD#16:00:00,
+        tSwitchOffTime   := TOD#9:00:00,
+        bSunday          := TRUE,
+        bMonday          := TRUE,
+        bTuesday         := TRUE,
+        bWednesday       := TRUE,
+        bThursday        := TRUE,
+        bFriday          := TRUE,
+        bSaturday        := TRUE);
 
 (* FBD Network 10 *)
 fbThresholdSwitch[8](
-    fSignal          := stDatenWetterstation.iDaemmerung_Lux,
-    fLowerLimit      := 250,
-    fUpperLimit      := 250,
-    tLowerLimitDelay := T#1m,
-    tUpperLimitDelay := T#1m);
+        fSignal          := stDatenWetterstation.iDaemmerung_Lux,
+        fLowerLimit      := 250,
+        fUpperLimit      := 250,
+        tLowerLimitDelay := T#1M,
+        tUpperLimitDelay := T#1M);
 bDaemmerung := NOT fbThresholdSwitch[8].bSwitchingSignal AND fbWeeklyTimeSwitch[2].bOutput;
 ]]></ST>
     </Implementation>
-    <Action Name="A_Sonnenposition" Id="{6638b382-6751-4ed3-a5d9-00cd34e222b2}">
+    <Action Name="A_Sonnenposition" Id="{18865841-669b-42d7-a631-cbc5ea5b3288}">
       <Implementation>
         <ST><![CDATA[fbCalcSunPosition(fDegreeOfLongitude := stDatenWetterstation.lrLaengengrad_Grad, fDegreeOfLatitude := stDatenWetterstation.lrBreitengrad_Grad, dtGMT := DT_TO_SYSTEMTIME( dtIn := fbThiesWSC11Time.dtGMT));
 
@@ -144,47 +146,39 @@ Freigabe_Sonnenschutz_Sued := ((fbCalcSunPosition.fSunAzimuth > 90) AND (fbCalcS
 Freigabe_Sonnenschutz_West := ((fbCalcSunPosition.fSunAzimuth > 200) AND (fbCalcSunPosition.fSunAzimuth < 310)) AND ((fbCalcSunPosition.fSunElevation > 10) AND (fbCalcSunPosition.fSunElevation < 80));
 
 fbThresholdswitch_Beschattung[1](
-    fSignal          := stDatenWetterstation.rHelligkeitNord_kLux,
-    fLowerLimit      := 30,
-    fUpperLimit      := 50,
-    tLowerLimitDelay := T#5m,
-    tUpperLimitDelay := T#5m);
-TOF[1](
-    IN := (stDatenWetterstation.rLufttemperatur_GradC > 17),
-    PT := T#180m);
+        fSignal          := stDatenWetterstation.rHelligkeitNord_kLux,
+        fLowerLimit      := 30,
+        fUpperLimit      := 50,
+        tLowerLimitDelay := T#5M,
+        tUpperLimitDelay := T#5M);
+TOF[1](IN := (stDatenWetterstation.rLufttemperatur_GradC > 17), PT := T#180M);
 gbShadowPositionNord := fbThresholdswitch_Beschattung[1].bSwitchingSignal AND TOF[1].Q AND Freigabe_Sonnenschutz_Nord;
 
 fbThresholdswitch_Beschattung[2](
-    fSignal          := stDatenWetterstation.rHelligkeitOst_kLux,
-    fLowerLimit      := 30,
-    fUpperLimit      := 50,
-    tLowerLimitDelay := T#5m,
-    tUpperLimitDelay := T#5m);
-TOF[2](
-    IN := (stDatenWetterstation.rLufttemperatur_GradC > 17),
-    PT := T#180m);
+        fSignal          := stDatenWetterstation.rHelligkeitOst_kLux,
+        fLowerLimit      := 30,
+        fUpperLimit      := 50,
+        tLowerLimitDelay := T#5M,
+        tUpperLimitDelay := T#5M);
+TOF[2](IN := (stDatenWetterstation.rLufttemperatur_GradC > 17), PT := T#180M);
 gbShadowPositionOst := (fbThresholdswitch_Beschattung[2].bSwitchingSignal AND TOF[2].Q AND Freigabe_Sonnenschutz_Ost) OR bTest_Osten;
 
 fbThresholdswitch_Beschattung[3](
-    fSignal          := stDatenWetterstation.rHelligkeitSued_kLux,
-    fLowerLimit      := 30,
-    fUpperLimit      := 50,
-    tLowerLimitDelay := T#5m,
-    tUpperLimitDelay := T#5m);
-TOF[3](
-    IN := (stDatenWetterstation.rLufttemperatur_GradC > 17),
-    PT := T#180m);
+        fSignal          := stDatenWetterstation.rHelligkeitSued_kLux,
+        fLowerLimit      := 30,
+        fUpperLimit      := 50,
+        tLowerLimitDelay := T#5M,
+        tUpperLimitDelay := T#5M);
+TOF[3](IN := (stDatenWetterstation.rLufttemperatur_GradC > 17), PT := T#180M);
 gbShadowPositionSued := (fbThresholdswitch_Beschattung[3].bSwitchingSignal AND TOF[3].Q AND Freigabe_Sonnenschutz_Sued) OR bTest_Sued;
 
 fbThresholdswitch_Beschattung[4](
-    fSignal          := stDatenWetterstation.rHelligkeitWest_kLux,
-    fLowerLimit      := 30,
-    fUpperLimit      := 50,
-    tLowerLimitDelay := T#5m,
-    tUpperLimitDelay := T#5m);
-TOF[4](
-    IN := (stDatenWetterstation.rLufttemperatur_GradC > 17),
-    PT := T#180m);
+        fSignal          := stDatenWetterstation.rHelligkeitWest_kLux,
+        fLowerLimit      := 30,
+        fUpperLimit      := 50,
+        tLowerLimitDelay := T#5M,
+        tUpperLimitDelay := T#5M);
+TOF[4](IN := (stDatenWetterstation.rLufttemperatur_GradC > 17), PT := T#180M);
 gbShadowPositionWest := (fbThresholdswitch_Beschattung[4].bSwitchingSignal AND TOF[4].Q AND Freigabe_Sonnenschutz_West) OR bTest_West;
 ]]></ST>
       </Implementation>

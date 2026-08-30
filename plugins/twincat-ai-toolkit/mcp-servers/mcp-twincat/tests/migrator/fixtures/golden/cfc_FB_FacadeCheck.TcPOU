@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.7">
-  <POU Name="FB_FacadeCheck" Id="{01fbd164-cf6c-4b2b-9709-583bc2948adb}" SpecialFunc="None">
+  <POU Name="FB_FacadeCheck" Id="{6dc2bcfe-76fe-489a-a84a-4869db9c2c31}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_FacadeCheck
 VAR_INPUT
 	nFassade : INT;
@@ -18,7 +18,7 @@ END_VAR
    AUTO-GENERATED from CFC by migrator.cfc
    Source:           cfc_FB_FacadeCheck.TcPOU
    Version:          1.0.0
-   Date:             2026-08-19 13:29:26
+   Date:             2026-08-28 16:25:10
    Accuracy:         100.00 %
 
    WARNING: This code was automatically converted from a CFC implementation.

@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
-  <POU Name="DataStorage" Id="{95e508f9-8495-4943-b741-476ab84f1fef}" SpecialFunc="None">
+  <POU Name="DataStorage" Id="{76a70d8f-a655-4a06-a0f0-0ae8907b1147}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM DataStorage
 VAR
 	fbSceneMaster : FB_IoT_SceneMaster;
@@ -16,7 +16,7 @@ END_VAR
    AUTO-GENERATED from FBD/FUP by migrator.fbd
    Source:           fbd_DataStorage.TcPOU
    Version:          1.0.0
-   Date:             2026-08-19 13:29:26
+   Date:             2026-08-28 16:25:10
    Accuracy:         100.00 %
 
    WARNING: This code was automatically converted from a FBD/FUP implementation.
@@ -28,11 +28,11 @@ END_VAR
 fbSceneMaster.Execute();
 
 (* FBD Network 2 *)
-fbTON(IN := fbSceneLight.bSwitch, PT := T#30m);
+fbTON(IN := fbSceneLight.bSwitch, PT := T#30M);
 fbSceneLight(bEnable := TRUE, sDisplayName := 'Szenenspeicherung', bOff := fbTON.Q, bToggle := bIn_8fach_Taster_Flur_OG_Taste_6 OR bManuell);
 
 (* fbSceneLight output mappings *)
-gbSceneEnableSave := fbSceneLight.bSwitch;
+gbSceneEnableSave                    := fbSceneLight.bSwitch;
 bOut_8fach_Taster_Flur_OG_RM_Taste_6 := fbSceneLight.bSwitch;
 ]]></ST>
     </Implementation>

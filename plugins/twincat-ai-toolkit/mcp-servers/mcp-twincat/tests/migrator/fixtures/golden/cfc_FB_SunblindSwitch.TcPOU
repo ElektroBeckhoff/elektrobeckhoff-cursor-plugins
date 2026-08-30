@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.12">
-  <POU Name="FB_SunblindSwitch" Id="{436f5a44-af62-4093-bead-01c6c0938387}" SpecialFunc="None">
+  <POU Name="FB_SunblindSwitch" Id="{7f6dac91-5ebf-49c3-81d0-e7bd820499e3}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_SunblindSwitch
 VAR_INPUT
 	bEn        : BOOL;
@@ -43,7 +43,7 @@ END_VAR
    AUTO-GENERATED from CFC by migrator.cfc
    Source:           cfc_FB_SunblindSwitch.TcPOU
    Version:          1.0.0
-   Date:             2026-08-19 13:29:26
+   Date:             2026-08-28 16:25:10
    Accuracy:         100.00 %
 
    WARNING: This code was automatically converted from a CFC implementation.
@@ -82,10 +82,10 @@ FB_Value_Change(nValue := nSlid_Pos);
 FB_Value_Change2(nValue := nSlid_Angl);
 
 (* CFC Exec Order: 15 — TON_Dwn_Reset *)
-TON_Dwn_Reset(IN := SR.Q1, PT := t#80s);
+TON_Dwn_Reset(IN := SR.Q1, PT := T#80S);
 
 (* CFC Exec Order: 16 — TON_Reset_Selbe_Taste_Dwn *)
-TON_Reset_Selbe_Taste_Dwn(IN := SR.Q1, PT := t#1s);
+TON_Reset_Selbe_Taste_Dwn(IN := SR.Q1, PT := T#1S);
 
 (* CFC Exec Order: 19 — SR *)
 SR(SET1 := TON_Halten.Q, RESET := (bClicked OR (FB_Value_Change.bChanged OR FB_Value_Change2.bChanged)) OR TON_Dwn_Reset.Q OR bUp OR (bDwn AND TON_Reset_Selbe_Taste_Dwn.Q));
@@ -97,10 +97,10 @@ st_SunBld.bManDwn := SEL(bDwn, SR.Q1, TRUE);
 TON_Halten2(IN := bUp AND NOT SR2.Q1, PT := tSwiOvrTi);
 
 (* CFC Exec Order: 25 — TON_Up_Reset *)
-TON_Up_Reset(IN := SR.Q1, PT := t#80s);
+TON_Up_Reset(IN := SR.Q1, PT := T#80S);
 
 (* CFC Exec Order: 26 — TON_Reset_Selbe_Taste_Up *)
-TON_Reset_Selbe_Taste_Up(IN := SR2.Q1, PT := t#1s);
+TON_Reset_Selbe_Taste_Up(IN := SR2.Q1, PT := T#1S);
 
 (* CFC Exec Order: 29 — SR2 *)
 SR2(SET1 := TON_Halten2.Q, RESET := (bClicked OR (FB_Value_Change.bChanged OR FB_Value_Change2.bChanged)) OR TON_Up_Reset.Q OR bDwn OR (bUp AND TON_Reset_Selbe_Taste_Up.Q));

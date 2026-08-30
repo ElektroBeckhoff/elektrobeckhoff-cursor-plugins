@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
-  <POU Name="FB_Sunblind" Id="{02b3de1a-be3c-49a1-85d3-da39b4331585}" SpecialFunc="None">
+  <POU Name="FB_Sunblind" Id="{b2d497b2-2d6f-4f39-a9af-543a0a0d133d}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_Sunblind
 VAR_INPUT
 	nFassade               : INT;
@@ -57,7 +57,7 @@ END_VAR
    AUTO-GENERATED from CFC by migrator.cfc
    Source:           cfc_FB_Sunblind.TcPOU
    Version:          1.0.0
-   Date:             2026-08-19 13:29:26
+   Date:             2026-08-28 16:25:10
    Accuracy:         100.00 %
 
    WARNING: This code was automatically converted from a CFC implementation.
