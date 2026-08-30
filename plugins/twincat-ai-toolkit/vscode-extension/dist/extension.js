@@ -6697,8 +6697,8 @@ var require_protocolCodeAction = __commonJS({
   "node_modules/vscode-languageclient/lib/common/protocolCodeAction.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    var vscode4 = require("vscode");
-    var ProtocolCodeAction = class extends vscode4.CodeAction {
+    var vscode3 = require("vscode");
+    var ProtocolCodeAction = class extends vscode3.CodeAction {
       constructor(title, data) {
         super(title);
         this.data = data;
@@ -6714,7 +6714,7 @@ var require_protocolDiagnostic = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ProtocolDiagnostic = exports2.DiagnosticCode = void 0;
-    var vscode4 = require("vscode");
+    var vscode3 = require("vscode");
     var Is = require_is();
     var DiagnosticCode;
     (function(DiagnosticCode2) {
@@ -6724,7 +6724,7 @@ var require_protocolDiagnostic = __commonJS({
       }
       DiagnosticCode2.is = is;
     })(DiagnosticCode || (exports2.DiagnosticCode = DiagnosticCode = {}));
-    var ProtocolDiagnostic = class extends vscode4.Diagnostic {
+    var ProtocolDiagnostic = class extends vscode3.Diagnostic {
       constructor(range, message, severity, data) {
         super(range, message, severity);
         this.data = data;
@@ -10923,7 +10923,7 @@ var require_notebook = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.NotebookDocumentSyncFeature = void 0;
-    var vscode4 = require("vscode");
+    var vscode3 = require("vscode");
     var minimatch = require_minimatch();
     var proto = require_main3();
     var UUID = require_uuid();
@@ -10978,9 +10978,9 @@ var require_notebook = __commonJS({
         c2p2.asNotebookCell = asNotebookCell;
         function asNotebookCellKind(kind) {
           switch (kind) {
-            case vscode4.NotebookCellKind.Markup:
+            case vscode3.NotebookCellKind.Markup:
               return proto.NotebookCellKind.Markup;
-            case vscode4.NotebookCellKind.Code:
+            case vscode3.NotebookCellKind.Code:
               return proto.NotebookCellKind.Code;
           }
         }
@@ -11231,25 +11231,25 @@ var require_notebook = __commonJS({
         this.notebookDidOpen = /* @__PURE__ */ new Set();
         this.disposables = [];
         this.selector = client2.protocol2CodeConverter.asDocumentSelector($NotebookDocumentSyncOptions.asDocumentSelector(options));
-        vscode4.workspace.onDidOpenNotebookDocument((notebookDocument) => {
+        vscode3.workspace.onDidOpenNotebookDocument((notebookDocument) => {
           this.notebookDidOpen.add(notebookDocument.uri.toString());
           this.didOpen(notebookDocument);
         }, void 0, this.disposables);
-        for (const notebookDocument of vscode4.workspace.notebookDocuments) {
+        for (const notebookDocument of vscode3.workspace.notebookDocuments) {
           this.notebookDidOpen.add(notebookDocument.uri.toString());
           this.didOpen(notebookDocument);
         }
-        vscode4.workspace.onDidChangeNotebookDocument((event) => this.didChangeNotebookDocument(event), void 0, this.disposables);
+        vscode3.workspace.onDidChangeNotebookDocument((event) => this.didChangeNotebookDocument(event), void 0, this.disposables);
         if (this.options.save === true) {
-          vscode4.workspace.onDidSaveNotebookDocument((notebookDocument) => this.didSave(notebookDocument), void 0, this.disposables);
+          vscode3.workspace.onDidSaveNotebookDocument((notebookDocument) => this.didSave(notebookDocument), void 0, this.disposables);
         }
-        vscode4.workspace.onDidCloseNotebookDocument((notebookDocument) => {
+        vscode3.workspace.onDidCloseNotebookDocument((notebookDocument) => {
           this.didClose(notebookDocument);
           this.notebookDidOpen.delete(notebookDocument.uri.toString());
         }, void 0, this.disposables);
       }
       getState() {
-        for (const notebook of vscode4.workspace.notebookDocuments) {
+        for (const notebook of vscode3.workspace.notebookDocuments) {
           const matchingCells = this.getMatchingCells(notebook);
           if (matchingCells !== void 0) {
             return { kind: "document", id: "$internal", registrations: true, matches: true };
@@ -11261,10 +11261,10 @@ var require_notebook = __commonJS({
         return "notebook";
       }
       handles(textDocument) {
-        return vscode4.languages.match(this.selector, textDocument) > 0;
+        return vscode3.languages.match(this.selector, textDocument) > 0;
       }
       didOpenNotebookCellTextDocument(notebookDocument, cell) {
-        if (vscode4.languages.match(this.selector, cell.document) === 0) {
+        if (vscode3.languages.match(this.selector, cell.document) === 0) {
           return;
         }
         if (!this.notebookDidOpen.has(notebookDocument.uri.toString())) {
@@ -11295,7 +11295,7 @@ var require_notebook = __commonJS({
         }
       }
       didChangeNotebookCellTextDocument(notebookDocument, event) {
-        if (vscode4.languages.match(this.selector, event.document) === 0) {
+        if (vscode3.languages.match(this.selector, event.document) === 0) {
           return;
         }
         this.doSendChange({
@@ -11568,7 +11568,7 @@ var require_notebook = __commonJS({
         this.client = client2;
         this.registrations = /* @__PURE__ */ new Map();
         this.registrationType = proto.NotebookDocumentSyncRegistrationType.type;
-        vscode4.workspace.onDidOpenTextDocument((textDocument) => {
+        vscode3.workspace.onDidOpenTextDocument((textDocument) => {
           if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
             return;
           }
@@ -11582,7 +11582,7 @@ var require_notebook = __commonJS({
             }
           }
         });
-        vscode4.workspace.onDidChangeTextDocument((event) => {
+        vscode3.workspace.onDidChangeTextDocument((event) => {
           if (event.contentChanges.length === 0) {
             return;
           }
@@ -11600,7 +11600,7 @@ var require_notebook = __commonJS({
             }
           }
         });
-        vscode4.workspace.onDidCloseTextDocument((textDocument) => {
+        vscode3.workspace.onDidCloseTextDocument((textDocument) => {
           if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
             return;
           }
@@ -11665,7 +11665,7 @@ var require_notebook = __commonJS({
         if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
           return false;
         }
-        if (this.dedicatedChannel !== void 0 && vscode4.languages.match(this.dedicatedChannel, textDocument) > 0) {
+        if (this.dedicatedChannel !== void 0 && vscode3.languages.match(this.dedicatedChannel, textDocument) > 0) {
           return true;
         }
         for (const provider of this.registrations.values()) {
@@ -11685,7 +11685,7 @@ var require_notebook = __commonJS({
       }
       findNotebookDocumentAndCell(textDocument) {
         const uri = textDocument.uri.toString();
-        for (const notebookDocument of vscode4.workspace.notebookDocuments) {
+        for (const notebookDocument of vscode3.workspace.notebookDocuments) {
           for (const cell of notebookDocument.getCells()) {
             if (cell.document.uri.toString() === uri) {
               return [notebookDocument, cell];
@@ -14201,7 +14201,7 @@ var require_semanticTokens = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.SemanticTokensFeature = void 0;
-    var vscode4 = require("vscode");
+    var vscode3 = require("vscode");
     var vscode_languageserver_protocol_1 = require_main3();
     var features_1 = require_features();
     var Is = require_is();
@@ -14279,7 +14279,7 @@ var require_semanticTokens = __commonJS({
         const selector = options.documentSelector;
         const fullProvider = Is.boolean(options.full) ? options.full : options.full !== void 0;
         const hasEditProvider = options.full !== void 0 && typeof options.full !== "boolean" && options.full.delta === true;
-        const eventEmitter = new vscode4.EventEmitter();
+        const eventEmitter = new vscode3.EventEmitter();
         const documentProvider = fullProvider ? {
           onDidChangeSemanticTokens: eventEmitter.event,
           provideDocumentSemanticTokens: (document, token) => {
@@ -14351,12 +14351,12 @@ var require_semanticTokens = __commonJS({
         const legend = client2.protocol2CodeConverter.asSemanticTokensLegend(options.legend);
         const documentSelector = client2.protocol2CodeConverter.asDocumentSelector(selector);
         if (documentProvider !== void 0) {
-          disposables.push(vscode4.languages.registerDocumentSemanticTokensProvider(documentSelector, documentProvider, legend));
+          disposables.push(vscode3.languages.registerDocumentSemanticTokensProvider(documentSelector, documentProvider, legend));
         }
         if (rangeProvider !== void 0) {
-          disposables.push(vscode4.languages.registerDocumentRangeSemanticTokensProvider(documentSelector, rangeProvider, legend));
+          disposables.push(vscode3.languages.registerDocumentRangeSemanticTokensProvider(documentSelector, rangeProvider, legend));
         }
-        return [new vscode4.Disposable(() => disposables.forEach((item) => item.dispose())), { range: rangeProvider, full: documentProvider, onDidChangeSemanticTokensEmitter: eventEmitter }];
+        return [new vscode3.Disposable(() => disposables.forEach((item) => item.dispose())), { range: rangeProvider, full: documentProvider, onDidChangeSemanticTokensEmitter: eventEmitter }];
       }
     };
     exports2.SemanticTokensFeature = SemanticTokensFeature;
@@ -17738,18 +17738,18 @@ var require_main4 = __commonJS({
     __exportStar(require_node2(), exports2);
     __exportStar(require_api3(), exports2);
     var REQUIRED_VSCODE_VERSION = "^1.82.0";
-    var TransportKind2;
-    (function(TransportKind3) {
-      TransportKind3[TransportKind3["stdio"] = 0] = "stdio";
-      TransportKind3[TransportKind3["ipc"] = 1] = "ipc";
-      TransportKind3[TransportKind3["pipe"] = 2] = "pipe";
-      TransportKind3[TransportKind3["socket"] = 3] = "socket";
-    })(TransportKind2 || (exports2.TransportKind = TransportKind2 = {}));
+    var TransportKind;
+    (function(TransportKind2) {
+      TransportKind2[TransportKind2["stdio"] = 0] = "stdio";
+      TransportKind2[TransportKind2["ipc"] = 1] = "ipc";
+      TransportKind2[TransportKind2["pipe"] = 2] = "pipe";
+      TransportKind2[TransportKind2["socket"] = 3] = "socket";
+    })(TransportKind || (exports2.TransportKind = TransportKind = {}));
     var Transport;
     (function(Transport2) {
       function isSocket(value) {
         const candidate = value;
-        return candidate && candidate.kind === TransportKind2.socket && Is.number(candidate.port);
+        return candidate && candidate.kind === TransportKind.socket && Is.number(candidate.port);
       }
       Transport2.isSocket = isSocket;
     })(Transport || (Transport = {}));
@@ -17950,7 +17950,7 @@ var require_main4 = __commonJS({
         return this._getServerWorkingDir(json.options).then((serverWorkingDir) => {
           if (NodeModule.is(json) && json.module) {
             let node = json;
-            let transport = node.transport || TransportKind2.stdio;
+            let transport = node.transport || TransportKind.stdio;
             if (node.runtime) {
               const args = [];
               const options = node.options ?? /* @__PURE__ */ Object.create(null);
@@ -17966,32 +17966,32 @@ var require_main4 = __commonJS({
               execOptions.env = getEnvironment(options.env, false);
               const runtime = this._getRuntimePath(node.runtime, serverWorkingDir);
               let pipeName = void 0;
-              if (transport === TransportKind2.ipc) {
+              if (transport === TransportKind.ipc) {
                 execOptions.stdio = [null, null, null, "ipc"];
                 args.push("--node-ipc");
-              } else if (transport === TransportKind2.stdio) {
+              } else if (transport === TransportKind.stdio) {
                 args.push("--stdio");
-              } else if (transport === TransportKind2.pipe) {
+              } else if (transport === TransportKind.pipe) {
                 pipeName = (0, node_1.generateRandomPipeName)();
                 args.push(`--pipe=${pipeName}`);
               } else if (Transport.isSocket(transport)) {
                 args.push(`--socket=${transport.port}`);
               }
               args.push(`--clientProcessId=${process.pid.toString()}`);
-              if (transport === TransportKind2.ipc || transport === TransportKind2.stdio) {
+              if (transport === TransportKind.ipc || transport === TransportKind.stdio) {
                 const serverProcess = cp.spawn(runtime, args, execOptions);
                 if (!serverProcess || !serverProcess.pid) {
                   return handleChildProcessStartError(serverProcess, `Launching server using runtime ${runtime} failed.`);
                 }
                 this._serverProcess = serverProcess;
                 serverProcess.stderr.on("data", (data) => this.outputChannel.append(Is.string(data) ? data : data.toString(encoding)));
-                if (transport === TransportKind2.ipc) {
+                if (transport === TransportKind.ipc) {
                   serverProcess.stdout.on("data", (data) => this.outputChannel.append(Is.string(data) ? data : data.toString(encoding)));
                   return Promise.resolve({ reader: new node_1.IPCMessageReader(serverProcess), writer: new node_1.IPCMessageWriter(serverProcess) });
                 } else {
                   return Promise.resolve({ reader: new node_1.StreamMessageReader(serverProcess.stdout), writer: new node_1.StreamMessageWriter(serverProcess.stdin) });
                 }
-              } else if (transport === TransportKind2.pipe) {
+              } else if (transport === TransportKind.pipe) {
                 return (0, node_1.createClientPipeTransport)(pipeName).then((transport2) => {
                   const process2 = cp.spawn(runtime, args, execOptions);
                   if (!process2 || !process2.pid) {
@@ -18022,11 +18022,11 @@ var require_main4 = __commonJS({
               let pipeName = void 0;
               return new Promise((resolve2, reject) => {
                 const args = (node.args && node.args.slice()) ?? [];
-                if (transport === TransportKind2.ipc) {
+                if (transport === TransportKind.ipc) {
                   args.push("--node-ipc");
-                } else if (transport === TransportKind2.stdio) {
+                } else if (transport === TransportKind.stdio) {
                   args.push("--stdio");
-                } else if (transport === TransportKind2.pipe) {
+                } else if (transport === TransportKind.pipe) {
                   pipeName = (0, node_1.generateRandomPipeName)();
                   args.push(`--pipe=${pipeName}`);
                 } else if (Transport.isSocket(transport)) {
@@ -18038,18 +18038,18 @@ var require_main4 = __commonJS({
                 options.execArgv = options.execArgv || [];
                 options.cwd = serverWorkingDir;
                 options.silent = true;
-                if (transport === TransportKind2.ipc || transport === TransportKind2.stdio) {
+                if (transport === TransportKind.ipc || transport === TransportKind.stdio) {
                   const sp = cp.fork(node.module, args || [], options);
                   assertStdio(sp);
                   this._serverProcess = sp;
                   sp.stderr.on("data", (data) => this.outputChannel.append(Is.string(data) ? data : data.toString(encoding)));
-                  if (transport === TransportKind2.ipc) {
+                  if (transport === TransportKind.ipc) {
                     sp.stdout.on("data", (data) => this.outputChannel.append(Is.string(data) ? data : data.toString(encoding)));
                     resolve2({ reader: new node_1.IPCMessageReader(this._serverProcess), writer: new node_1.IPCMessageWriter(this._serverProcess) });
                   } else {
                     resolve2({ reader: new node_1.StreamMessageReader(sp.stdout), writer: new node_1.StreamMessageWriter(sp.stdin) });
                   }
-                } else if (transport === TransportKind2.pipe) {
+                } else if (transport === TransportKind.pipe) {
                   (0, node_1.createClientPipeTransport)(pipeName).then((transport2) => {
                     const sp = cp.fork(node.module, args || [], options);
                     assertStdio(sp);
@@ -18079,19 +18079,19 @@ var require_main4 = __commonJS({
             const args = json.args !== void 0 ? json.args.slice(0) : [];
             let pipeName = void 0;
             const transport = json.transport;
-            if (transport === TransportKind2.stdio) {
+            if (transport === TransportKind.stdio) {
               args.push("--stdio");
-            } else if (transport === TransportKind2.pipe) {
+            } else if (transport === TransportKind.pipe) {
               pipeName = (0, node_1.generateRandomPipeName)();
               args.push(`--pipe=${pipeName}`);
             } else if (Transport.isSocket(transport)) {
               args.push(`--socket=${transport.port}`);
-            } else if (transport === TransportKind2.ipc) {
+            } else if (transport === TransportKind.ipc) {
               throw new Error(`Transport kind ipc is not support for command executable`);
             }
             const options = Object.assign({}, command.options);
             options.cwd = options.cwd || serverWorkingDir;
-            if (transport === void 0 || transport === TransportKind2.stdio) {
+            if (transport === void 0 || transport === TransportKind.stdio) {
               const serverProcess = cp.spawn(command.command, args, options);
               if (!serverProcess || !serverProcess.pid) {
                 return handleChildProcessStartError(serverProcess, `Launching server using command ${command.command} failed.`);
@@ -18100,7 +18100,7 @@ var require_main4 = __commonJS({
               this._serverProcess = serverProcess;
               this._isDetached = !!options.detached;
               return Promise.resolve({ reader: new node_1.StreamMessageReader(serverProcess.stdout), writer: new node_1.StreamMessageWriter(serverProcess.stdin) });
-            } else if (transport === TransportKind2.pipe) {
+            } else if (transport === TransportKind.pipe) {
               return (0, node_1.createClientPipeTransport)(pipeName).then((transport2) => {
                 const serverProcess = cp.spawn(command.command, args, options);
                 if (!serverProcess || !serverProcess.pid) {
@@ -18250,102 +18250,21 @@ module.exports = __toCommonJS(extension_exports);
 var fs2 = __toESM(require("fs"));
 var os = __toESM(require("os"));
 var path2 = __toESM(require("path"));
-var vscode3 = __toESM(require("vscode"));
+var vscode2 = __toESM(require("vscode"));
 var import_node = __toESM(require_node3());
-
-// src/virtualDocumentProvider.ts
-var vscode = __toESM(require("vscode"));
-var TWINCAT_ST_SCHEME = "twincat-st";
-var TwinCatVirtualDocumentProvider = class _TwinCatVirtualDocumentProvider {
-  _onDidChange = new vscode.EventEmitter();
-  onDidChange = this._onDidChange.event;
-  client;
-  constructor() {
-  }
-  setClient(client2) {
-    this.client = client2;
-  }
-  refresh(uri) {
-    this._onDidChange.fire(uri);
-  }
-  static toVirtualUri(physicalUri) {
-    return vscode.Uri.parse(
-      `${TWINCAT_ST_SCHEME}:${encodeURIComponent(physicalUri.toString())}.st`
-    );
-  }
-  static toPhysicalUri(virtualUri) {
-    const raw = virtualUri.path.replace(/\.st$/, "");
-    const decoded = decodeURIComponent(raw);
-    return vscode.Uri.parse(decoded);
-  }
-  async provideTextDocumentContent(uri, _token) {
-    if (!this.client) {
-      return "// TwinCAT Language Server is not connected.";
-    }
-    const physicalUri = _TwinCatVirtualDocumentProvider.toPhysicalUri(uri);
-    try {
-      const resp = await this.client.sendRequest(
-        "twincat/virtualSt/get",
-        { uri: physicalUri.toString() }
-      );
-      return resp.virtualSt;
-    } catch (err) {
-      vscode.window.showErrorMessage(
-        `Failed to project Virtual ST: ${err?.message || err}`
-      );
-      return `// Error loading Virtual ST for ${physicalUri.fsPath}
-// ${err?.message || err}`;
-    }
-  }
-  async saveVirtualSt(document) {
-    if (!this.client) {
-      vscode.window.showErrorMessage("TwinCAT Language Server is not running.");
-      return false;
-    }
-    if (document.uri.scheme !== TWINCAT_ST_SCHEME) {
-      return false;
-    }
-    const physicalUri = _TwinCatVirtualDocumentProvider.toPhysicalUri(document.uri);
-    const virtualText = document.getText();
-    try {
-      const resp = await this.client.sendRequest(
-        "twincat/virtualSt/save",
-        {
-          uri: physicalUri.toString(),
-          virtualSt: virtualText
-        }
-      );
-      if (resp.success && resp.newXml) {
-        const encoder = new TextEncoder();
-        await vscode.workspace.fs.writeFile(physicalUri, encoder.encode(resp.newXml));
-        vscode.window.setStatusBarMessage(
-          `TwinCAT: Synced Virtual ST to ${physicalUri.path.split("/").pop()}`,
-          3e3
-        );
-        return true;
-      }
-      return false;
-    } catch (err) {
-      vscode.window.showErrorMessage(
-        `Failed to sync Virtual ST back to XML: ${err?.message || err}`
-      );
-      return false;
-    }
-  }
-};
 
 // src/aiCommands.ts
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
-var vscode2 = __toESM(require("vscode"));
+var vscode = __toESM(require("vscode"));
 var TC_FILE_REGEX = /\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i;
 function normalizePath(p) {
   return p.replace(/\\/g, "/").toLowerCase();
 }
 function resolveResourceRef(resourceRelPath) {
   const cleanPath = resourceRelPath.replace(/\\/g, "/").replace(/^@/, "");
-  if (vscode2.workspace.workspaceFolders) {
-    for (const folder of vscode2.workspace.workspaceFolders) {
+  if (vscode.workspace.workspaceFolders) {
+    for (const folder of vscode.workspace.workspaceFolders) {
       const direct = path.join(folder.uri.fsPath, cleanPath);
       if (fs.existsSync(direct)) {
         return `@${cleanPath}`;
@@ -18387,14 +18306,14 @@ function findTwinCatFilesInDir(dirPath, maxFiles = 100) {
   return result;
 }
 function getTargetScopeInfo(uri, uris) {
-  const activeEditor = vscode2.window.activeTextEditor;
+  const activeEditor = vscode.window.activeTextEditor;
   if (uris && uris.length > 1) {
     const refs = uris.map((u) => {
       let physical = u;
       if (physical.scheme === TWINCAT_ST_SCHEME) {
         physical = TwinCatVirtualDocumentProvider.toPhysicalUri(physical);
       }
-      return `@${vscode2.workspace.asRelativePath(physical, false).replace(/\\/g, "/")}`;
+      return `@${vscode.workspace.asRelativePath(physical, false).replace(/\\/g, "/")}`;
     });
     return {
       uri: uris[0],
@@ -18410,11 +18329,8 @@ ${refs.map((r) => `- ${r}`).join("\n")}`,
   }
   let targetUri = uri || activeEditor?.document.uri;
   if (!targetUri) {
-    vscode2.window.showWarningMessage("No TwinCAT file or folder selected.");
+    vscode.window.showWarningMessage("No TwinCAT file or folder selected.");
     return void 0;
-  }
-  if (targetUri.scheme === TWINCAT_ST_SCHEME) {
-    targetUri = TwinCatVirtualDocumentProvider.toPhysicalUri(targetUri);
   }
   const fsPath = targetUri.fsPath;
   let isFolder = false;
@@ -18424,11 +18340,11 @@ ${refs.map((r) => `- ${r}`).join("\n")}`,
     }
   } catch {
   }
-  const relativePath = vscode2.workspace.asRelativePath(targetUri, false).replace(/\\/g, "/");
+  const relativePath = vscode.workspace.asRelativePath(targetUri, false).replace(/\\/g, "/");
   const baseName = targetUri.path.split("/").pop() || relativePath;
   if (isFolder) {
     const files = findTwinCatFilesInDir(fsPath);
-    const relFiles = files.map((f) => `@${vscode2.workspace.asRelativePath(f, false).replace(/\\/g, "/")}`);
+    const relFiles = files.map((f) => `@${vscode.workspace.asRelativePath(f, false).replace(/\\/g, "/")}`);
     const folderRef = `@${relativePath}/`;
     return {
       uri: targetUri,
@@ -18448,10 +18364,7 @@ ${refs.map((r) => `- ${r}`).join("\n")}`,
   let scopeText = "Entire file";
   let selectedText;
   if (activeEditor) {
-    let editorPhysicalUri = activeEditor.document.uri;
-    if (editorPhysicalUri.scheme === TWINCAT_ST_SCHEME) {
-      editorPhysicalUri = TwinCatVirtualDocumentProvider.toPhysicalUri(editorPhysicalUri);
-    }
+    const editorPhysicalUri = activeEditor.document.uri;
     const isSameFile = normalizePath(editorPhysicalUri.fsPath) === normalizePath(targetUri.fsPath);
     if (isSameFile) {
       const selection = activeEditor.selection;
@@ -18529,46 +18442,45 @@ ${refList}
 Respond in German with a short and concise summary of what was done.`;
 }
 async function sendPromptToCursor(prompt, title) {
-  await vscode2.env.clipboard.writeText(prompt);
+  await vscode.env.clipboard.writeText(prompt);
   try {
-    await vscode2.commands.executeCommand("workbench.action.chat.open", { query: prompt });
+    await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt });
   } catch {
     try {
-      await vscode2.commands.executeCommand("aichat.newchataction");
+      await vscode.commands.executeCommand("aichat.newchataction");
     } catch {
       try {
-        await vscode2.commands.executeCommand("workbench.action.chat.open");
+        await vscode.commands.executeCommand("workbench.action.chat.open");
       } catch {
       }
     }
   }
-  vscode2.window.setStatusBarMessage(`$(sparkle) [TwinCAT AI] Prompt for "${title}" ready in Chat. Select model & click Start.`, 6e3);
-  vscode2.window.showInformationMessage(
+  vscode.window.setStatusBarMessage(`$(sparkle) [TwinCAT AI] Prompt for "${title}" ready in Chat. Select model & click Start.`, 6e3);
+  vscode.window.showInformationMessage(
     `[TwinCAT AI] Prompt for "${title}" inserted into Chat (and copied to clipboard). Select your model and click Start.`
   );
 }
 function registerAiCommands(context) {
   context.subscriptions.push(
-    vscode2.commands.registerCommand("twincat.ai.addComments", async (uri, uris) => {
+    vscode.commands.registerCommand("twincat.ai.checkSyntax", async (uri, uris) => {
       const target = getTargetScopeInfo(uri, uris);
       if (!target)
         return;
       const prompt = buildStandardAiPrompt(
-        "/twincat3-cmd-comment",
+        "/twincat3-cmd-check-syntax",
         target,
-        `Perform a standard-compliant, professional comment pass (* *) on ${target.ref}`,
+        `Run fast headless syntax and semantic validation using twincat_check_syntax on ${target.ref}`,
         [
           "rules/twincat3-core.mdc",
-          "rules/twincat3-comments.mdc",
-          "skills/twincat3-comment/SKILL.md",
-          "skills/twincat3-code-style/references/comment-rules.md"
+          "rules/twincat3-mcp-syntax.mdc",
+          "skills/twincat3-check-syntax/SKILL.md"
         ]
       );
-      await sendPromptToCursor(prompt, `Add Comments: ${target.displayTitle}`);
+      await sendPromptToCursor(prompt, `Check Syntax: ${target.displayTitle}`);
     })
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("twincat.ai.pagefaultAudit", async (uri, uris) => {
+    vscode.commands.registerCommand("twincat.ai.pagefaultAudit", async (uri, uris) => {
       const target = getTargetScopeInfo(uri, uris);
       if (!target)
         return;
@@ -18589,33 +18501,28 @@ function registerAiCommands(context) {
     })
   );
   context.subscriptions.push(
-    vscode2.commands.registerCommand("twincat.ai.codeReview", async (uri, uris) => {
+    vscode.commands.registerCommand("twincat.ai.addComments", async (uri, uris) => {
       const target = getTargetScopeInfo(uri, uris);
       if (!target)
         return;
       const prompt = buildStandardAiPrompt(
-        "",
+        "/twincat3-cmd-comment",
         target,
-        `Perform a comprehensive, rigorous IEC 61131-3 ST, OOP, and architecture code review on ${target.ref}`,
+        `Perform a standard-compliant, professional comment pass (* *) on ${target.ref}`,
         [
           "rules/twincat3-core.mdc",
-          "rules/twincat3-naming.mdc",
-          "rules/twincat3-formatting.mdc",
           "rules/twincat3-comments.mdc",
-          "rules/twincat3-oop.mdc",
-          "rules/twincat3-pagefault-safety.mdc",
-          "rules/twincat3-xml.mdc",
-          "agents/twincat-code-reviewer.md"
+          "skills/twincat3-comment/SKILL.md",
+          "skills/twincat3-code-style/references/comment-rules.md"
         ]
       );
-      await sendPromptToCursor(prompt, `Code Review: ${target.displayTitle}`);
+      await sendPromptToCursor(prompt, `Add Comments: ${target.displayTitle}`);
     })
   );
 }
 
 // src/extension.ts
 var client;
-var virtualProvider;
 function resolvePythonPathEnv(context, userExtraPaths) {
   const candidateDirs = [];
   candidateDirs.push(path2.join(context.extensionPath, "server"));
@@ -18624,8 +18531,8 @@ function resolvePythonPathEnv(context, userExtraPaths) {
   candidateDirs.push(
     path2.resolve(context.extensionPath, "..", "..", "plugins", "twincat-ai-toolkit", "mcp-servers", "mcp-twincat")
   );
-  if (vscode3.workspace.workspaceFolders) {
-    for (const wf of vscode3.workspace.workspaceFolders) {
+  if (vscode2.workspace.workspaceFolders) {
+    for (const wf of vscode2.workspace.workspaceFolders) {
       candidateDirs.push(path2.join(wf.uri.fsPath, "plugins", "twincat-ai-toolkit", "mcp-servers", "mcp-twincat"));
       candidateDirs.push(path2.join(wf.uri.fsPath, "mcp-servers", "mcp-twincat"));
       candidateDirs.push(wf.uri.fsPath);
@@ -18700,7 +18607,7 @@ function resolvePythonPathEnv(context, userExtraPaths) {
   return validPaths.join(path2.delimiter);
 }
 function activate(context) {
-  const config = vscode3.workspace.getConfiguration("twincat");
+  const config = vscode2.workspace.getConfiguration("twincat");
   const pythonPath = config.get("server.pythonPath", "python");
   const extraPaths = config.get("server.extraPaths", []);
   const pythonPathEnv = resolvePythonPathEnv(context, extraPaths);
@@ -18717,15 +18624,14 @@ function activate(context) {
   const clientOptions = {
     documentSelector: [
       { scheme: "file", language: "iecst" },
-      { scheme: TWINCAT_ST_SCHEME, language: "iecst" },
       { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,st,iecst}" }
     ],
     synchronize: {
       fileEvents: [
-        vscode3.workspace.createFileSystemWatcher("**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,plcproj}")
+        vscode2.workspace.createFileSystemWatcher("**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,plcproj}")
       ]
     },
-    traceOutputChannel: vscode3.window.createOutputChannel("TwinCAT Language Server Trace")
+    traceOutputChannel: vscode2.window.createOutputChannel("TwinCAT Language Server Trace")
   };
   client = new import_node.LanguageClient(
     "twincat-lsp",
@@ -18733,61 +18639,14 @@ function activate(context) {
     serverOptions,
     clientOptions
   );
-  virtualProvider = new TwinCatVirtualDocumentProvider();
-  context.subscriptions.push(
-    vscode3.workspace.registerTextDocumentContentProvider(
-      TWINCAT_ST_SCHEME,
-      virtualProvider
-    )
-  );
-  client.start().then(() => {
-    if (client) {
-      virtualProvider.setClient(client);
-    }
-  });
-  const openVirtualStCmd = vscode3.commands.registerCommand(
-    "twincat.openVirtualSt",
-    async (uri) => {
-      const targetUri = uri || vscode3.window.activeTextEditor?.document.uri;
-      if (!targetUri) {
-        vscode3.window.showWarningMessage("No TwinCAT file selected.");
-        return;
-      }
-      if (targetUri.scheme === TWINCAT_ST_SCHEME) {
-        return;
-      }
-      const virtualUri = TwinCatVirtualDocumentProvider.toVirtualUri(targetUri);
-      try {
-        const doc = await vscode3.workspace.openTextDocument(virtualUri);
-        await vscode3.window.showTextDocument(doc, { preview: false });
-      } catch (err) {
-        vscode3.window.showErrorMessage(
-          `Could not open Virtual ST view: ${err?.message || err}`
-        );
-      }
-    }
-  );
-  const saveVirtualStCmd = vscode3.commands.registerCommand(
-    "twincat.saveVirtualSt",
-    async () => {
-      const editor = vscode3.window.activeTextEditor;
-      if (!editor || editor.document.uri.scheme !== TWINCAT_ST_SCHEME) {
-        vscode3.window.showInformationMessage("Active document is not a Virtual ST document.");
-        return;
-      }
-      await virtualProvider.saveVirtualSt(editor.document);
-    }
-  );
-  const restartServerCmd = vscode3.commands.registerCommand(
+  client.start();
+  const restartServerCmd = vscode2.commands.registerCommand(
     "twincat.restartServer",
     async () => {
       if (client) {
         await client.stop();
         client.start().then(() => {
-          if (client) {
-            virtualProvider.setClient(client);
-          }
-          vscode3.window.showInformationMessage("TwinCAT Language Server restarted.");
+          vscode2.window.showInformationMessage("TwinCAT Language Server restarted.");
         });
       }
     }
@@ -18795,8 +18654,6 @@ function activate(context) {
   registerAiCommands(context);
   context.subscriptions.push(
     client,
-    openVirtualStCmd,
-    saveVirtualStCmd,
     restartServerCmd
   );
 }
