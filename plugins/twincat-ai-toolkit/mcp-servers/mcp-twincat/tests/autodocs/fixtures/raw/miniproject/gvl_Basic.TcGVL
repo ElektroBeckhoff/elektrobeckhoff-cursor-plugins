@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="GVL_Basic" Id="{66666666-6666-6666-6666-666666666601}">
+    <Declaration><![CDATA[(* Basic GVL for autodocs tests. *)
+VAR_GLOBAL
+    bSystemReady : BOOL;
+    nCounter     : INT := 0;
+END_VAR
+VAR_GLOBAL CONSTANT
+    cMaxCount : INT := 100;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>

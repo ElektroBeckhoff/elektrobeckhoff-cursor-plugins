@@ -1,0 +1,96 @@
+# Copy to: <library-repo>/.github/workflows/autodocs.yml
+#
+# Zero-change behavior (verified on steady-state re-run):
+#   - Individual docs/*.md files: content identical → no git diff (despite write_text).
+#   - ALWAYS changed on every run (even when no PLC sources changed):
+#       * docs/autodocs.log  — full rewrite with new Run timestamp + log body
+#       * docs/toc.md        — TOC block timestamp line updated
+#       * README.md          — TOC marker block timestamp line updated
+#   - Therefore git add docs README.md is almost never empty after a successful run.
+#   - Commit only skipped on first run failure or if docs/ + README.md do not exist yet
+#     and autodocs produced nothing (edge case).
+
+name: AutoDocs (workflows file only)
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - '**/*.TcPOU'
+      - '**/*.TcDUT'
+      - '**/*.TcGVL'
+      - '**/*.TcIO'
+      - '.github/workflows/autodocs.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-push-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    env:
+      TOOLKIT_REPO: ElektroBeckhoff/elektrobeckhoff-cursor-plugins
+      TOOLKIT_REF: main
+      TOOLKIT_ROOT: toolkit/plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+
+    steps:
+      - name: Checkout aktuelles Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout TwinCAT AI Toolkit (autodocs source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TOOLKIT_REPO }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: toolkit
+          sparse-checkout: |
+            plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat/autodocs
+          sparse-checkout-cone-mode: true
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Repo-Pfade setzen
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "REPO_NAME=${REPO_NAME}" >> "$GITHUB_ENV"
+          echo "LIB_INPUT=${REPO_NAME}/${REPO_NAME}" >> "$GITHUB_ENV"
+          echo "Solution input: ${REPO_NAME}/${REPO_NAME}"
+
+      - name: AutoDocs ausführen
+        env:
+          PYTHONPATH: ${{ github.workspace }}/${{ env.TOOLKIT_ROOT }}
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pyc
+        run: |
+          set -euo pipefail
+          test -d "${LIB_INPUT}" || {
+            echo "ERROR: Solution folder not found: ${LIB_INPUT}"
+            ls -la
+            exit 1
+          }
+          python -B -m autodocs --input "${LIB_INPUT}"
+
+      - name: Änderungen committen & pushen
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A -- docs README.md
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen – nichts zu committen."
+            exit 0
+          fi
+
+          git commit -m "AutoDocs: update docs from '${REPO_NAME}' (run ${{ github.run_number }}) [skip ci]"
+          git pull --rebase
+          git push

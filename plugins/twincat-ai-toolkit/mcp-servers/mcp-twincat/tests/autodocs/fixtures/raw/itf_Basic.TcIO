@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Basic" Id="{44444444-4444-4444-4444-444444444401}">
+    <Declaration><![CDATA[(* Basic interface for autodocs tests. *)
+INTERFACE I_Basic
+]]></Declaration>
+    <Method Name="Init" Id="{44444444-4444-4444-4444-444444444402}">
+      <Declaration><![CDATA[METHOD Init : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="Ready" Id="{44444444-4444-4444-4444-444444444403}">
+      <Declaration><![CDATA[PROPERTY Ready : BOOL]]></Declaration>
+      <Get Name="Get" Id="{44444444-4444-4444-4444-444444444404}"><Declaration><![CDATA[]]></Declaration></Get>
+    </Property>
+  </Itf>
+</TcPlcObject>

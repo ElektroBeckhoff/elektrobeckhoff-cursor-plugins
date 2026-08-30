@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Extends" Id="{44444444-4444-4444-4444-444444444405}">
+    <Declaration><![CDATA[INTERFACE I_Extends EXTENDS I_Base
+]]></Declaration>
+  </Itf>
+</TcPlcObject>

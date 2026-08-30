@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="GVL_Hidden" Id="{66666666-6666-6666-6666-666666666602}">
+    <Declaration><![CDATA[{attribute 'hide'}
+VAR_GLOBAL
+    nSecret : INT;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>

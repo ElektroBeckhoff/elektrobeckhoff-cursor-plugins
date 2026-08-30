@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Basic" Id="{11111111-1111-1111-1111-111111111101}">
+    <Declaration><![CDATA[(* Basic FB for autodocs tests. *)
+FUNCTION_BLOCK FB_Basic
+VAR_INPUT
+    bEnable : BOOL;
+    nValue  : INT := 0;
+END_VAR
+VAR_OUTPUT
+    bDone : BOOL;
+END_VAR
+VAR_IN_OUT
+    stData : ST_TestData;
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[bDone := bEnable;]]></ST></Implementation>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="F_Return" Id="{11111111-1111-1111-1111-111111111105}">
+    <Declaration><![CDATA[FUNCTION F_Return : REAL
+VAR_INPUT
+    fIn : REAL;
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[F_Return := fIn;]]></ST></Implementation>
+  </POU>
+</TcPlcObject>

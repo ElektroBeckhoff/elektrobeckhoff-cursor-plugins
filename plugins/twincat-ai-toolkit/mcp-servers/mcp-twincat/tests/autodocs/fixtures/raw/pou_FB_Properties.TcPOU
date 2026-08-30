@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Properties" Id="{11111111-1111-1111-1111-111111111104}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Properties
+]]></Declaration>
+    <Property Name="Count" Id="{33333333-3333-3333-3333-333333333301}">
+      <Declaration><![CDATA[PROPERTY Count : INT]]></Declaration>
+      <Get Name="Get" Id="{33333333-3333-3333-3333-333333333302}"><Declaration><![CDATA[]]></Declaration></Get>
+    </Property>
+    <Property Name="Name" Id="{33333333-3333-3333-3333-333333333303}">
+      <Declaration><![CDATA[PROPERTY Name : STRING]]></Declaration>
+      <Get Name="Get" Id="{33333333-3333-3333-3333-333333333304}"><Declaration><![CDATA[]]></Declaration></Get>
+      <Set Name="Set" Id="{33333333-3333-3333-3333-333333333305}"><Declaration><![CDATA[]]></Declaration></Set>
+    </Property>
+    <Implementation><ST><![CDATA[]]></ST></Implementation>
+  </POU>
+</TcPlcObject>

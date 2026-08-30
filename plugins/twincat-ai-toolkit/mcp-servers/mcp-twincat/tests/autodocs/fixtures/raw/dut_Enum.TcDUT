@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="E_TestMode" Id="{55555555-5555-5555-5555-555555555501}">
+    <Declaration><![CDATA[(* Test enum. *)
+TYPE E_TestMode : (
+    Off := 0,
+    On  := 1  (* Active state *)
+);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

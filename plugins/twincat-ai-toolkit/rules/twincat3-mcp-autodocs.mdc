@@ -1,0 +1,129 @@
+---
+description: >-
+  MCP autodocs path contract. When to use twincat_autodocs; input = solution
+  folder; output optional (auto repo root → docs/). No XAE. Folders only.
+alwaysApply: false
+---
+
+# TwinCAT MCP Autodocs
+
+Use when the user asks to generate/refresh API docs, autodocs, or
+`/twincat3-cmd-autodocs`. Detailed workflow: skill `twincat3-autodocs`.
+
+**Scope of this run:** call `twincat_autodocs` once. Do **not** format,
+validate, comment, migrate, open XAE, or edit source files in the same turn
+unless the user explicitly asks for those steps separately.
+
+## Tool (no XAE)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_autodocs` | Generate Markdown API docs from `.TcPOU`/`.TcDUT`/`.TcGVL`/`.TcIO` |
+
+| Parameter | Required | Default |
+|-----------|----------|---------|
+| `input` | **Yes** | — solution folder (directory, not a file) |
+| `output` | No | Auto-detect repo root → docs land in `<repo-root>/docs/` |
+
+## Path contract (library repo)
+
+```text
+<repo-root>/                    ← auto output (README.md + docs/)
+├── README.md
+├── docs/                       ← autodocs writes HERE
+├── samples/                    ← NEVER use as input
+└── <LibName>/                  ← input (solution folder)
+    ├── <LibName>.sln
+    └── <LibName>/
+        └── <LibName>/
+            ├── <LibName>.plcproj
+            ├── POUs/, DUTs/, GVLs/, ITFs/
+            └── ...
+```
+
+### Before calling the tool
+
+1. **`input`** = `<repo-root>/<LibName>/` — folder containing `<LibName>.sln`.
+2. **`output`** — omit unless the user wants a non-default root:
+   - **Default:** auto-detect `<repo-root>` from `input` (walk up for `README.md`
+     or `.git`; else parent of `input`).
+   - Docs always go to `<resolved-root>/docs/` — never pass `docs/` as `output`.
+
+### AI path resolution (when user gives a repo path)
+
+```text
+IF user path has README.md at top AND a child <LibName>/<LibName>.sln:
+   input  = <user-path>/<LibName>/     ← NOT the repo root alone
+   output = (omit — auto-detect)
+
+IF user already gives the solution folder (contains .sln):
+   input  = that folder
+   output = (omit)
+
+IF user gives repo root only as input:
+   WRONG — also scans samples/ and pollutes docs/toc.md
+   FIX: append /<LibName>/ (folder with .sln one level below repo root)
+```
+
+Do **not** guess paths on failure — read MCP `log`.
+
+### Default call (preferred)
+
+```
+twincat_autodocs(
+  input="C:/path/to/<repo-root>/<LibName>"
+)
+```
+
+CLI:
+
+```bash
+python -m autodocs --input "C:/path/to/<repo-root>/<LibName>"
+```
+
+### Explicit output (override only when needed)
+
+```
+twincat_autodocs(
+  input="C:/path/to/<repo-root>/<LibName>",
+  output="C:/path/to/<repo-root>"
+)
+```
+
+### Expected artifacts
+
+| Artifact | Path |
+|----------|------|
+| Per-object Markdown | `<repo-root>/docs/<LibName>/.../*.md` |
+| Full TOC | `<repo-root>/docs/toc.md` |
+| Run log | `<repo-root>/docs/autodocs.log` |
+| README TOC block | `<repo-root>/README.md` (`<!-- TOC -->` markers only) |
+
+JSON: `repo_root` = resolved project root; `output` = `<repo-root>/docs`.
+
+## Forbidden
+
+| Wrong | Why |
+|-------|-----|
+| `output="<repo-root>/docs"` | Creates `docs/docs/...` |
+| `input="<repo-root>"` | Scans `samples/`; docs land in repo but TOC polluted |
+| `input="<repo-root>/samples"` | Sample projects — never document |
+| `input` = plcproj inner folder only | Wrong mirror paths + type index |
+| `input` = single file | Not supported |
+| `input=".../POUs"` alone | Incomplete cross-refs |
+| Format/validate/migrate in same step | Out of scope |
+
+## Result check
+
+- `success == true`, `errors == 0`
+- `output` ends with `/docs`
+- `repo_root` points at detected/explicit project root
+- `skipped_hidden` > 0 is normal for `{attribute 'hide'}`
+
+On failure: read `log` — do not guess alternate paths.
+
+## References
+
+- Skill: `twincat3-autodocs`
+- Command: `/twincat3-cmd-autodocs`
+- Also: `twincat3-mcp-build`
