@@ -617,5 +617,154 @@ END_VAR
         diags = run_semantic_analysis(ws, pou_file)
         assert any(d.code == "TC-SEM-005" and "FB_AbstractBase" in d.message for d in diags)
 
+    def test_semantic_type_mismatch_assignment_error(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_TypeMismatch.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_TypeMismatch" Id="{55555555-5555-5555-5555-555555555551}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_TypeMismatch
+VAR
+    sName : STRING;
+    nVal  : INT;
+    bFlag : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+sName := nVal;
+bFlag := 'hello';
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        mismatch_diags = [d for d in diags if d.code == "TC-SEM-006"]
+        assert len(mismatch_diags) == 2
+        assert "Cannot convert" in mismatch_diags[0].message
+
+    def test_semantic_implicit_narrowing_and_sign_change_warning(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+        from twincat_core.syntax.diagnostics import DiagnosticSeverity
+
+        pou_file = tmp_path / "FB_Narrowing.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Narrowing" Id="{66666666-6666-6666-6666-666666666661}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Narrowing
+VAR
+    nInt   : INT;
+    nDint  : DINT;
+    fReal  : REAL;
+    fLReal : LREAL;
+    nUint  : UINT;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+nInt := nDint;
+fReal := fLReal;
+nUint := nInt;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        warnings = [d for d in diags if d.code == "TC-SEM-007" and d.severity == DiagnosticSeverity.WARNING]
+        assert len(warnings) == 3
+        assert any("possible loss of data" in w.message for w in warnings)
+        assert any("possible loss of precision" in w.message for w in warnings)
+        assert any("possible change of sign" in w.message for w in warnings)
+
+    def test_semantic_condition_must_be_boolean(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_NonBoolCond.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_NonBoolCond" Id="{77777777-7777-7777-7777-777777777771}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_NonBoolCond
+VAR
+    sName : STRING;
+    nVal  : INT;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+IF sName THEN
+    nVal := 1;
+END_IF;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert any(d.code == "TC-SEM-006" and "must be of type 'BOOL'" in d.message for d in diags)
+
+    def test_semantic_valid_widening_and_conversions_zero_diagnostics(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_ValidConversions.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_ValidConversions" Id="{88888888-8888-8888-8888-888888888881}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ValidConversions
+VAR
+    nInt   : INT := 10;
+    nDint  : DINT;
+    fReal  : REAL := 1.5;
+    fLReal : LREAL;
+    sStr   : STRING := 'Hello';
+    wStr   : WSTRING;
+    tTime  : TIME := T#1S;
+    ltTime : LTIME;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+nDint := nInt;
+fLReal := fReal;
+wStr := sStr;
+ltTime := tTime;
+nInt := TO_INT(nDint);
+fReal := TO_REAL(fLReal);
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 0, f"Expected 0 diagnostics for valid widening, found: {diags}"
+
+    def test_semantic_initial_value_mismatch_error(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_BadInit.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_BadInit" Id="{99999999-9999-9999-9999-999999999991}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_BadInit
+VAR
+    nVal : INT := 'invalid_string';
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert any(d.code == "TC-SEM-006" and "Initial value" in d.message for d in diags)
+
+
 
 

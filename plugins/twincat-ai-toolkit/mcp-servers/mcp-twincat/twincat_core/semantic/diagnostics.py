@@ -5,10 +5,22 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Set
 
-from ..syntax.ast import PouDecl
+from ..syntax.ast import (
+    AssignStmt,
+    CaseStmt,
+    ForStmt,
+    IfStmt,
+    PouDecl,
+    RepeatStmt,
+    Statement,
+    WhileStmt,
+)
 from ..syntax.diagnostics import DiagnosticSeverity, SyntaxDiagnostic
+from ..syntax.parser_statements import StatementParser
 from ..syntax.span import SourceSpan
+from .scopes import Scope
 from .symbols import SymbolKind
+from .type_compatibility import TypeCheckResultKind, check_type_assignment
 from .type_index import BUILTIN_TYPES
 
 if TYPE_CHECKING:
@@ -189,4 +201,175 @@ def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[Syntax
             curr_desc = index.type_index.get_type(curr, context_path=file_path)
             curr = curr_desc.extends_name if curr_desc else None
 
+    # 4. Initial Value Type Validation for Declared Symbols
+    for sym in indexed.declared_symbols:
+        if (
+            sym.kind in (SymbolKind.VARIABLE, SymbolKind.CONSTANT, SymbolKind.STRUCT_FIELD)
+            and sym.initial_value
+            and sym.type_ref
+        ):
+            init_val = sym.initial_value.strip()
+            # Skip composite struct/array constructors to avoid false positives on nested elements
+            if not init_val.startswith("(") and not init_val.startswith("["):
+                try:
+                    p = StatementParser.from_source(init_val)
+                    init_expr = p.parse_expression()
+                    if init_expr:
+                        init_t = index.resolver.infer_expression_type(init_expr, index.symbol_table.global_scope)
+                        if init_t:
+                            res = check_type_assignment(sym.type_ref, init_t, index.type_index, file_path)
+                            if res.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR and sym.span and sym.span.start.line > 0:
+                                diagnostics.append(
+                                    SyntaxDiagnostic(
+                                        message=f"Initial value for '{sym.name}': {res.message}",
+                                        span=sym.span,
+                                        severity=DiagnosticSeverity.ERROR,
+                                        code="TC-SEM-006",
+                                    )
+                                )
+                            elif res.kind == TypeCheckResultKind.NARROWING_WARNING and sym.span and sym.span.start.line > 0:
+                                diagnostics.append(
+                                    SyntaxDiagnostic(
+                                        message=f"Initial value for '{sym.name}': {res.message}",
+                                        span=sym.span,
+                                        severity=DiagnosticSeverity.WARNING,
+                                        code="TC-SEM-007",
+                                    )
+                                )
+                except Exception:
+                    pass
+
+    # 5. Implementation Statements Type & Conversion Validation (TC-SEM-006, TC-SEM-007)
+    for cdata_span, scope, stmts in indexed.implementation_statements:
+        for stmt in stmts:
+            _validate_statement(stmt, scope, index, file_path, diagnostics)
+
     return diagnostics
+
+
+def _validate_statement(
+    stmt: Statement,
+    scope: Scope,
+    index: WorkspaceIndex,
+    file_path: Path,
+    diagnostics: list[SyntaxDiagnostic],
+) -> None:
+    if isinstance(stmt, AssignStmt):
+        target_t = index.resolver.infer_expression_type(stmt.target, scope)
+        value_t = index.resolver.infer_expression_type(stmt.value, scope)
+        if target_t and value_t:
+            res = check_type_assignment(target_t, value_t, index.type_index, file_path)
+            if res.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR:
+                diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=res.message or f"Cannot convert type '{value_t}' to '{target_t}'",
+                        span=stmt.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-SEM-006",
+                    )
+                )
+            elif res.kind == TypeCheckResultKind.NARROWING_WARNING:
+                diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=res.message or f"Implicit conversion from '{value_t}' to '{target_t}'",
+                        span=stmt.span,
+                        severity=DiagnosticSeverity.WARNING,
+                        code="TC-SEM-007",
+                    )
+                )
+
+    elif isinstance(stmt, IfStmt):
+        cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
+        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+            diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"IF condition expression must be of type 'BOOL', found '{cond_t}'",
+                    span=stmt.condition.span,
+                    severity=DiagnosticSeverity.ERROR,
+                    code="TC-SEM-006",
+                )
+            )
+        for s in stmt.then_body:
+            _validate_statement(s, scope, index, file_path, diagnostics)
+        for branch in stmt.elsifs:
+            b_cond_t = index.resolver.infer_expression_type(branch.condition, scope)
+            if b_cond_t and b_cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not b_cond_t.upper().startswith("__SYSTEM"):
+                diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=f"ELSIF condition expression must be of type 'BOOL', found '{b_cond_t}'",
+                        span=branch.condition.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-SEM-006",
+                    )
+                )
+            for s in branch.body:
+                _validate_statement(s, scope, index, file_path, diagnostics)
+        if stmt.else_branch:
+            for s in stmt.else_branch.body:
+                _validate_statement(s, scope, index, file_path, diagnostics)
+
+    elif isinstance(stmt, WhileStmt):
+        cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
+        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+            diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"WHILE condition expression must be of type 'BOOL', found '{cond_t}'",
+                    span=stmt.condition.span,
+                    severity=DiagnosticSeverity.ERROR,
+                    code="TC-SEM-006",
+                )
+            )
+        for s in stmt.body:
+            _validate_statement(s, scope, index, file_path, diagnostics)
+
+    elif isinstance(stmt, RepeatStmt):
+        cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
+        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+            diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"REPEAT UNTIL condition expression must be of type 'BOOL', found '{cond_t}'",
+                    span=stmt.condition.span,
+                    severity=DiagnosticSeverity.ERROR,
+                    code="TC-SEM-006",
+                )
+            )
+        for s in stmt.body:
+            _validate_statement(s, scope, index, file_path, diagnostics)
+
+    elif isinstance(stmt, ForStmt):
+        loop_var_sym = index.resolver.resolve_identifier(stmt.loop_var, scope)
+        if loop_var_sym and loop_var_sym.type_ref:
+            start_t = index.resolver.infer_expression_type(stmt.start_expr, scope)
+            end_t = index.resolver.infer_expression_type(stmt.end_expr, scope)
+            if start_t:
+                res_s = check_type_assignment(loop_var_sym.type_ref, start_t, index.type_index, file_path)
+                if res_s.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR:
+                    diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"FOR loop start value: {res_s.message}",
+                            span=stmt.start_expr.span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-SEM-006",
+                        )
+                    )
+            if end_t:
+                res_e = check_type_assignment(loop_var_sym.type_ref, end_t, index.type_index, file_path)
+                if res_e.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR:
+                    diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"FOR loop end value: {res_e.message}",
+                            span=stmt.end_expr.span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-SEM-006",
+                        )
+                    )
+        for s in stmt.body:
+            _validate_statement(s, scope, index, file_path, diagnostics)
+
+    elif isinstance(stmt, CaseStmt):
+        for branch in stmt.branches:
+            for s in branch.body:
+                _validate_statement(s, scope, index, file_path, diagnostics)
+        if stmt.else_branch:
+            for s in stmt.else_branch.body:
+                _validate_statement(s, scope, index, file_path, diagnostics)

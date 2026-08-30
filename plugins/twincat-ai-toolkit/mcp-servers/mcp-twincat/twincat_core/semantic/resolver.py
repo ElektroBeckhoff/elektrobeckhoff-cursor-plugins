@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from ..syntax.ast import (
+    AddressOfExpr,
     BinaryExpr,
     CallExpr,
     DerefExpr,
@@ -339,23 +340,52 @@ class SymbolResolver:
                 return self.type_index.clean_type_name(target_type)
             return None
 
+        if isinstance(expr, AddressOfExpr):
+            target_t = self.infer_expression_type(expr.target, current_scope)
+            if target_t:
+                return f"POINTER TO {target_t}"
+            return "PVOID"
+
         if isinstance(expr, CallExpr):
             callee_type = self.infer_expression_type(expr.callee, current_scope)
             if callee_type:
                 return callee_type
             if isinstance(expr.callee, IdentifierExpr):
                 func_sym = self.resolve_identifier(expr.callee.name, current_scope)
-                if func_sym:
+                if func_sym and func_sym.type_ref:
                     return func_sym.type_ref
+                # Standard IEC Conversion Functions & Builtins
+                upper_callee = expr.callee.name.upper()
+                if upper_callee.startswith("TO_"):
+                    return upper_callee[3:]
+                if "_TO_" in upper_callee:
+                    return upper_callee.split("_TO_")[-1]
+                if upper_callee in ("SIZEOF", "LEN"):
+                    return "UDINT"
+                if upper_callee in ("CONCAT", "MID", "LEFT", "RIGHT", "INSERT", "DELETE", "REPLACE"):
+                    return "STRING"
+                if upper_callee in ("WCONCAT", "WMID", "WLEFT", "WRIGHT", "WINSERT", "WDELETE", "WREPLACE"):
+                    return "WSTRING"
+                if upper_callee in ("ABS", "SQRT", "LN", "LOG", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC", "ROUND", "FLOOR", "CEIL"):
+                    if expr.args:
+                        return self.infer_expression_type(expr.args[0].value, current_scope) or "LREAL"
+                    return "LREAL"
             return None
 
         if isinstance(expr, BinaryExpr):
             op = expr.op.upper()
             if op in ("=", "<>", "<", ">", "<=", ">=", "AND", "OR", "XOR", "NOT"):
                 return "BOOL"
+            if op in (":=", "REF=", "?="):
+                return self.infer_expression_type(expr.right, current_scope) or self.infer_expression_type(expr.left, current_scope)
             if op in ("+", "-", "*", "/", "MOD", "EXPT"):
                 left_t = self.infer_expression_type(expr.left, current_scope)
-                return left_t or "LREAL"
+                right_t = self.infer_expression_type(expr.right, current_scope)
+                if (left_t and left_t.upper() == "LREAL") or (right_t and right_t.upper() == "LREAL"):
+                    return "LREAL"
+                if (left_t and left_t.upper() == "REAL") or (right_t and right_t.upper() == "REAL"):
+                    return "REAL"
+                return left_t or right_t or "LREAL"
             return None
 
         if isinstance(expr, UnaryExpr):

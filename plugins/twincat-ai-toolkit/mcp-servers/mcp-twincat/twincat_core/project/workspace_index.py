@@ -23,6 +23,7 @@ from ..syntax.ast import (
     UnionType,
     VarBlock,
     VarDecl,
+    Statement,
 )
 from ..syntax.cst import CstNode
 from ..syntax.diagnostics import SyntaxDiagnostic
@@ -44,6 +45,7 @@ class IndexedFile:
     cst_nodes: list[CstNode] = field(default_factory=list)
     diagnostics: list[SyntaxDiagnostic] = field(default_factory=list)
     declared_symbols: list[Symbol] = field(default_factory=list)
+    implementation_statements: list[tuple[CdataSpan, Scope, list[Statement]]] = field(default_factory=list)
 
 
 class WorkspaceIndex:
@@ -118,6 +120,8 @@ class WorkspaceIndex:
         active_pou_symbol: Optional[Symbol] = None
         active_pou_scope: Optional[Scope] = None
         active_pou_type_desc: Optional[TypeDescriptor] = None
+        method_scopes: dict[str, Scope] = {}
+        implementation_statements: list[tuple[CdataSpan, Scope, list[Statement]]] = []
 
         default_span = SourceSpan.from_bounds(1, 1, 0, 1, 1, 0)
 
@@ -381,6 +385,7 @@ class WorkspaceIndex:
                     declared_symbols.append(m_sym)
 
                     m_scope = self.symbol_table.create_method_scope(m_sym, active_pou_scope, path)
+                    method_scopes[m_name.lower()] = m_scope
                     for v_block in ast_node.var_blocks:
                         for v in v_block.variables:
                             mv_sym = Symbol(
@@ -420,15 +425,19 @@ class WorkspaceIndex:
                         active_pou_type_desc.add_property(prop_sym)
                     declared_symbols.append(prop_sym)
 
-            # 4. Implementation Bodies (POU, Method, Action)
-            elif span.kind in (
-                CdataKind.POU_IMPLEMENTATION,
-                CdataKind.METHOD_IMPLEMENTATION,
-                CdataKind.ACTION_IMPLEMENTATION,
-            ):
+            # 4. Implementation Bodies (POU, Method, Action, Property)
+            elif span.is_implementation:
                 stmts, cst_nodes, diags = parse_implementation(span.content)
                 all_cst_nodes.extend(cst_nodes)
                 all_diags.extend(diags)
+
+                impl_scope = active_pou_scope or self.symbol_table.global_scope
+                if span.kind == CdataKind.METHOD_IMPLEMENTATION and span.parent_name:
+                    m_scope = method_scopes.get(span.parent_name.lower())
+                    if m_scope:
+                        impl_scope = m_scope
+
+                implementation_statements.append((span, impl_scope, stmts))
 
                 if span.kind == CdataKind.ACTION_IMPLEMENTATION and active_pou_scope and span.parent_name:
                     lines_before = xml_doc.raw_text[:span.content_start].splitlines(keepends=True)
@@ -462,6 +471,7 @@ class WorkspaceIndex:
             cst_nodes=all_cst_nodes,
             diagnostics=all_diags,
             declared_symbols=declared_symbols,
+            implementation_statements=implementation_statements,
         )
         self.indexed_files[path] = indexed
         return indexed
