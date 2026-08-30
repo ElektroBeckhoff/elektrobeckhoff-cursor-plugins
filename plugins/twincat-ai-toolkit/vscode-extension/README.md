@@ -19,8 +19,8 @@ Full TextMate grammar support tailored specifically for TwinCAT 3 and modern IEC
 ### 2. Built-in TwinCAT Language Server (LSP)
 Directly backed by `twincat_core.lsp`:
 - **Live Syntax & Semantic Diagnostics**: Instant error detection and squiggly underlines for syntax mistakes, duplicate identifiers, interface conformance, and type mismatches.
-- **Rich Hover & Parameter Documentation**: Comprehensive tooltips for POUs, methods, structs, enums, variables, and comments with InfoSys documentation.
-- **Go to Definition & Implementation**: Fast navigation to symbols across files within the solution.
+- **Rich Hover & Parameter Documentation**: Comprehensive tooltips for POUs, methods, structs, enums, variables, and inline comments, filtered to public interfaces and styled with the ST formatter.
+- **Go to Definition, Implementation & Type Definition**: Fast navigation (`F12`, `Ctrl+F12`) across POUs, methods, properties, actions, interfaces, structs, enums, unions, aliases, and GVLs.
 - **IntelliSense Auto-Completion**: Member access (`.`, `^`) and scope completions.
 - **Workspace & Project Awareness**: Indexing of `.plcproj` project trees, libraries, and global variable lists (GVLs).
 
@@ -35,6 +35,9 @@ Directly backed by `twincat_core.lsp`:
 | Command | Title | Description |
 | :--- | :--- | :--- |
 | `twincat.restartServer` | **TwinCAT: Restart Language Server** | Restarts the background Python Language Server. |
+| `twincat.ai.checkSyntax` | **TwinCAT AI: Check Syntax & Diagnostics** | Runs fast headless syntax and semantic validation on the active file or selected folder. |
+| `twincat.ai.pagefaultAudit` | **TwinCAT AI: Pagefault & Safety Audit** | Audits active file or folder for pagefaults, unchecked pointers, and memory safety risks. |
+| `twincat.ai.addComments` | **TwinCAT AI: Add Comments (\* \*)** | Generates structured IEC 61131-3 block comments matching density rules. |
 
 ---
 

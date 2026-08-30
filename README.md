@@ -19,6 +19,7 @@ Architecture: **rules** (always-on core + on-demand domains) · **skills** (work
 |------------|--------------|
 | **Ship gate** | `/twincat3-cmd-new-version` — plcproj sync → comment → STweep format → pagefault audit → validate (4024) → auto version → changelog → export `.library` + `.compiled-library` → thematic local commits |
 | **Release core** | `/twincat3-cmd-release` — user-chosen version only; validate + export both artifacts + changelog (no auto-bump) |
+| **Fast syntax / diagnostics** | `/twincat3-cmd-check-syntax` — instantaneous headless AST & semantic checks (`twincat_check_syntax`), type compatibility, interface conformance, no XAE needed |
 | **Validate / build** | MCP `CheckAllObjects` / build against TwinCAT XAE |
 | **STweep format** | Format ST via MCP (file/folder; project with confirm); async + cancel for large jobs |
 | **UmRT online test** | `/twincat3-cmd-online-test` — Usermode Runtime E2E: activate, runtime messages, ADS smoke |
