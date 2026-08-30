@@ -2,7 +2,7 @@
 
 import html
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from infosys_mshc.constants import (
     DEFAULT_MAX_FULL_TEXT_CHARS,
@@ -22,6 +22,20 @@ from infosys_mshc.constants import (
     TYPE_PREFIXES,
 )
 
+RE_PREFIX_STRIP = re.compile(
+    r'^(?:Interface|Schnittstelle|Function\s+Block|Funktionsbaustein|Function|Funktion|Struct|Struktur|Structure|Type|Datentyp|Enum|Aufz[äa]hlung|Method|Methode|Property|Eigenschaft)\s+',
+    re.IGNORECASE,
+)
+
+RE_VALID_IEC_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+NOISE_PARAM_NAMES = {
+    "name", "parameter", "bezeichnung", "eingang", "ausgang",
+    "return parameter", "rückgabeparameter", "meaning", "bedeutung",
+    "hinweis", "notice", "description", "beschreibung", "wert", "value",
+    "typ", "type", "daten", "datentyp",
+}
+
 
 def strip_tags(text: str) -> str:
     """Strip HTML tags, unescape HTML entities, and normalize whitespace."""
@@ -39,8 +53,15 @@ def strip_tags(text: str) -> str:
 _strip_tags = strip_tags
 
 
-def detect_type(title: str, description: str = "", syntax: str = "") -> str:
-    """Detect IEC 61131-3 entity type from title, syntax block, or description."""
+def detect_type(
+    title: str,
+    description: str = "",
+    syntax: str = "",
+    full_text: str = "",
+    return_type: Optional[str] = None,
+    has_methods: bool = False,
+) -> str:
+    """Detect IEC 61131-3 entity type from title, syntax block, description, full_text, or return_type."""
     if not title:
         return "article"
 
@@ -57,7 +78,7 @@ def detect_type(title: str, description: str = "", syntax: str = "") -> str:
         return "FUNCTION_BLOCK"
     if t_lower.startswith("function ") or t_lower.startswith("funktion ") or t_lower.startswith("f_"):
         return "FUNCTION"
-    if t_lower.startswith("interface ") or t_lower.startswith("schnittstelle ") or t_lower.startswith("i_"):
+    if t_lower.startswith("interface ") or t_lower.startswith("schnittstelle ") or t_lower.startswith("i_") or t_lower.startswith("itc"):
         return "INTERFACE"
     if t_lower.startswith("struct ") or t_lower.startswith("structure ") or t_lower.startswith("struktur ") or t_lower.startswith("st_"):
         return "STRUCT"
@@ -72,30 +93,73 @@ def detect_type(title: str, description: str = "", syntax: str = "") -> str:
             return "METHOD"
         if s_upper.startswith("PROPERTY "):
             return "PROPERTY"
-        if s_upper.startswith("FUNCTION_BLOCK "):
+        if s_upper.startswith("FUNCTION_BLOCK ") or s_upper.startswith("FUNCTION BLOCK "):
             return "FUNCTION_BLOCK"
-        if s_upper.startswith("FUNCTION "):
+        if s_upper.startswith("FUNCTION ") or s_upper.startswith("FUNCTION:"):
             return "FUNCTION"
         if s_upper.startswith("TYPE "):
             return "TYPE"
         if s_upper.startswith("INTERFACE "):
             return "INTERFACE"
 
+    if full_text:
+        ft_upper = full_text[:3000].upper()
+        if re.search(r'\bFUNCTION_BLOCK\s+', ft_upper):
+            return "FUNCTION_BLOCK"
+        if re.search(r'\bFUNCTION\s+[A-Za-z0-9_]+\s*:', ft_upper) or re.search(r'\bFUNCTION\s*:', ft_upper):
+            return "FUNCTION"
+        if re.search(r'\bINTERFACE\s+', ft_upper):
+            return "INTERFACE"
+
     if description:
         d_lower = description.lower().strip()
-        if d_lower.startswith("this method ") or d_lower.startswith("diese methode "):
+        if d_lower.startswith("this method ") or d_lower.startswith("diese methode ") or " method " in d_lower:
             return "METHOD"
-        if d_lower.startswith("this property ") or d_lower.startswith("diese eigenschaft "):
+        if d_lower.startswith("this property ") or d_lower.startswith("diese eigenschaft ") or " property " in d_lower:
             return "PROPERTY"
-        if d_lower.startswith("this function block ") or d_lower.startswith("dieser funktionsbaustein "):
+        if d_lower.startswith("this function block ") or d_lower.startswith("dieser funktionsbaustein ") or " function block " in d_lower:
             return "FUNCTION_BLOCK"
-        if d_lower.startswith("this function ") or d_lower.startswith("diese funktion "):
+        if (
+            d_lower.startswith("this function ")
+            or d_lower.startswith("diese funktion ")
+            or d_lower.startswith("the function ")
+            or d_lower.startswith("die funktion ")
+            or " function " in d_lower
+            or " funktion " in d_lower
+        ):
             return "FUNCTION"
+
+    if return_type and not has_methods:
+        return "FUNCTION"
+
+    if has_methods:
+        return "FUNCTION_BLOCK"
 
     return "article"
 
 
 _detect_type = detect_type
+
+
+def extract_canonical_name_and_type(
+    title: str,
+    description: str = "",
+    syntax: str = "",
+    full_text: str = "",
+    return_type: Optional[str] = None,
+    has_methods: bool = False,
+) -> Tuple[str, str]:
+    """Extract stripped canonical IEC symbol name and symbol type."""
+    detected = detect_type(
+        title,
+        description=description,
+        syntax=syntax,
+        full_text=full_text,
+        return_type=return_type,
+        has_methods=has_methods,
+    )
+    clean_title = RE_PREFIX_STRIP.sub("", title).strip()
+    return clean_title or title, detected
 
 
 def extract_syntax(raw_html: str) -> str:
@@ -107,6 +171,7 @@ def extract_syntax(raw_html: str) -> str:
             kw in text
             for kw in (
                 "FUNCTION_BLOCK",
+                "FUNCTION BLOCK",
                 "FUNCTION ",
                 "VAR_INPUT",
                 "VAR_OUTPUT",
@@ -124,6 +189,30 @@ def extract_syntax(raw_html: str) -> str:
 
 
 _extract_syntax = extract_syntax
+
+
+def extract_return_type(syntax: str, full_text: str = "", sym_type: str = "") -> Optional[str]:
+    """Extract return type for Functions, Methods, and Properties from declaration syntax or text."""
+    text_to_search = (syntax + "\n" + full_text[:2000]).replace("VAR_INPUT", " VAR_INPUT ").replace("VAR_OUTPUT", " VAR_OUTPUT ")
+
+    # 1. Standard ST FUNCTION declaration e.g. "FUNCTION MEMCPY : UDINT" or "MEMCPY FUNCTION : UDINT"
+    m = re.search(r'FUNCTION\s+\w+\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+    if m:
+        ret = m.group(1).strip()
+        return ret.split("(")[0].strip()
+
+    m2 = re.search(r'(\w+)\s+FUNCTION\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+    if m2:
+        ret = m2.group(2).strip()
+        return ret.split("(")[0].strip()
+
+    # 2. METHOD or PROPERTY declaration e.g. "METHOD M_GetVal : INT"
+    m_meth = re.search(r'(?:METHOD|PROPERTY)\s+\w+\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+    if m_meth:
+        ret = m_meth.group(1).strip()
+        return ret.split("(")[0].strip()
+
+    return None
 
 
 def split_sections(raw_html: str) -> Dict[str, str]:
@@ -145,7 +234,7 @@ _split_sections = split_sections
 
 
 def parse_param_table(section_html: str) -> List[Dict[str, str]]:
-    """Extract parameter / variable definitions from an HTML table."""
+    """Extract parameter / variable definitions from an HTML table, filtering out non-identifier noise."""
     if not section_html:
         return []
     rows = RE_TABLE_ROW.findall(section_html)
@@ -157,13 +246,52 @@ def parse_param_table(section_html: str) -> List[Dict[str, str]]:
         name = strip_tags(cells[0]).strip()
         typ = strip_tags(cells[1]).strip()
         desc = strip_tags(cells[2]).strip() if len(cells) > 2 else ""
-        if not name or name.lower() in ("name", "parameter", "bezeichnung"):
+
+        if not name:
             continue
+
+        name_lower = name.lower()
+        if name_lower in NOISE_PARAM_NAMES:
+            continue
+        if name.startswith(("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ">", "<", "=", "+", "-", "*", "/", "#")):
+            continue
+        if " " in name and not name.startswith("_"):
+            continue
+
         params.append({"name": name, "type": typ, "description": desc})
     return params
 
 
 _parse_param_table = parse_param_table
+
+
+def extract_properties(section_html: str) -> List[Dict[str, str]]:
+    """Extract property list from properties section HTML table."""
+    if not section_html:
+        return []
+    rows = RE_TABLE_ROW.findall(section_html)
+    properties: List[Dict[str, str]] = []
+    for row in rows:
+        cells = RE_TABLE_CELL.findall(row)
+        if len(cells) < 1:
+            continue
+        name = strip_tags(cells[0]).strip()
+        if not name or name.lower() in ("name", "property", "eigenschaft", "bezeichnung"):
+            continue
+
+        typ = strip_tags(cells[1]).strip() if len(cells) > 1 else "BOOL"
+        desc = strip_tags(cells[2]).strip() if len(cells) > 2 else ""
+        access = "Get/Set"
+        if len(cells) > 3:
+            access = strip_tags(cells[3]).strip()
+
+        properties.append({
+            "name": name,
+            "type": typ,
+            "description": desc,
+            "access": access,
+        })
+    return properties
 
 
 def extract_methods(section_html: str) -> List[Dict[str, str]]:
@@ -292,7 +420,6 @@ def parse_page(
     )
 
     syntax = extract_syntax(raw_html)
-    sym_type = detect_type(title, description=description, syntax=syntax)
     sections = split_sections(raw_html)
 
     inputs = parse_param_table(sections.get("inputs", ""))
@@ -307,6 +434,21 @@ def parse_page(
         methods = extract_methods(
             sections.get("event-driven methods (callback methods)", "")
         )
+
+    properties = extract_properties(sections.get("properties", ""))
+
+    full_text_raw = strip_tags(raw_html)
+    return_type = extract_return_type(syntax, full_text_raw)
+    has_methods = bool(methods)
+
+    canonical_name, sym_type = extract_canonical_name_and_type(
+        title,
+        description=description,
+        syntax=syntax,
+        full_text=full_text_raw,
+        return_type=return_type,
+        has_methods=has_methods,
+    )
 
     requirements = extract_requirements(sections.get("requirements", ""))
     if display_version and not requirements.get("library"):
@@ -344,7 +486,6 @@ def parse_page(
         params_shown = len(inputs) + len(outputs) + len(parameters)
         truncated = True
 
-    full_text_raw = strip_tags(raw_html)
     total_full_text_chars = len(full_text_raw)
 
     if include_full_text:
@@ -360,8 +501,10 @@ def parse_page(
 
     result: Dict[str, Any] = {
         "title": title,
+        "canonical_name": canonical_name,
         "component": component,
         "type": sym_type,
+        "sym_type": sym_type,
         "path": html_path,
         "library": library,
         "parent": parent,
@@ -369,6 +512,8 @@ def parse_page(
         "description": description,
         "syntax": syntax,
     }
+    if return_type:
+        result["return_type"] = return_type
     if inputs:
         result["inputs"] = inputs
     if outputs:
@@ -377,6 +522,8 @@ def parse_page(
         result["parameters"] = parameters
     if methods:
         result["methods"] = methods
+    if properties:
+        result["properties"] = properties
     if requirements:
         result["requirements"] = requirements
     result["full_text"] = full_text

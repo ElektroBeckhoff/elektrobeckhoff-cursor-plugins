@@ -77,6 +77,9 @@ def format_page_markdown(page: Dict[str, Any]) -> str:
         meta_info.append(f"**Parent:** `{parent}`")
     if comp:
         meta_info.append(f"**Component:** `{comp}`")
+    ret_type = page.get("return_type", "")
+    if ret_type:
+        meta_info.append(f"**Return Type:** `{ret_type}`")
     if meta_info:
         lines.append(" | ".join(meta_info))
         lines.append("")
@@ -123,6 +126,19 @@ def format_page_markdown(page: Dict[str, Any]) -> str:
             lines.append(
                 f"| `{p.get('name', '')}` | `{p.get('type', '')}` | {p.get('description', '')} |"
             )
+        lines.append("")
+
+    properties = page.get("properties", [])
+    if properties:
+        lines.append("### Properties")
+        lines.append("| Property | Type | Access | Description |")
+        lines.append("|---|---|---|---|")
+        for prop in properties:
+            p_name = prop.get("name", "") if isinstance(prop, dict) else getattr(prop, "name", "")
+            p_type = prop.get("type", "") if isinstance(prop, dict) else getattr(prop, "type", "")
+            p_access = prop.get("access", "Get/Set") if isinstance(prop, dict) else getattr(prop, "access", "Get/Set")
+            p_desc = prop.get("description", "") if isinstance(prop, dict) else getattr(prop, "description", "")
+            lines.append(f"| `{p_name}` | `{p_type}` | {p_access} | {p_desc} |")
         lines.append("")
 
     methods = page.get("methods", [])

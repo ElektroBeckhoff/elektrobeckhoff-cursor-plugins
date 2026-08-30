@@ -39,8 +39,15 @@ SECTION_ALIASES = {
     "ausgaenge": "outputs",
     "ein-/ausgänge": "inputs",
     "ein-/ausgaenge": "inputs",
+    "eigenschaften": "properties",
+    "properties": "properties",
+    "property": "properties",
     "methoden": "methods",
     "voraussetzungen": "requirements",
+    "rückgabewert": "return_value",
+    "rueckgabewert": "return_value",
+    "return value": "return_value",
+    "returns": "return_value",
     "ereignisgesteuerte methoden (callback-methoden)": (
         "event-driven methods (callback methods)"
     ),

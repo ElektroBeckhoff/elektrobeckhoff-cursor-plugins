@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, TypedDict
 
 
@@ -19,6 +19,27 @@ class MethodItem(TypedDict, total=False):
 
     name: str
     description: str
+    signature: str
+
+
+@dataclass
+class PropertyItem:
+    """Property entry extracted from properties / Eigenschaften section."""
+
+    name: str
+    type: str
+    description: str = ""
+    access: str = "Get/Set"
+
+    def to_dict(self) -> Dict[str, str]:
+        d: Dict[str, str] = {
+            "name": self.name,
+            "type": self.type,
+            "access": self.access,
+        }
+        if self.description:
+            d["description"] = self.description
+        return d
 
 
 class RequirementsInfo(TypedDict, total=False):
@@ -42,9 +63,10 @@ class DocEntry:
     parent: str = ""
     qualified_name: str = ""
     description: str = ""
+    canonical_name: str = ""
 
     def to_dict(self) -> Dict[str, str]:
-        return {
+        d: Dict[str, str] = {
             "title": self.title,
             "type": self.type,
             "component": self.component,
@@ -54,6 +76,9 @@ class DocEntry:
             "qualified_name": self.qualified_name,
             "description": self.description,
         }
+        if self.canonical_name:
+            d["canonical_name"] = self.canonical_name
+        return d
 
 
 @dataclass
@@ -70,6 +95,7 @@ class SearchResultItem:
     qualified_name: str = ""
     description: str = ""
     snippet: str = ""
+    canonical_name: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -89,6 +115,8 @@ class SearchResultItem:
             d["description"] = self.description
         if self.snippet:
             d["snippet"] = self.snippet
+        if self.canonical_name:
+            d["canonical_name"] = self.canonical_name
         return d
 
 
@@ -122,15 +150,18 @@ class PageResult:
     component: str
     type: str
     path: str
+    canonical_name: str
     library: str = ""
     parent: str = ""
     qualified_name: str = ""
     description: str = ""
     syntax: str = ""
+    return_type: Optional[str] = None
     inputs: List[ParamItem] = field(default_factory=list)
     outputs: List[ParamItem] = field(default_factory=list)
     parameters: List[ParamItem] = field(default_factory=list)
     methods: List[MethodItem] = field(default_factory=list)
+    properties: List[PropertyItem] = field(default_factory=list)
     requirements: Dict[str, str] = field(default_factory=dict)
     full_text: str = ""
     truncated: bool = False
@@ -141,11 +172,18 @@ class PageResult:
     params_total: int = 0
     params_shown: int = 0
 
+    @property
+    def sym_type(self) -> str:
+        """IEC 61131-3 symbol type alias for structured consumers."""
+        return self.type
+
     def to_dict(self) -> Dict[str, Any]:
         res: Dict[str, Any] = {
             "title": self.title,
+            "canonical_name": self.canonical_name,
             "component": self.component,
             "type": self.type,
+            "sym_type": self.type,
             "path": self.path,
         }
         if self.library:
@@ -156,6 +194,8 @@ class PageResult:
             res["qualified_name"] = self.qualified_name
         res["description"] = self.description
         res["syntax"] = self.syntax
+        if self.return_type:
+            res["return_type"] = self.return_type
 
         if self.inputs:
             res["inputs"] = self.inputs
@@ -165,6 +205,8 @@ class PageResult:
             res["parameters"] = self.parameters
         if self.methods:
             res["methods"] = self.methods
+        if self.properties:
+            res["properties"] = [p.to_dict() if isinstance(p, PropertyItem) else p for p in self.properties]
         if self.requirements:
             res["requirements"] = self.requirements
         res["full_text"] = self.full_text

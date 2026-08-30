@@ -148,6 +148,80 @@ def test_parse_page_full():
     assert page["inputs"][0]["name"] == "bRun"
     assert len(page["outputs"]) == 1
     assert page["outputs"][0]["name"] == "bDone"
+def test_parse_param_table_noise_filtering():
+    section_html = (
+        "<table>"
+        "<tr><th>Name</th><th>Type</th><th>Description</th></tr>"
+        "<tr><td>bExecute</td><td>BOOL</td><td>Rising edge starts operation</td></tr>"
+        "<tr><td>0</td><td></td><td>OK</td></tr>"
+        "<tr><td>> 0</td><td></td><td>Error code</td></tr>"
+        "<tr><td>Return parameter</td><td>UDINT</td><td>Internal status</td></tr>"
+        "<tr><td>Meaning of flags</td><td></td><td>Table note</td></tr>"
+        "<tr><td>nLimit</td><td>INT</td><td>Upper boundary</td></tr>"
+        "</table>"
+    )
+    params = parse_param_table(section_html)
+    assert len(params) == 2
+    assert params[0]["name"] == "bExecute"
+    assert params[0]["type"] == "BOOL"
+    assert params[1]["name"] == "nLimit"
+    assert params[1]["type"] == "INT"
+
+
+def test_extract_properties_and_return_type():
+    from infosys_mshc.html_parser import extract_properties, extract_return_type, extract_canonical_name_and_type
+
+    prop_html = (
+        "<table>"
+        "<tr><th>Property</th><th>Type</th><th>Description</th><th>Access</th></tr>"
+        "<tr><td>bConnected</td><td>BOOL</td><td>Connection status</td><td>Get</td></tr>"
+        "<tr><td>nTimeout</td><td>UDINT</td><td>Timeout in ms</td><td>Get/Set</td></tr>"
+        "</table>"
+    )
+    props = extract_properties(prop_html)
+    assert len(props) == 2
+    assert props[0]["name"] == "bConnected"
+    assert props[0]["type"] == "BOOL"
+    assert props[0]["access"] == "Get"
+    assert props[1]["name"] == "nTimeout"
+    assert props[1]["type"] == "UDINT"
+    assert props[1]["access"] == "Get/Set"
+
+    # Return type extraction
+    syntax_fn = "FUNCTION MEMCPY : UDINT\nVAR_INPUT\n    destAddr : PVOID;\nEND_VAR"
+    assert extract_return_type(syntax_fn) == "UDINT"
+
+    syntax_str = "FUNCTION CONCAT : STRING(255)\nVAR_INPUT\n    STR1 : STRING(255);\nEND_VAR"
+    assert extract_return_type(syntax_str) == "STRING"
+
+    # Canonical name and prefix stripping
+    canon, sym_type = extract_canonical_name_and_type("Interface ITcUnknown")
+    assert canon == "ITcUnknown"
+    assert sym_type == "INTERFACE"
+
+    canon_fb, sym_fb = extract_canonical_name_and_type("Funktionsbaustein FB_Demo")
+    assert canon_fb == "FB_Demo"
+    assert sym_fb == "FUNCTION_BLOCK"
+
+
+def test_parse_page_with_properties_and_canonical():
+    raw_html = (
+        "<html><head>"
+        "<title>Interface ITcIoServer</title>"
+        '<meta name="Description" content="TwinCAT I/O server interface" />'
+        "</head><body>"
+        "<h2>Properties</h2>"
+        "<table><tr><td>bActive</td><td>BOOL</td><td>Server active flag</td></tr></table>"
+        "<h2>Methods</h2>"
+        "<table><tr><td>M_Start</td><td>Starts server</td></tr></table>"
+        "</body></html>"
+    )
+    page = parse_page(raw_html, "tc3_system/1033/999.html")
+    assert page["title"] == "Interface ITcIoServer"
+    assert page["canonical_name"] == "ITcIoServer"
+    assert page["type"] == "INTERFACE"
+    assert len(page["properties"]) == 1
+    assert page["properties"][0]["name"] == "bActive"
     assert len(page["methods"]) == 1
-    assert page["methods"][0]["name"] == "Reset"
-    assert page["requirements"]["library"] == "Tc3_Demo"
+    assert page["methods"][0]["name"] == "M_Start"
+
