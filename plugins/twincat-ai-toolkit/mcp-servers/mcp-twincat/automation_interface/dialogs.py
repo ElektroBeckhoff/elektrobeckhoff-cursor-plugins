@@ -37,12 +37,20 @@ class DialogOpsMixin:
         "modified outside the environment",
         "modified outside of twincat",
         "outside the environment",  # broad EN anchor for reload prompt
+        "can not create project",
+        "name must be a valid identifier",
+        "an exception has been encountered. this may be caused by an extension",
+        "no solution found",
+        "system.invalidoperationexception",
+        "stweep",
         # DE
         "außerhalb der umgebung geändert",
         "ausserhalb der umgebung geändert",  # ae spelling
         "außerhalb von twincat xae",
         "außerhalb der umgebung",
         "datei neu laden",
+        "der name muss ein",
+        "ein gültiger iec 61131-3-bezeichner",
     ]
 
     _POLL_IDLE_S = 0.5
@@ -184,7 +192,10 @@ class DialogOpsMixin:
                     pattern = dlg.get("matched_pattern", "")
                     text = dlg.get("text", "")[:120]
                     _tai().win32gui.PostMessage(
-                        hwnd, _tai().win32con.WM_COMMAND, IDYES, 0,
+                        hwnd, _tai().win32con.WM_COMMAND, 1, 0,  # IDOK
+                    )
+                    _tai().win32gui.PostMessage(
+                        hwnd, _tai().win32con.WM_COMMAND, 6, 0,  # IDYES
                     )
                     log.warning(
                         "Auto-dismissed TcXaeShell dialog (hwnd=%s, "
@@ -228,7 +239,10 @@ class DialogOpsMixin:
                 text = dlg.get("text", "")[:120]
                 try:
                     _tai().win32gui.PostMessage(
-                        hwnd, _tai().win32con.WM_COMMAND, IDYES, 0,
+                        hwnd, _tai().win32con.WM_COMMAND, 1, 0,  # IDOK
+                    )
+                    _tai().win32gui.PostMessage(
+                        hwnd, _tai().win32con.WM_COMMAND, 6, 0,  # IDYES
                     )
                 except Exception as exc:
                     log.debug("PostMessage dismiss hwnd=%s: %s", hwnd, exc)

@@ -11,7 +11,7 @@ on the VS PlatformUI marshaler
 (``Method '…UIHierarchyItemMarshaler.Select' not found``). Folder / project
 scope therefore walks formattable files and runs the editor command after
 ItemOperations.OpenFile (then closes the document). Use
-``twincat_format_cancel`` to abort a running multi-file job between files.
+``twincat_stweep_format_cancel`` to abort a running multi-file job between files.
 CLI (STweep.CLI) is intentionally never invoked.
 """
 from __future__ import annotations
@@ -360,7 +360,7 @@ class StweepOpsMixin:
             was_running=True,
             message=(
                 "Cancel requested. Job stops after the current file finishes "
-                "(poll twincat_format_progress until running=false)."
+                "(poll twincat_stweep_format_progress until running=false)."
             ),
         )
 
@@ -405,7 +405,7 @@ class StweepOpsMixin:
         """Format via STweep Formatcode.
 
         ``wait=False`` (default): start on a background thread and return
-        immediately; poll ``get_format_progress`` / ``twincat_format_progress``
+        immediately; poll ``get_format_progress`` / ``twincat_stweep_format_progress``
         until ``running`` is false. ``wait=True`` only for short sync checks;
         if ``timeout_s`` exceeds the Cursor idle guard, wait is coerced to async.
         """
@@ -427,7 +427,7 @@ class StweepOpsMixin:
                     target=path or "",
                     message=(
                         "A format job is already running. "
-                        "Poll twincat_format_progress until running=false."
+                        "Poll twincat_stweep_format_progress until running=false."
                     ),
                 )
             # Claim the job slot before leaving the lock (sync or async).
@@ -435,7 +435,7 @@ class StweepOpsMixin:
             self._format_cancel_requested = False
             start_msg = "Starting format job…"
             if coerced:
-                start_msg = async_coerced_message("twincat_format_progress")
+                start_msg = async_coerced_message("twincat_stweep_format_progress")
             self._stweep_format_progress.update({
                 "running": True,
                 "phase": "starting",
@@ -458,7 +458,7 @@ class StweepOpsMixin:
             )
             if coerced and result.async_started:
                 result.message = (
-                    async_coerced_message("twincat_format_progress")
+                    async_coerced_message("twincat_stweep_format_progress")
                     + " "
                     + (result.message or "")
                 )
@@ -596,7 +596,7 @@ class StweepOpsMixin:
             async_started=True,
             message=(
                 "Format started in background. "
-                "Poll twincat_format_progress until running=false."
+                "Poll twincat_stweep_format_progress until running=false."
             ),
         )
 
@@ -979,7 +979,7 @@ class StweepOpsMixin:
             current_file="",
             message=(
                 f"Formatting 0/{len(files)} file(s) "
-                f"(per-file OpenFile; cancel via twincat_format_cancel)…"
+                f"(per-file OpenFile; cancel via twincat_stweep_format_cancel)…"
             ),
         )
 
@@ -1396,6 +1396,16 @@ class StweepOpsMixin:
                     self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
                     max_retries=3, delay_s=0.5,
                 )
+                if file_path.lower().endswith(".tcpou"):
+                    try:
+                        self._dte.ExecuteCommand("Window.NextSplitPane")
+                        time.sleep(0.3)
+                        self._retry_com(
+                            self._dte.ExecuteCommand, STWEEP_CMD_EDITOR,
+                            max_retries=2, delay_s=0.3,
+                        )
+                    except Exception as split_exc:
+                        log.debug("NextSplitPane format for %s: %s", file_path, split_exc)
                 was_dirty, did_save = self._wait_and_save_active(
                     file_path, deadline, doc=doc,
                 )

@@ -16,7 +16,8 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 2. `rules/twincat3-versioning.mdc`
 3. `skills/twincat3-plcproj-sync/SKILL.md`
 4. `skills/twincat3-comment/SKILL.md`
-5. `skills/twincat3-stweep-format/SKILL.md`
+5. `skills/twincat3-format/SKILL.md`
+   (STweep alternative: `skills/twincat3-stweep-format/SKILL.md`)
 6. `skills/twincat3-pagefault-audit/SKILL.md`
 7. `skills/twincat3-pagefault-audit/checklist.md`
 8. `skills/twincat3-validate/SKILL.md`

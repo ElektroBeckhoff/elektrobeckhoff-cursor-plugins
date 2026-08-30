@@ -28,12 +28,12 @@ schemas by reading `mcps/**/tools/*.json`. Server IDs: see
 | `twincat_export_check_artifacts` | Disk-only verify after `-32001` / unclear finish — if `all_present` do **not** re-export |
 | `twincat_dismiss_safe_dialogs` | Dismiss idle “file changed outside” reload prompts (Yes/Ja) |
 | `twincat_close` | Release MCP session (quit only if MCP started XAE; else detach) |
-| `twincat_stweep_status` | STweep install + Formatcode commands (+ format_progress snapshot) |
-| `twincat_format_code` | STweep Format code (default `wait=false`; project needs `confirm`) |
-| `twincat_format_progress` | Live format job poll while formatting |
-| `twincat_format_cancel` | Abort multi-file format between files (`phase=canceled`) |
+| `twincat_stweep_status` | STweep install + Formatcode DTE commands (+ format_progress snapshot) |
+| `twincat_stweep_format` | STweep Format code (default `wait=false`; project needs `confirm`) |
+| `twincat_stweep_format_progress` | Live STweep format job poll while formatting |
+| `twincat_stweep_format_cancel` | Abort multi-file STweep format between files (`phase=canceled`) |
 
-STweep details: rule `twincat3-mcp-stweep` / skill `twincat3-stweep-format`.
+STweep details: rule `twincat3-mcp-stweep` / skill `twincat3-stweep-format` / command `/twincat3-cmd-stweep-format`.
 
 ### Export scope: release / new-version vs online-test
 
@@ -51,7 +51,16 @@ Never skip `.compiled-library` on a ship gate / release just to save time.
 | `twincat_plcproj_info` | Read version/title from `.plcproj` |
 | `twincat_plcproj_verify` / `twincat_plcproj_sync` | plcproj ↔ disk |
 | `twincat_migrate` / `twincat_fup_migrate` / `twincat_cfc_migrate` | FBD/CFC → ST |
+| `twincat_autodocs` | Generate Markdown API docs from `.TcPOU`/`.TcDUT`/`.TcGVL`/`.TcIO` |
+| `twincat_format` | Python ST formatter — format files/folders/project (no XAE) |
+| `twincat_format_progress` | Poll running Python format job |
+| `twincat_format_validate` | Validate-only (XML structure, GUIDs) — no format |
+| `twincat_format_config` | Show active `.stformat.json` config |
 | `twincat_infosys_mshc_search` / `_read` | Offline InfoSys |
+
+Python formatter details: rule `twincat3-mcp-format` / skill `twincat3-format` / command `/twincat3-cmd-format`.
+
+Autodocs details: rule `twincat3-mcp-autodocs` / skill `twincat3-autodocs` / command `/twincat3-cmd-autodocs`. Input = solution folder; output optional (auto repo root); one call only.
 
 ## Validation (short)
 

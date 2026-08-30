@@ -483,26 +483,26 @@ def _is_fake_guid(value: str) -> bool:
     if re.search(r"(.)\1{4,}", hex_only):
         return True
 
-    # Sequential ascending: 5+ consecutive ascending hex digits
+    # Sequential ascending: 6+ consecutive ascending hex digits
     asc_run = 1
     for i in range(1, len(hex_only)):
         prev_idx = _HEX_SEQ.index(hex_only[i - 1])
         curr_idx = _HEX_SEQ.index(hex_only[i])
         if curr_idx == prev_idx + 1:
             asc_run += 1
-            if asc_run >= 5:
+            if asc_run >= 6:
                 return True
         else:
             asc_run = 1
 
-    # Sequential descending: 5+ consecutive descending hex digits
+    # Sequential descending: 6+ consecutive descending hex digits
     desc_run = 1
     for i in range(1, len(hex_only)):
         prev_idx = _HEX_SEQ.index(hex_only[i - 1])
         curr_idx = _HEX_SEQ.index(hex_only[i])
         if curr_idx == prev_idx - 1:
             desc_run += 1
-            if desc_run >= 5:
+            if desc_run >= 6:
                 return True
         else:
             desc_run = 1

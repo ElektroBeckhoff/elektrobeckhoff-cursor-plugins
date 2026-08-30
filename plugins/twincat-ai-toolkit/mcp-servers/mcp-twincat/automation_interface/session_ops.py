@@ -1024,11 +1024,16 @@ class SessionOpsMixin:
         elif not preferred_prog_id:
             self._set_open_pin_state("", None)
         self._save_active_to_registry()
+        plc_name = ""
+        try:
+            plc_name = str(self._retry_com(lambda: self._plc_proj_item.Name, max_retries=3, delay_s=0.5))
+        except Exception:
+            pass
         return self._open_result(
             True,
             "Solution open, PLC project found",
             created_new=self._created_new,
-            plc_name=str(self._plc_proj_item.Name),
+            plc_name=plc_name,
         )
 
     def _create_new_dte(

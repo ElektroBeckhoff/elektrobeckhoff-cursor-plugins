@@ -19,7 +19,8 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 
 Optional:
 
-4. `skills/twincat3-stweep-format/SKILL.md` — if formatting after comments
+4. `skills/twincat3-format/SKILL.md` — if formatting after comments
+   (STweep: `skills/twincat3-stweep-format/SKILL.md`)
 
 ## Do
 

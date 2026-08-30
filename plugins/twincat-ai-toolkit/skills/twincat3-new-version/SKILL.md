@@ -53,7 +53,8 @@ Resolve plugin root (`skills/` + `rules/`). Then Read as needed:
    (+ `rules/examples/twincat3-versioning.md` when applying plcproj/GVL)
 2. `skills/twincat3-plcproj-sync/SKILL.md` (+ `rules/twincat3-plcproj-safety.mdc`)
 3. `skills/twincat3-comment/SKILL.md` + `rules/twincat3-comments.mdc`
-4. `skills/twincat3-stweep-format/SKILL.md` + `rules/twincat3-mcp-stweep.mdc`
+4. `skills/twincat3-format/SKILL.md` + `rules/twincat3-mcp-format.mdc`
+   (STweep alternative: `skills/twincat3-stweep-format/SKILL.md`)
 5. `skills/twincat3-pagefault-audit/SKILL.md` (+ checklist, infosys-evidence)
 6. `skills/twincat3-validate/SKILL.md` + `rules/twincat3-mcp-build.mdc`
 7. `skills/twincat3-release/SKILL.md` — apply version / export / reload patterns
@@ -116,11 +117,11 @@ invocation; loop the set.
 
 ## Step 3: Format (baseline)
 
-Follow `twincat3-stweep-format`. Use default `wait=false` + poll progress.
-Whole project only with `confirm=true`. Honor path filter. Prefer
-`xae_version="4024"` on open. On reload popups → dialog playbook in
-`twincat3-mcp-build` (`twincat_dismiss_safe_dialogs`) — do not invent
-manual XAE clicks.
+Follow `twincat3-format` (`twincat_format`). Whole project:
+`twincat_format(project="<.sln>")`. Scoped path filter when set.
+
+STweep alternative (explicit request only): `twincat3-stweep-format` /
+`/twincat3-cmd-stweep-format`.
 
 Rationale: clean baseline **before** audit (also after comment churn).
 

@@ -409,6 +409,7 @@ class BuildOpsMixin:
         # late output; 4026 may not write to the Build pane at all.
         # Extended retry budget (10 × 3s = 30s) to survive modal dialogs
         # being dismissed or file-reload settling.
+        exc1_str: str | None = None
         try:
             self._retry_com(
                 lambda: self._plc_proj_item.CheckAllObjects(),
@@ -422,6 +423,7 @@ class BuildOpsMixin:
             )
             return self._merge_errors_into_check(result)
         except Exception as exc1:
+            exc1_str = str(exc1)
             log.warning("CheckAllObjects interface failed: %s", exc1)
 
         self._clear_build_pane()
@@ -445,7 +447,7 @@ class BuildOpsMixin:
                 method="unavailable",
                 message=(
                     f"CheckAllObjects unavailable. "
-                    f"Interface: {exc1} | DTE: {exc2}"
+                    f"Interface: {exc1_str} | DTE: {exc2}"
                 ),
             )
 

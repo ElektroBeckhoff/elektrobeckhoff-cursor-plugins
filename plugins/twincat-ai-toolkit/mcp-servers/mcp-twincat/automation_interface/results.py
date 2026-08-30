@@ -286,9 +286,9 @@ class StweepFormatResult:
     license_state: str = ""
     license_detail: str = ""
     message: str = ""
-    # True when wait=false started a background job (poll twincat_format_progress).
+    # True when wait=false started a background job (poll twincat_stweep_format_progress).
     async_started: bool = False
-    # True when twincat_format_cancel stopped the job mid-loop.
+    # True when twincat_stweep_format_cancel stopped the job mid-loop.
     canceled: bool = False
 
 
