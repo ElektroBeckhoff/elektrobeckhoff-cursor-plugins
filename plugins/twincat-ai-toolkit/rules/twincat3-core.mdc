@@ -24,7 +24,7 @@ When goals conflict, follow this order. Do **not** trade a higher priority for a
 
 ### Core Architecture & Single Source of Truth (`twincat_core`)
 
-- `twincat_core` is the central engine and single source of truth for all TwinCAT 3 file handling, lossless XML parsing, surgical patching, ST Lexer/CST/AST parsing, semantic symbol resolution, project graph indexing, and virtual ST projection.
+- `twincat_core` is the central engine and single source of truth for all TwinCAT 3 file handling, lossless XML parsing, surgical patching, ST Lexer/CST/AST parsing, semantic symbol resolution, and project graph indexing.
 - **Consumer Tools**: Formatter, AutoDocs, Migrator, PLCProj, LSP, MCP Tools, and VS Code extensions must consume `twincat_core` and **must never** implement duplicate or parallel parsing, XML serialization, or symbol resolution logic.
 - **Surgical Patching**: Modify code by surgically updating targeted CDATA spans while preserving original XML formatting, encodings (BOM, UTF-8, Latin-1), line endings (CRLF/LF), and GUIDs.
 

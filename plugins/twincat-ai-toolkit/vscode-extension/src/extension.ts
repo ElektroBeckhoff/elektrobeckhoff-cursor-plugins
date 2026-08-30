@@ -6,16 +6,10 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind,
 } from 'vscode-languageclient/node';
-import {
-  TwinCatVirtualDocumentProvider,
-  TWINCAT_ST_SCHEME,
-} from './virtualDocumentProvider';
 import { registerAiCommands } from './aiCommands';
 
 let client: LanguageClient | undefined;
-let virtualProvider: TwinCatVirtualDocumentProvider;
 
 /**
  * Locate directories containing the `twincat_core` Python package across bundled extension,
@@ -148,7 +142,6 @@ export function activate(context: vscode.ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: 'file', language: 'iecst' },
-      { scheme: TWINCAT_ST_SCHEME, language: 'iecst' },
       { scheme: 'file', pattern: '**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,st,iecst}' },
     ],
     synchronize: {
@@ -167,60 +160,8 @@ export function activate(context: vscode.ExtensionContext) {
     clientOptions
   );
 
-  // Register Virtual Document Content Provider for twincat-st: scheme
-  virtualProvider = new TwinCatVirtualDocumentProvider();
-  context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider(
-      TWINCAT_ST_SCHEME,
-      virtualProvider
-    )
-  );
-
-  // Start client and attach to provider
-  client.start().then(() => {
-    if (client) {
-      virtualProvider.setClient(client);
-    }
-  });
-
-  // Command: Open Virtual ST View
-  const openVirtualStCmd = vscode.commands.registerCommand(
-    'twincat.openVirtualSt',
-    async (uri?: vscode.Uri) => {
-      const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
-      if (!targetUri) {
-        vscode.window.showWarningMessage('No TwinCAT file selected.');
-        return;
-      }
-
-      if (targetUri.scheme === TWINCAT_ST_SCHEME) {
-        return;
-      }
-
-      const virtualUri = TwinCatVirtualDocumentProvider.toVirtualUri(targetUri);
-      try {
-        const doc = await vscode.workspace.openTextDocument(virtualUri);
-        await vscode.window.showTextDocument(doc, { preview: false });
-      } catch (err: any) {
-        vscode.window.showErrorMessage(
-          `Could not open Virtual ST view: ${err?.message || err}`
-        );
-      }
-    }
-  );
-
-  // Command: Save Virtual ST to XML
-  const saveVirtualStCmd = vscode.commands.registerCommand(
-    'twincat.saveVirtualSt',
-    async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document.uri.scheme !== TWINCAT_ST_SCHEME) {
-        vscode.window.showInformationMessage('Active document is not a Virtual ST document.');
-        return;
-      }
-      await virtualProvider.saveVirtualSt(editor.document);
-    }
-  );
+  // Start client
+  client.start();
 
   // Command: Restart Language Server
   const restartServerCmd = vscode.commands.registerCommand(
@@ -229,9 +170,6 @@ export function activate(context: vscode.ExtensionContext) {
       if (client) {
         await client.stop();
         client.start().then(() => {
-          if (client) {
-            virtualProvider.setClient(client);
-          }
           vscode.window.showInformationMessage('TwinCAT Language Server restarted.');
         });
       }
@@ -243,8 +181,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     client,
-    openVirtualStCmd,
-    saveVirtualStCmd,
     restartServerCmd
   );
 }

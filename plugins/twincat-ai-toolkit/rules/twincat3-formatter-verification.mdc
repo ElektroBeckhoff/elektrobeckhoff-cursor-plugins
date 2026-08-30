@@ -21,7 +21,7 @@ tests/formatter/fixtures/
 All integration tests that interact with the real TwinCAT 3 test solution (`solution/twincat3-solution/`) are centralized under:
 ```
 tests/solution/
-├── core/       <-- Lossless XML roundtrip, Syntax, Virtual ST, Workspace Index
+├── core/       <-- Lossless XML roundtrip, Syntax, Workspace Index
 ├── formatter/  <-- Formatter idempotency and XAE STweep parity
 ├── autodocs/   <-- AutoDocs generation against real solution POUs
 ├── migrator/   <-- Migrator file loader & integrity

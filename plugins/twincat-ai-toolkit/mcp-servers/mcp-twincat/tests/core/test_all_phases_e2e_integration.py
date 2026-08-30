@@ -1,4 +1,4 @@
-"""Comprehensive End-to-End Integration Test across all 8 Phases.
+"""Comprehensive End-to-End Integration Test across all Core Phases.
 
 Validates the full unified pipeline:
 1. Phase 1: TcXmlDocument lossless parsing and GUID preservation
@@ -7,8 +7,7 @@ Validates the full unified pipeline:
 4. Phase 4: Formatter engine using twincat_core with idempotency
 5. Phase 5: AutoDocs, Migrator, and PlcProj operations using twincat_core
 6. Phase 6: Language Server (pygls) handlers (definition, hover, documentSymbol, diagnostics)
-7. Phase 7: Virtual ST projection with bidirectional source mapping and surgical XML sync
-8. Phase 8: Advanced Symbol Resolution (Level 4 chained members, Level 5 standard library catalog, MCP tool integration)
+7. Phase 7: Advanced Symbol Resolution (Level 4 chained members, Level 5 standard library catalog, MCP tool integration)
 """
 import json
 from pathlib import Path
@@ -20,13 +19,9 @@ from twincat_core.lsp.handlers import (
     handle_document_symbol,
     handle_formatting,
     handle_hover,
-    handle_virtual_st_get,
-    handle_virtual_st_map_location,
-    handle_virtual_st_save,
 )
 from twincat_core.lsp.utils import path_to_uri, position_to_lsp
 from twincat_core.project import WorkspaceIndex, parse_plcproj_file
-from twincat_core.projection import VirtualStDocument, project_to_virtual_st, sync_virtual_st_to_xml
 from twincat_core.semantic import SymbolKind
 from twincat_core.syntax import parse_declaration, parse_implementation, tokenize_st
 from twincat_core.syntax.span import Position
@@ -235,34 +230,7 @@ class TestAllPhasesE2EIntegration:
         assert def_res.uri == uri
 
         # -------------------------------------------------------------
-        # Phase 7: Virtual ST Projection & Bidirectional Sync
-        # -------------------------------------------------------------
-        v_get = handle_virtual_st_get(ws, uri)
-        assert "FUNCTION_BLOCK FB_Controller" in v_get["virtualSt"]
-        assert "METHOD PUBLIC M_Reset : BOOL" in v_get["virtualSt"]
-        assert len(v_get["sections"]) == 4
-
-        # Location mapping to XML
-        map_to_xml = handle_virtual_st_map_location(ws, uri, line=1, col=1, direction="toXml")
-        assert map_to_xml["line"] >= 1
-        assert map_to_xml["col"] >= 1
-
-        # Location mapping to Virtual
-        map_to_virt = handle_virtual_st_map_location(ws, uri, line=map_to_xml["line"], col=map_to_xml["col"], direction="toVirtual")
-        assert map_to_virt["line"] >= 1
-
-        # Edit virtual ST and save back
-        modified_virtual_st = v_get["virtualSt"].replace(
-            "_bLocalDone : BOOL := FALSE;",
-            "_bLocalDone : BOOL := TRUE;\n    bExtraSignal : BOOL := FALSE;",
-        )
-        v_save = handle_virtual_st_save(ws, uri, modified_virtual_st)
-        assert v_save["success"] is True
-        assert "bExtraSignal : BOOL := FALSE;" in v_save["newXml"]
-        assert 'Id="{CCCC3333-3333-3333-3333-333333333333}"' in v_save["newXml"]
-
-        # -------------------------------------------------------------
-        # Phase 8: Level 4/5 Chained Members & MCP Tooling
+        # Phase 7: Level 4/5 Chained Members & MCP Tooling
         # -------------------------------------------------------------
         from server import twincat_symbol_lookup, twincat_workspace_symbols
 

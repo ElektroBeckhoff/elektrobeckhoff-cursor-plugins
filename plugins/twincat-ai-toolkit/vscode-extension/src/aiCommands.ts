@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { TWINCAT_ST_SCHEME, TwinCatVirtualDocumentProvider } from './virtualDocumentProvider';
 
 export interface TargetScopeInfo {
   uri: vscode.Uri;
@@ -126,11 +125,6 @@ function getTargetScopeInfo(uri?: vscode.Uri, uris?: vscode.Uri[]): TargetScopeI
     return undefined;
   }
 
-  // If invoked on a Virtual ST document, resolve the real physical file URI
-  if (targetUri.scheme === TWINCAT_ST_SCHEME) {
-    targetUri = TwinCatVirtualDocumentProvider.toPhysicalUri(targetUri);
-  }
-
   const fsPath = targetUri.fsPath;
   let isFolder = false;
   try {
@@ -171,11 +165,7 @@ function getTargetScopeInfo(uri?: vscode.Uri, uris?: vscode.Uri[]): TargetScopeI
   let selectedText: string | undefined;
 
   if (activeEditor) {
-    let editorPhysicalUri = activeEditor.document.uri;
-    if (editorPhysicalUri.scheme === TWINCAT_ST_SCHEME) {
-      editorPhysicalUri = TwinCatVirtualDocumentProvider.toPhysicalUri(editorPhysicalUri);
-    }
-
+    const editorPhysicalUri = activeEditor.document.uri;
     const isSameFile = normalizePath(editorPhysicalUri.fsPath) === normalizePath(targetUri.fsPath);
 
     if (isSameFile) {
@@ -299,31 +289,30 @@ async function sendPromptToCursor(prompt: string, title: string): Promise<void> 
 }
 
 /**
- * Register the top 3 AI-driven file context commands:
- * 1. Add Comments (* *)
+ * Register AI-driven file context commands:
+ * 1. Fast Syntax & Diagnostics Check
  * 2. Pagefault & Safety Audit
- * 3. Code Review (IEC 61131-3 & OOP)
+ * 3. Add Comments (* *)
  */
 export function registerAiCommands(context: vscode.ExtensionContext) {
-  // 1. Add Comments (* *)
+  // 1. TwinCAT 3 Fast Syntax & Diagnostics Check
   context.subscriptions.push(
-    vscode.commands.registerCommand('twincat.ai.addComments', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+    vscode.commands.registerCommand('twincat.ai.checkSyntax', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
       const target = getTargetScopeInfo(uri, uris);
       if (!target) return;
 
       const prompt = buildStandardAiPrompt(
-        '/twincat3-cmd-comment',
+        '/twincat3-cmd-check-syntax',
         target,
-        `Perform a standard-compliant, professional comment pass (* *) on ${target.ref}`,
+        `Run fast headless syntax and semantic validation using twincat_check_syntax on ${target.ref}`,
         [
           'rules/twincat3-core.mdc',
-          'rules/twincat3-comments.mdc',
-          'skills/twincat3-comment/SKILL.md',
-          'skills/twincat3-code-style/references/comment-rules.md',
+          'rules/twincat3-mcp-syntax.mdc',
+          'skills/twincat3-check-syntax/SKILL.md',
         ]
       );
 
-      await sendPromptToCursor(prompt, `Add Comments: ${target.displayTitle}`);
+      await sendPromptToCursor(prompt, `Check Syntax: ${target.displayTitle}`);
     })
   );
 
@@ -351,46 +340,25 @@ export function registerAiCommands(context: vscode.ExtensionContext) {
     })
   );
 
-  // 3. TwinCAT 3 Code Review (IEC 61131-3 & OOP)
+  // 3. Add Comments (* *)
   context.subscriptions.push(
-    vscode.commands.registerCommand('twincat.ai.codeReview', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+    vscode.commands.registerCommand('twincat.ai.addComments', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
       const target = getTargetScopeInfo(uri, uris);
       if (!target) return;
 
       const prompt = buildStandardAiPrompt(
-        '',
+        '/twincat3-cmd-comment',
         target,
-        `Perform a comprehensive, rigorous IEC 61131-3 ST, OOP, and architecture code review on ${target.ref}`,
+        `Perform a standard-compliant, professional comment pass (* *) on ${target.ref}`,
         [
           'rules/twincat3-core.mdc',
-          'rules/twincat3-naming.mdc',
-          'rules/twincat3-formatting.mdc',
           'rules/twincat3-comments.mdc',
-          'rules/twincat3-oop.mdc',
-          'rules/twincat3-pagefault-safety.mdc',
-          'rules/twincat3-xml.mdc',
-          'agents/twincat-code-reviewer.md',
+          'skills/twincat3-comment/SKILL.md',
+          'skills/twincat3-code-style/references/comment-rules.md',
         ]
       );
 
-  // 4. TwinCAT 3 Fast Syntax & Diagnostics Check
-  context.subscriptions.push(
-    vscode.commands.registerCommand('twincat.ai.checkSyntax', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
-      const target = getTargetScopeInfo(uri, uris);
-      if (!target) return;
-
-      const prompt = buildStandardAiPrompt(
-        '/twincat3-cmd-check-syntax',
-        target,
-        `Run fast headless syntax and semantic validation using twincat_check_syntax on ${target.ref}`,
-        [
-          'rules/twincat3-core.mdc',
-          'rules/twincat3-mcp-syntax.mdc',
-          'skills/twincat3-check-syntax/SKILL.md',
-        ]
-      );
-
-      await sendPromptToCursor(prompt, `Check Syntax: ${target.displayTitle}`);
+      await sendPromptToCursor(prompt, `Add Comments: ${target.displayTitle}`);
     })
   );
 }

@@ -37,8 +37,6 @@ from twincat_core.semantic import (
     SymbolResolver,
     Scope,
 )
-from twincat_core.projection.virtual_st import project_to_virtual_st, sync_virtual_st_to_xml
-from twincat_core.projection.source_map import SourceMap
 
 
 class TestDeepInheritanceAndShadowing:
@@ -157,8 +155,8 @@ class TestSyntaxErrorRecoveryAndEdgeCases:
         assert vars[3].name == "nSpeed2"
 
 
-class TestComplexXmlAndVirtualStOperations:
-    """Tests XML surgical patching and Virtual ST on complex multi-member POUs."""
+class TestComplexXmlSurgicalPatching:
+    """Tests XML surgical patching on complex multi-member POUs."""
 
     SAMPLE_COMPLEX_POU = """<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
@@ -232,19 +230,6 @@ END_VAR
         # Confirm root GUID and all structure remained intact
         assert "{11111111-2222-3333-4444-555555555555}" in patched3
         assert "{66666666-7777-8888-9999-000000000000}" in patched3
-
-    def test_virtual_st_projection_and_sync(self):
-        virt_doc = project_to_virtual_st(self.SAMPLE_COMPLEX_POU)
-        assert len(virt_doc.source_map.sections) >= 5
-
-        # Modify virtual ST
-        modified_virt_st = virt_doc.virtual_st.replace("CASE _nState OF", "CASE _nState OF // Modified in Virtual ST")
-        synced_xml = sync_virtual_st_to_xml(self.SAMPLE_COMPLEX_POU, modified_virt_st)
-
-        assert "Modified in Virtual ST" in synced_xml
-        assert "A_Reset" in synced_xml
-        assert "M_Start" in synced_xml
-        assert "P_IsBusy" in synced_xml
 
 
 class TestLspMethodLocalScopeResolution:
