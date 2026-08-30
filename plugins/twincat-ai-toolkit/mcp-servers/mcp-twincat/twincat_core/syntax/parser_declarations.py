@@ -334,6 +334,16 @@ class DeclarationParser:
         pragmas = self._extract_pragmas(total_span)
         pou_comment = self._extract_doc_comment(start_span)
 
+        if pou_type == "FUNCTION" and return_type is None:
+            self.diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"FUNCTION '{name}' requires an explicit return type",
+                    span=total_span,
+                    severity=DiagnosticSeverity.ERROR,
+                    code="TC-DECL-001",
+                )
+            )
+
         ast_node = PouDecl(
             span=total_span,
             pou_type=pou_type,
@@ -467,6 +477,16 @@ class DeclarationParser:
         total_span = SourceSpan.merge(start_span, end_span)
         pragmas = self._extract_pragmas(total_span)
         prop_comment = self._extract_doc_comment(start_span)
+
+        if not type_name:
+            self.diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"PROPERTY '{name}' requires an explicit data type",
+                    span=total_span,
+                    severity=DiagnosticSeverity.ERROR,
+                    code="TC-DECL-002",
+                )
+            )
 
         ast_node = PropertyDecl(
             span=total_span,
@@ -635,6 +655,22 @@ class DeclarationParser:
         total_span = SourceSpan.merge(start_span, end_span)
         pragmas = self._extract_pragmas(total_span)
         type_comment = self._extract_doc_comment(start_span)
+
+        # TC-DECL-007: Array bound check on type definition
+        if isinstance(body_node, str) and "ARRAY" in body_node.upper():
+            import re
+            for m in re.finditer(r'(-?\d+)\s*\.\.\s*(-?\d+)', body_node):
+                low_b = int(m.group(1))
+                high_b = int(m.group(2))
+                if low_b > high_b:
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Array lower bound {low_b} exceeds upper bound {high_b}",
+                            span=total_span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-DECL-007",
+                        )
+                    )
 
         ast_node = TypeDecl(
             span=total_span,
@@ -889,6 +925,40 @@ class DeclarationParser:
         total_span = SourceSpan.merge(start_span, end_span)
         pragmas = self._extract_pragmas(total_span)
 
+        # Validation rules for variables in block
+        for v in variables:
+            # TC-DECL-003: Constant variables must have an initial value
+            if is_constant or v.is_constant:
+                if not v.initial_value or not v.initial_value.strip():
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Constant variable '{v.name}' must be initialized with a value",
+                            span=v.span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-DECL-003",
+                        )
+                    )
+            # TC-DECL-004: VAR_IN_OUT variables cannot have an initial value
+            if block_type == "VAR_IN_OUT" and v.initial_value:
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=f"VAR_IN_OUT variable '{v.name}' cannot have an initial value",
+                        span=v.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-DECL-004",
+                    )
+                )
+            # TC-DECL-005: VAR_TEMP variables cannot be RETAIN or PERSISTENT
+            if block_type == "VAR_TEMP" and (is_retain or is_persistent or v.is_retain or v.is_persistent):
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message=f"VAR_TEMP variable '{v.name}' cannot be declared RETAIN or PERSISTENT",
+                        span=v.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-DECL-005",
+                    )
+                )
+
         ast_block = VarBlock(
             span=total_span,
             block_type=block_type,
@@ -1054,6 +1124,22 @@ class DeclarationParser:
         total_span = SourceSpan.merge(start_span, end_span)
         pragmas = self._extract_pragmas(total_span)
         doc_comment = self._extract_doc_comment(total_span)
+
+        # TC-DECL-007: Array bound check
+        if "ARRAY" in type_name.upper():
+            import re
+            for m in re.finditer(r'(-?\d+)\s*\.\.\s*(-?\d+)', type_name):
+                low_b = int(m.group(1))
+                high_b = int(m.group(2))
+                if low_b > high_b:
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Array lower bound {low_b} exceeds upper bound {high_b}",
+                            span=total_span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-DECL-007",
+                        )
+                    )
 
         decls: list[VarDecl] = []
         csts: list[CstNode] = []

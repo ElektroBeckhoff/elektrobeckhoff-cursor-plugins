@@ -803,3 +803,65 @@ class TestExhaustiveSyntaxAndExSTEdgeCases:
             stmts, cst_nodes, diags = parse_implementation(code)
             assert not diags, f"Unexpected implementation diagnostics: {diags}"
             assert len(stmts) > 0
+
+
+# =========================================================================
+# 5. Real Syntax Error Detection Battery (IEC 61131-3 & TwinCAT 3 Verification)
+# =========================================================================
+
+class TestSyntaxErrorDiagnostics:
+    def test_function_requires_return_type(self):
+        decl = "FUNCTION F_NoReturnType\nVAR_INPUT\n    nIn : INT;\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-001" for d in diags)
+
+    def test_property_requires_data_type(self):
+        decl = "PROPERTY PropNoType\nVAR\n    _nVal : INT;\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-002" for d in diags)
+
+    def test_constant_requires_initial_value(self):
+        decl = "VAR CONSTANT\n    cMaxRetries : INT;\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-003" for d in diags)
+
+    def test_var_in_out_cannot_have_initial_value(self):
+        decl = "VAR_IN_OUT\n    stBuffer : ST_Data := (nId := 1);\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-004" for d in diags)
+
+    def test_var_temp_cannot_be_retain(self):
+        decl = "VAR_TEMP RETAIN\n    nTemp : INT;\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-005" for d in diags)
+
+    def test_array_lower_bound_exceeds_upper_bound(self):
+        decl = "VAR\n    arrInvalid : ARRAY[10..1] OF INT;\nEND_VAR\n"
+        _, _, diags = parse_declaration(decl)
+        assert any(d.code == "TC-DECL-007" for d in diags)
+
+    def test_exit_outside_loop_diagnostics(self):
+        code = "nVal := 10;\nEXIT;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-STMT-001" for d in diags)
+
+    def test_continue_outside_loop_diagnostics(self):
+        code = "nVal := 20;\nCONTINUE;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-STMT-002" for d in diags)
+
+    def test_undefined_jmp_label_diagnostics(self):
+        code = "IF bError THEN\n    JMP StepError;\nEND_IF;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-STMT-004" for d in diags)
+
+    def test_defined_jmp_label_produces_zero_diagnostics(self):
+        code = "IF bError THEN\n    JMP StepError;\nEND_IF;\n\nStepError:\nnState := 99;\n"
+        _, _, diags = parse_implementation(code)
+        assert not diags
+
+    def test_invalid_assignment_target_literal_diagnostics(self):
+        code = "10 := nVal;\n"
+        _, _, diags = parse_implementation(code)
+        assert any(d.code == "TC-EXPR-002" for d in diags)
+

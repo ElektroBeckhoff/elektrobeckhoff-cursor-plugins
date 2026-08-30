@@ -520,4 +520,102 @@ END_VAR
         diags = run_semantic_analysis(ws, pou_file)
         assert len(diags) == 0, f"Expected 0 diagnostics but found: {diags}"
 
+    def test_semantic_analysis_catches_missing_interface_method(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        itf_file = tmp_path / "I_Device.TcIO"
+        itf_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Device" Id="{11111111-1111-1111-1111-111111111111}">
+    <Declaration><![CDATA[INTERFACE I_Device
+]]></Declaration>
+    <Method Name="M_Reset" Id="{11111111-1111-1111-1111-111111111112}">
+      <Declaration><![CDATA[METHOD M_Reset : BOOL
+]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>""", encoding="utf-8")
+
+        pou_file = tmp_path / "FB_IncompleteDevice.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_IncompleteDevice" Id="{22222222-2222-2222-2222-222222222222}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_IncompleteDevice IMPLEMENTS I_Device
+VAR
+    bFlag : BOOL;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(itf_file)
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert any(d.code == "TC-SEM-003" and "M_Reset" in d.message for d in diags)
+
+    def test_semantic_analysis_catches_cyclic_inheritance(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_a = tmp_path / "FB_A.TcPOU"
+        pou_a.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_A" Id="{33333333-3333-3333-3333-333333333331}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_A EXTENDS FB_B
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        pou_b = tmp_path / "FB_B.TcPOU"
+        pou_b.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_B" Id="{33333333-3333-3333-3333-333333333332}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_B EXTENDS FB_A
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_a)
+        ws.update_file(pou_b)
+
+        diags_a = run_semantic_analysis(ws, pou_a)
+        assert any(d.code == "TC-SEM-004" for d in diags_a)
+
+    def test_semantic_analysis_catches_abstract_fb_instantiation(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        abs_file = tmp_path / "FB_AbstractBase.TcPOU"
+        abs_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_AbstractBase" Id="{44444444-4444-4444-4444-444444444441}">
+    <Declaration><![CDATA[FUNCTION_BLOCK ABSTRACT FB_AbstractBase
+VAR
+    nId : INT;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        pou_file = tmp_path / "FB_User.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_User" Id="{44444444-4444-4444-4444-444444444442}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_User
+VAR
+    fbInst : FB_AbstractBase;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(abs_file)
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert any(d.code == "TC-SEM-005" and "FB_AbstractBase" in d.message for d in diags)
+
+
 

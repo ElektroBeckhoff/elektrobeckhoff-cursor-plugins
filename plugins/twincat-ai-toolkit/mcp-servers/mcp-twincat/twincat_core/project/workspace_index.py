@@ -164,6 +164,7 @@ class WorkspaceIndex:
                         type_ref=ast_node.return_type,
                         access=ast_node.access_modifier,
                         doc_comment=ast_node.comment,
+                        is_abstract=ast_node.is_abstract,
                     )
                     self.symbol_table.define_global(pou_sym)
                     declared_symbols.append(pou_sym)
@@ -182,6 +183,7 @@ class WorkspaceIndex:
                         implements_names=ast_node.implements_names,
                         file_path=path,
                         symbol=pou_sym,
+                        is_abstract=ast_node.is_abstract,
                     )
                     active_pou_type_desc = type_desc
 

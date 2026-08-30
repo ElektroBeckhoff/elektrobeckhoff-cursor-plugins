@@ -50,6 +50,7 @@ class TypeDescriptor:
     base_type_name: Optional[str] = None  # e.g. for ALIAS or ENUM base type
     namespace: Optional[str] = None       # e.g. "Tc2_Standard", "Tc3_Module"
     is_external: bool = False
+    is_abstract: bool = False
 
     def add_field(self, sym: Symbol) -> None:
         self.fields[sym.name.lower()] = sym

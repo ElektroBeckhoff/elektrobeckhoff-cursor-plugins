@@ -47,6 +47,7 @@ class Symbol:
     initial_value: Optional[str] = None
     address: Optional[str] = None
     qualified_only: bool = False
+    is_abstract: bool = False
 
     @property
     def display_name(self) -> str:

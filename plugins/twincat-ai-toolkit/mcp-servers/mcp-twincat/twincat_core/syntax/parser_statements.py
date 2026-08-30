@@ -52,6 +52,9 @@ class StatementParser:
         self.diagnostics = diagnostics
         self.tokens = [t for t in tokens if not t.is_trivia]
         self.pos = 0
+        self.loop_depth = 0
+        self.defined_labels: set[str] = set()
+        self.used_jmps: list[tuple[str, SourceSpan]] = []
 
     @classmethod
     def from_source(cls, source: str) -> "StatementParser":
@@ -123,7 +126,26 @@ class StatementParser:
                 )
                 self._recover_to_semicolon()
 
+        if not stop_tokens and self.is_eof():
+            # TC-STMT-004: Validate undefined JMP target labels at top level
+            for jmp_target, jmp_span in self.used_jmps:
+                if jmp_target.lower() not in self.defined_labels:
+                    self.diagnostics.append(
+                        SyntaxDiagnostic(
+                            message=f"Undefined JMP target label '{jmp_target}'",
+                            span=jmp_span,
+                            severity=DiagnosticSeverity.ERROR,
+                            code="TC-STMT-004",
+                        )
+                    )
+
         return statements, cst_nodes
+
+    @staticmethod
+    def _is_valid_assignment_target(target: Expression) -> bool:
+        if isinstance(target, (IdentifierExpr, MemberAccessExpr, IndexExpr, DerefExpr)):
+            return True
+        return False
 
     def parse_single_statement(self) -> tuple[Optional[Statement], Optional[CstNode]]:
         tok = self.peek()
@@ -156,11 +178,29 @@ class StatementParser:
         if tok.type == TokenType.KEYWORD_EXIT:
             exit_tok = self.advance()
             self.match(TokenType.SEMICOLON)
+            if self.loop_depth <= 0:
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message="Statement 'EXIT' is only allowed inside a loop (FOR, WHILE, REPEAT)",
+                        span=exit_tok.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-STMT-001",
+                    )
+                )
             return ExitStmt(span=exit_tok.span), CstNode(kind=CstNodeKind.EXIT_STMT, span=exit_tok.span)
 
         if tok.type == TokenType.KEYWORD_CONTINUE:
             cont_tok = self.advance()
             self.match(TokenType.SEMICOLON)
+            if self.loop_depth <= 0:
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message="Statement 'CONTINUE' is only allowed inside a loop (FOR, WHILE, REPEAT)",
+                        span=cont_tok.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-STMT-002",
+                    )
+                )
             return ContinueStmt(span=cont_tok.span), CstNode(kind=CstNodeKind.CONTINUE_STMT, span=cont_tok.span)
 
         if tok.type == TokenType.KEYWORD_JMP:
@@ -169,6 +209,8 @@ class StatementParser:
             label_name = label_tok.value if label_tok else ""
             self.match(TokenType.SEMICOLON)
             span = SourceSpan.merge(jmp_tok.span, label_tok.span if label_tok else jmp_tok.span)
+            if label_name:
+                self.used_jmps.append((label_name, span))
             return JmpStmt(span=span, label=label_name), CstNode(kind=CstNodeKind.JMP_STMT, span=span)
 
         if tok.type == TokenType.KEYWORD_TRY:
@@ -182,6 +224,7 @@ class StatementParser:
         ):
             lbl_tok = self.advance()
             colon_tok = self.advance()
+            self.defined_labels.add(lbl_tok.value.lower())
             span = SourceSpan.merge(lbl_tok.span, colon_tok.span)
             return LabelStmt(span=span, label=lbl_tok.value), CstNode(kind=CstNodeKind.LABEL_STMT, span=span)
 
@@ -197,6 +240,15 @@ class StatementParser:
                 end_span = expr.span
 
             total_span = SourceSpan.merge(expr.span, end_span)
+            if not self._is_valid_assignment_target(expr.left):
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message="Invalid assignment target: cannot assign to literal or non-variable expression",
+                        span=expr.left.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-EXPR-002",
+                    )
+                )
             stmt = AssignStmt(
                 span=total_span,
                 target=expr.left,
@@ -216,6 +268,15 @@ class StatementParser:
                 end_span = val_expr.span
 
             total_span = SourceSpan.merge(expr.span, end_span)
+            if not self._is_valid_assignment_target(expr):
+                self.diagnostics.append(
+                    SyntaxDiagnostic(
+                        message="Invalid assignment target: cannot assign to literal or non-variable expression",
+                        span=expr.span,
+                        severity=DiagnosticSeverity.ERROR,
+                        code="TC-EXPR-002",
+                    )
+                )
             stmt = AssignStmt(
                 span=total_span,
                 target=expr,
@@ -457,7 +518,9 @@ class StatementParser:
             by_expr = self.parse_expression()
 
         self.expect(TokenType.KEYWORD_DO, "Expected 'DO' in FOR loop")
+        self.loop_depth += 1
         body, body_cst = self.parse_statements(stop_tokens=(TokenType.KEYWORD_END_FOR,))
+        self.loop_depth -= 1
         end_tok = self.expect(TokenType.KEYWORD_END_FOR, "Expected 'END_FOR'")
 
         if self.peek().type == TokenType.SEMICOLON:
@@ -486,7 +549,9 @@ class StatementParser:
         cond = self.parse_expression()
         self.expect(TokenType.KEYWORD_DO, "Expected 'DO' after WHILE condition")
 
+        self.loop_depth += 1
         body, body_cst = self.parse_statements(stop_tokens=(TokenType.KEYWORD_END_WHILE,))
+        self.loop_depth -= 1
         end_tok = self.expect(TokenType.KEYWORD_END_WHILE, "Expected 'END_WHILE'")
 
         if self.peek().type == TokenType.SEMICOLON:
@@ -502,7 +567,9 @@ class StatementParser:
 
     def parse_repeat_statement(self) -> tuple[RepeatStmt, CstNode]:
         repeat_tok = self.advance()  # REPEAT
+        self.loop_depth += 1
         body, body_cst = self.parse_statements(stop_tokens=(TokenType.KEYWORD_UNTIL,))
+        self.loop_depth -= 1
         self.expect(TokenType.KEYWORD_UNTIL, "Expected 'UNTIL' in REPEAT statement")
         cond = self.parse_expression()
         end_tok = self.expect(TokenType.KEYWORD_END_REPEAT, "Expected 'END_REPEAT'")
