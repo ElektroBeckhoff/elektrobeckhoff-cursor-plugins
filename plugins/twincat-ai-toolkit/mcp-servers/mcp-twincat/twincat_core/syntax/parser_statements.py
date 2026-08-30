@@ -189,7 +189,24 @@ class StatementParser:
         expr = self.parse_expression()
         end_span = expr.span
 
-        if self.peek().type in (TokenType.ASSIGN, TokenType.REF_ASSIGN):
+        if isinstance(expr, BinaryExpr) and expr.op.upper() in (":=", "REF=", "=>", "?="):
+            if self.peek().type == TokenType.SEMICOLON:
+                semi = self.advance()
+                end_span = semi.span
+            else:
+                end_span = expr.span
+
+            total_span = SourceSpan.merge(expr.span, end_span)
+            stmt = AssignStmt(
+                span=total_span,
+                target=expr.left,
+                value=expr.right,
+                assign_op=expr.op,
+            )
+            cst = CstNode(kind=CstNodeKind.ASSIGN_STMT, span=total_span)
+            return stmt, cst
+
+        elif self.peek().type in (TokenType.ASSIGN, TokenType.REF_ASSIGN):
             assign_op_tok = self.advance()
             val_expr = self.parse_expression()
             if self.peek().type == TokenType.SEMICOLON:
@@ -298,23 +315,43 @@ class StatementParser:
     # -------------------------------------------------------------------------
     def _is_case_label_ahead(self) -> bool:
         """Check if looking ahead at a case label, e.g. 10: or 10, 20: or 30..50: or E_State.Running:"""
+        tok0 = self.peek()
+        if tok0.type in (TokenType.KEYWORD_END_CASE, TokenType.KEYWORD_ELSE):
+            return True
+
+        valid_label_tokens = (
+            TokenType.IDENTIFIER,
+            TokenType.INT_LITERAL,
+            TokenType.REAL_LITERAL,
+            TokenType.TYPED_LITERAL,
+            TokenType.STRING_LITERAL,
+            TokenType.BOOL_LITERAL,
+            TokenType.DOT,
+            TokenType.RANGE,
+            TokenType.COMMA,
+            TokenType.PLUS,
+            TokenType.MINUS,
+            TokenType.PAREN_OPEN,
+            TokenType.PAREN_CLOSE,
+        )
+
         i = 0
+        has_at_least_one_val = False
         while self.pos + i < len(self.tokens):
             tok = self.tokens[self.pos + i]
-            if tok.type in (TokenType.KEYWORD_END_CASE, TokenType.KEYWORD_ELSE):
-                return True
             if tok.type == TokenType.COLON:
-                return True
-            if tok.type in (
-                TokenType.SEMICOLON,
-                TokenType.ASSIGN,
-                TokenType.REF_ASSIGN,
-                TokenType.OUTPUT_ASSIGN,
-                TokenType.KEYWORD_THEN,
-                TokenType.KEYWORD_DO,
-                TokenType.KEYWORD_TO,
-            ):
+                return has_at_least_one_val
+            if tok.type not in valid_label_tokens:
                 return False
+            if tok.type in (
+                TokenType.IDENTIFIER,
+                TokenType.INT_LITERAL,
+                TokenType.REAL_LITERAL,
+                TokenType.TYPED_LITERAL,
+                TokenType.STRING_LITERAL,
+                TokenType.BOOL_LITERAL,
+            ):
+                has_at_least_one_val = True
             i += 1
         return False
 
@@ -565,6 +602,8 @@ class StatementParser:
     def _lbp(self, tok: Token) -> int:
         """Left binding power for operators."""
         mapping = {
+            TokenType.ASSIGN: 5,
+            TokenType.REF_ASSIGN: 5,
             TokenType.KEYWORD_OR: 10,
             TokenType.KEYWORD_OR_ELSE: 10,
             TokenType.KEYWORD_XOR: 20,
@@ -737,7 +776,16 @@ class StatementParser:
             span = SourceSpan.merge(left.span, close_tok.span if close_tok else left.span)
             return CallExpr(span=span, callee=left, args=args)
 
-        # 5. Standard Binary operators (+, -, *, /, AND, OR, =, <>, etc.)
+        # 5. Assignment operators in expressions / chained assignments (:=, REF=)
+        if tok.type in (TokenType.ASSIGN, TokenType.REF_ASSIGN):
+            op_tok = self.advance()
+            lbp = self._lbp(op_tok)
+            # right-associative: pass rbp = lbp - 1
+            right = self.parse_expression(rbp=lbp - 1)
+            span = SourceSpan.merge(left.span, right.span)
+            return BinaryExpr(span=span, op=op_tok.value, left=left, right=right)
+
+        # 6. Standard Binary operators (+, -, *, /, AND, OR, =, <>, etc.)
         op_tok = self.advance()
         lbp = self._lbp(op_tok)
         right = self.parse_expression(rbp=lbp)

@@ -20,8 +20,11 @@ RE_STRING_LEN = re.compile(r'^(?:W?STRING)\s*\(\s*\d+\s*\)$', re.IGNORECASE)
 
 
 def extract_base_type_name(type_ref: str) -> str:
-    """Extract clean base type identifier from complex type reference (ARRAY, POINTER, STRING length, etc.)."""
+    """Extract clean base type identifier from complex type reference (ARRAY, POINTER, STRING length, FB_init params, etc.)."""
     cleaned = type_ref.strip()
+    if not cleaned:
+        return ""
+
     if RE_STRING_LEN.match(cleaned):
         return "WSTRING" if cleaned.upper().startswith("W") else "STRING"
 
@@ -37,7 +40,11 @@ def extract_base_type_name(type_ref: str) -> str:
     if m_ref:
         return extract_base_type_name(m_ref.group(1))
 
-    # Strip parentheses e.g. "STRING(255)" -> "STRING"
+    # Strip trailing bracketed FB_init or subrange params: e.g. "FB_Name [ ( ... ) ]" -> "FB_Name"
+    if "[" in cleaned:
+        cleaned = cleaned.split("[")[0].strip()
+
+    # Strip trailing parenthesized arguments: e.g. "STRING(255)" -> "STRING", "FB_Name(1, 2)" -> "FB_Name"
     if "(" in cleaned:
         cleaned = cleaned.split("(")[0].strip()
 
@@ -82,8 +89,9 @@ def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[Syntax
                 if not base_type or base_type.lower() in BUILTIN_TYPES:
                     continue
 
-                # Ignore generic / runtime keywords
-                if base_type.upper() in ("ANY", "ANY_TYPE", "PVOID", "__SYSTEM"):
+                # Ignore generic / runtime / system compiler keywords
+                base_upper = base_type.upper().replace(" ", "")
+                if base_upper in ("ANY", "ANY_TYPE", "PVOID", "__SYSTEM") or base_upper.startswith("__SYSTEM."):
                     continue
 
                 # Look up type in TypeIndex (includes project DUTs, FBs, and on-demand InfoSys MSHC types)

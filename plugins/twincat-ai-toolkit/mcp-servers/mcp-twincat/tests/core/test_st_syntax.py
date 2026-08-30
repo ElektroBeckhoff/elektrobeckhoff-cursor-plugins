@@ -390,3 +390,93 @@ class TestFaultTolerance:
         assert isinstance(stmts[0], AssignStmt)
         assert isinstance(stmts[-1], AssignStmt)
         assert stmts[-1].target.name == "y"
+
+
+# =========================================================================
+# 5. Syntax Edge Cases & False Positive Elimination Tests
+# =========================================================================
+
+class TestSyntaxEdgeCasesAndNoFalsePositives:
+    def test_chained_assignments_parse_cleanly(self):
+        source = """
+        bCmdA := bCmdB := FALSE;
+        bCmdA := bCmdB := TRUE;
+        nVal1 := nVal2 := nVal3 := 42;
+        """
+        stmts, cst_nodes, diags = parse_implementation(source)
+        assert len(diags) == 0, f"Unexpected diagnostics in chained assignments: {diags}"
+        assert len(stmts) == 3
+        assert isinstance(stmts[0], AssignStmt)
+        assert isinstance(stmts[0].value, BinaryExpr)
+        assert stmts[0].value.op == ":="
+
+    def test_nested_case_statements_parse_cleanly(self):
+        source = """
+        case nSelector of
+        1, 2, 3:
+            nResult := 10;
+        4..7:
+            case nSub of
+            0:
+                nResult := 20;
+            1..3:
+                nResult := 30;
+            else
+                nResult := -1;
+            end_case
+        8..10, 15:
+            nResult := 40;
+        else
+            nResult := 0;
+        end_case
+        """
+        stmts, cst_nodes, diags = parse_implementation(source)
+        assert len(diags) == 0, f"Unexpected diagnostics in nested case: {diags}"
+        assert len(stmts) == 1
+        assert isinstance(stmts[0], CaseStmt)
+        assert len(stmts[0].branches) == 3
+
+    def test_array_of_fb_with_fb_init_params_and_inits(self):
+        source = """
+        VAR
+            arrFbInitSingleLine : ARRAY[1..2] OF FB_Syntax_FBInitMethods[(nInitialId := 1, sInitialName := 'MotorA'), (nInitialId := 2, sInitialName := 'MotorB')];
+            arrStructSingleLine : ARRAY[1..2] OF ST_Syntax_Mini := [(nId := 1, bActive := TRUE), (nId := 2, bActive := FALSE)];
+        END_VAR
+        """
+        ast_node, cst_nodes, diags = parse_declaration(source)
+        assert len(diags) == 0, f"Unexpected diagnostics in FB_init array: {diags}"
+        assert isinstance(ast_node, VarBlock)
+        assert len(ast_node.variables) == 2
+        assert "FB_Syntax_FBInitMethods" in ast_node.variables[0].type_name
+        assert "nInitialId := 1" in ast_node.variables[0].type_name
+
+    def test_typed_enum_with_negative_values_and_defaults(self):
+        source = """
+        TYPE E_Syntax_TypedExplicit : (
+            Idle       := 0,
+            Starting   := 10,
+            Running    := 100,
+            FatalError := -1
+        ) DINT := Idle;
+        END_TYPE
+        """
+        ast_node, cst_nodes, diags = parse_declaration(source)
+        assert len(diags) == 0, f"Unexpected diagnostics in enum: {diags}"
+        assert isinstance(ast_node, TypeDecl)
+        assert ast_node.definition.base_type == "DINT"
+        assert len(ast_node.definition.members) == 4
+        assert ast_node.definition.members[-1].value == "- 1" or ast_node.definition.members[-1].value == "-1"
+
+    def test_var_config_dotted_variable_names(self):
+        source = """
+        VAR_CONFIG
+            MAIN.fbMotor.bEnable AT %QX0.0 : BOOL;
+            MAIN.fbMotor.nSpeed  AT %QW2   : INT;
+        END_VAR
+        """
+        ast_node, cst_nodes, diags = parse_declaration(source)
+        assert len(diags) == 0, f"Unexpected diagnostics in VAR_CONFIG: {diags}"
+        assert isinstance(ast_node, VarBlock)
+        assert len(ast_node.variables) == 2
+        assert ast_node.variables[0].name == "MAIN.fbMotor.bEnable"
+        assert ast_node.variables[1].name == "MAIN.fbMotor.nSpeed"

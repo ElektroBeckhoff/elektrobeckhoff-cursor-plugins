@@ -572,11 +572,27 @@ class DeclarationParser:
             # or TYPE T_Arr : ARRAY[1..10] OF INT; END_TYPE
             # or TYPE T_Sub : INT(1..10) := 5; END_TYPE
             type_tokens: list[str] = []
-            while not self.is_eof() and self.peek().type not in (
-                TokenType.SEMICOLON,
-                TokenType.ASSIGN,
-                TokenType.KEYWORD_END_TYPE,
-            ):
+            bracket_depth = 0
+            paren_depth = 0
+            while not self.is_eof():
+                t_peek = self.peek()
+                if t_peek.type == TokenType.BRACKET_OPEN:
+                    bracket_depth += 1
+                elif t_peek.type == TokenType.BRACKET_CLOSE:
+                    if bracket_depth > 0:
+                        bracket_depth -= 1
+                elif t_peek.type == TokenType.PAREN_OPEN:
+                    paren_depth += 1
+                elif t_peek.type == TokenType.PAREN_CLOSE:
+                    if paren_depth > 0:
+                        paren_depth -= 1
+                elif t_peek.type in (TokenType.SEMICOLON, TokenType.KEYWORD_END_TYPE):
+                    if bracket_depth == 0 and paren_depth == 0:
+                        break
+                elif t_peek.type == TokenType.ASSIGN:
+                    if bracket_depth == 0 and paren_depth == 0:
+                        break
+
                 t = self.advance()
                 type_tokens.append(t.value)
                 end_span = t.span
@@ -586,11 +602,27 @@ class DeclarationParser:
             # Initial value e.g. := 5;
             if self.peek().type == TokenType.ASSIGN:
                 self.advance()
-                while not self.is_eof() and self.peek().type not in (
-                    TokenType.SEMICOLON,
-                    TokenType.KEYWORD_END_TYPE,
-                ):
+                init_tokens: list[str] = []
+                bracket_depth = 0
+                paren_depth = 0
+                while not self.is_eof():
+                    t_peek = self.peek()
+                    if t_peek.type == TokenType.BRACKET_OPEN:
+                        bracket_depth += 1
+                    elif t_peek.type == TokenType.BRACKET_CLOSE:
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                    elif t_peek.type == TokenType.PAREN_OPEN:
+                        paren_depth += 1
+                    elif t_peek.type == TokenType.PAREN_CLOSE:
+                        if paren_depth > 0:
+                            paren_depth -= 1
+                    elif t_peek.type in (TokenType.SEMICOLON, TokenType.KEYWORD_END_TYPE):
+                        if bracket_depth == 0 and paren_depth == 0:
+                            break
+
                     t = self.advance()
+                    init_tokens.append(t.value)
                     end_span = t.span
 
         if self.peek().type == TokenType.SEMICOLON:
@@ -640,9 +672,17 @@ class DeclarationParser:
 
             if self.peek().type == TokenType.ASSIGN:
                 self.advance()
-                val_tok = self.advance()
-                m_val = val_tok.value
-                m_span = SourceSpan.merge(m_name_tok.span, val_tok.span)
+                val_tokens: list[Token] = []
+                while not self.is_eof() and self.peek().type not in (
+                    TokenType.COMMA,
+                    TokenType.PAREN_CLOSE,
+                    TokenType.SEMICOLON,
+                    TokenType.KEYWORD_END_TYPE,
+                ):
+                    val_tokens.append(self.advance())
+                if val_tokens:
+                    m_val = " ".join(t.value for t in val_tokens).strip()
+                    m_span = SourceSpan.merge(m_name_tok.span, val_tokens[-1].span)
 
             m_pragmas = self._extract_pragmas(m_span)
             m_comment = self._extract_doc_comment(m_span)
@@ -665,13 +705,25 @@ class DeclarationParser:
         if close_tok:
             end_span = close_tok.span
 
-        # Optional base type after ')' e.g. ) INT := 0;
+        # Optional base type after ')' e.g. ) DINT := 0; or ) DINT := Idle; or ) DINT;
         base_type = "INT"
-        if not self.is_eof() and self.peek().type in (TokenType.IDENTIFIER, TokenType.KEYWORD_INT if hasattr(TokenType, "KEYWORD_INT") else TokenType.IDENTIFIER):
-            if self.peek().type not in (TokenType.SEMICOLON, TokenType.KEYWORD_END_TYPE):
-                b_tok = self.advance()
-                base_type = b_tok.value
-                end_span = b_tok.span
+        if not self.is_eof() and self.peek().type not in (
+            TokenType.SEMICOLON,
+            TokenType.KEYWORD_END_TYPE,
+        ):
+            b_tok = self.advance()
+            base_type = b_tok.value
+            end_span = b_tok.span
+
+            # Optional default initial value after enum base type: e.g. := Idle; or := 0;
+            if self.peek().type == TokenType.ASSIGN:
+                self.advance()
+                while not self.is_eof() and self.peek().type not in (
+                    TokenType.SEMICOLON,
+                    TokenType.KEYWORD_END_TYPE,
+                ):
+                    init_tok = self.advance()
+                    end_span = init_tok.span
 
         total_span = SourceSpan.merge(start_span, end_span)
         ast_enum = EnumType(span=total_span, base_type=base_type, members=members)
@@ -864,8 +916,14 @@ class DeclarationParser:
 
         # List of (name, address, span)
         vars_info: list[tuple[str, Optional[str], SourceSpan]] = []
-        name_tok = self.advance()
-        start_span = name_tok.span
+        name_toks = [self.advance()]
+        while self.peek().type == TokenType.DOT:
+            self.advance()
+            if self.peek().type in (TokenType.IDENTIFIER, TokenType.INT_LITERAL):
+                name_toks.append(self.advance())
+
+        name_val = ".".join(t.value for t in name_toks)
+        start_span = SourceSpan.merge(name_toks[0].span, name_toks[-1].span)
 
         first_addr = None
         if self.peek().type == TokenType.KEYWORD_AT:
@@ -873,20 +931,30 @@ class DeclarationParser:
             addr_tok = self.expect(TokenType.DIRECT_ADDRESS, "Expected direct address e.g. %I* after AT")
             if addr_tok:
                 first_addr = addr_tok.value
-        vars_info.append((name_tok.value, first_addr, name_tok.span))
+        vars_info.append((name_val, first_addr, start_span))
 
         # Comma-separated variable names: a [AT %I*], b [AT %I*], c : INT;
         while self.peek().type == TokenType.COMMA:
             self.advance()
+            next_toks: list[Token] = []
             next_name_tok = self.expect(TokenType.IDENTIFIER, "Expected variable name after ','")
             if next_name_tok:
+                next_toks.append(next_name_tok)
+                while self.peek().type == TokenType.DOT:
+                    self.advance()
+                    if self.peek().type in (TokenType.IDENTIFIER, TokenType.INT_LITERAL):
+                        next_toks.append(self.advance())
+
+                next_val = ".".join(t.value for t in next_toks)
+                next_span = SourceSpan.merge(next_toks[0].span, next_toks[-1].span)
+
                 next_addr = None
                 if self.peek().type == TokenType.KEYWORD_AT:
                     self.advance()
                     addr_tok = self.expect(TokenType.DIRECT_ADDRESS, "Expected direct address e.g. %I* after AT")
                     if addr_tok:
                         next_addr = addr_tok.value
-                vars_info.append((next_name_tok.value, next_addr, next_name_tok.span))
+                vars_info.append((next_val, next_addr, next_span))
 
         end_span = vars_info[-1][2]
 
@@ -912,32 +980,68 @@ class DeclarationParser:
             self._skip_to_semicolon()
             return [], []
 
-        # Type expression (can be ARRAY[..] OF ..., POINTER TO ..., REFERENCE TO ..., or type name)
+        # Type expression (can be ARRAY[..] OF ..., POINTER TO ..., REFERENCE TO ..., or type name with FB_init params)
         type_tokens: list[str] = []
-        while not self.is_eof() and self.peek().type not in (
-            TokenType.SEMICOLON,
-            TokenType.ASSIGN,
-            TokenType.KEYWORD_END_VAR,
-            TokenType.KEYWORD_END_STRUCT,
-            TokenType.KEYWORD_END_UNION,
-        ):
+        bracket_depth = 0
+        paren_depth = 0
+        while not self.is_eof():
+            t_peek = self.peek()
+            if t_peek.type == TokenType.BRACKET_OPEN:
+                bracket_depth += 1
+            elif t_peek.type == TokenType.BRACKET_CLOSE:
+                if bracket_depth > 0:
+                    bracket_depth -= 1
+            elif t_peek.type == TokenType.PAREN_OPEN:
+                paren_depth += 1
+            elif t_peek.type == TokenType.PAREN_CLOSE:
+                if paren_depth > 0:
+                    paren_depth -= 1
+            elif t_peek.type in (
+                TokenType.SEMICOLON,
+                TokenType.KEYWORD_END_VAR,
+                TokenType.KEYWORD_END_STRUCT,
+                TokenType.KEYWORD_END_UNION,
+            ):
+                if bracket_depth == 0 and paren_depth == 0:
+                    break
+            elif t_peek.type == TokenType.ASSIGN:
+                if bracket_depth == 0 and paren_depth == 0:
+                    break
+
             t = self.advance()
             type_tokens.append(t.value)
             end_span = t.span
 
         type_name = " ".join(type_tokens).strip()
 
-        # Initial value e.g. := 10;
+        # Initial value e.g. := 10; or := [1, 2, 3]; or := (a := 1);
         initial_val = None
         if self.peek().type == TokenType.ASSIGN:
             self.advance()
             init_tokens: list[str] = []
-            while not self.is_eof() and self.peek().type not in (
-                TokenType.SEMICOLON,
-                TokenType.KEYWORD_END_VAR,
-                TokenType.KEYWORD_END_STRUCT,
-                TokenType.KEYWORD_END_UNION,
-            ):
+            bracket_depth = 0
+            paren_depth = 0
+            while not self.is_eof():
+                t_peek = self.peek()
+                if t_peek.type == TokenType.BRACKET_OPEN:
+                    bracket_depth += 1
+                elif t_peek.type == TokenType.BRACKET_CLOSE:
+                    if bracket_depth > 0:
+                        bracket_depth -= 1
+                elif t_peek.type == TokenType.PAREN_OPEN:
+                    paren_depth += 1
+                elif t_peek.type == TokenType.PAREN_CLOSE:
+                    if paren_depth > 0:
+                        paren_depth -= 1
+                elif t_peek.type in (
+                    TokenType.SEMICOLON,
+                    TokenType.KEYWORD_END_VAR,
+                    TokenType.KEYWORD_END_STRUCT,
+                    TokenType.KEYWORD_END_UNION,
+                ):
+                    if bracket_depth == 0 and paren_depth == 0:
+                        break
+
                 t = self.advance()
                 init_tokens.append(t.value)
                 end_span = t.span

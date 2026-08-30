@@ -442,3 +442,82 @@ END_VAR
         assert sym_sol_config is not None
         assert sym_sol_config.file_path == dut_sol.resolve()
 
+
+# =========================================================================
+# 5. Semantic Diagnostics Validation Tests
+# =========================================================================
+
+class TestSemanticDiagnostics:
+    def test_semantic_analysis_catches_unknown_type(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_InvalidType.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_InvalidType" Id="{12345678-1234-1234-1234-123456789abc}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_InvalidType
+VAR
+    fbGoodTimer : TON;
+    fbBadDevice : NonExistentCustomType_XYZ;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 1
+        assert diags[0].code == "TC-SEM-001"
+        assert "NonExistentCustomType_XYZ" in diags[0].message
+
+    def test_semantic_analysis_catches_duplicate_identifier(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_DuplicateVar.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_DuplicateVar" Id="{12345678-1234-1234-1234-123456789def}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_DuplicateVar
+VAR
+    nCounter : INT;
+    nCounter : DINT;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 1
+        assert diags[0].code == "TC-SEM-002"
+        assert "Duplicate identifier 'nCounter'" in diags[0].message
+
+    def test_semantic_analysis_accepts_system_types_and_fb_init_arrays(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_ValidAdvanced.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_ValidAdvanced" Id="{12345678-1234-1234-1234-123456789fff}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ValidAdvanced
+VAR
+    stVarInfo    : __SYSTEM.VAR_INFO;
+    arrTimers    : ARRAY[1..2] OF TON[(PT := T#1S), (PT := T#2S)];
+    arrPointers  : ARRAY[1..5] OF POINTER TO DINT;
+    arrStrings   : ARRAY[1..3] OF STRING(255);
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 0, f"Expected 0 diagnostics but found: {diags}"
+
+
