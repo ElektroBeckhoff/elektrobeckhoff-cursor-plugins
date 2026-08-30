@@ -480,3 +480,326 @@ class TestSyntaxEdgeCasesAndNoFalsePositives:
         assert len(ast_node.variables) == 2
         assert ast_node.variables[0].name == "MAIN.fbMotor.bEnable"
         assert ast_node.variables[1].name == "MAIN.fbMotor.nSpeed"
+
+
+# =========================================================================
+# 6. Exhaustive Syntax & ExST Language Features Battery
+# =========================================================================
+
+class TestExhaustiveSyntaxAndExSTEdgeCases:
+    @pytest.mark.parametrize(
+        "code,is_decl",
+        [
+            # Pragmas inside declaration & implementation
+            (
+                """
+                {attribute 'qualified_only'}
+                {attribute 'strict'}
+                VAR_GLOBAL CONSTANT
+                    {attribute 'hide'}
+                    cMaxVal : INT := 100;
+                    {region 'Config Section'}
+                    cConfigVal : DINT := 16#FFFF;
+                    {endregion}
+                END_VAR
+                """,
+                True,
+            ),
+            # ExST Dynamic memory allocation and pointers
+            (
+                """
+                pMotor := __NEW(FB_Motor, nInitId := 10);
+                IF pMotor <> 0 THEN
+                    pMotor^.M_Start();
+                    __DELETE(pMotor);
+                END_IF;
+                """,
+                False,
+            ),
+            # ExST QueryInterface, QueryPointer, IsValidRef, Position macros
+            (
+                """
+                __QUERYINTERFACE(iDevice, iWidget);
+                __QUERYPOINTER(iDevice, pMotor);
+                bValid := __ISVALIDREF(refA);
+                sName := __POUNAME();
+                sPos := __POSITION__();
+                """,
+                False,
+            ),
+            # ExST Interlocked functions
+            (
+                """
+                __XADD(ADR(_nAtomicVal), 1);
+                TEST_AND_SET(_dwSpinLock);
+                """,
+                False,
+            ),
+            # Multidimensional array indexing and slice/deref chains
+            (
+                """
+                arrMatrix[nRow, nCol] := 42;
+                pStructArray^[nIdx].stNested.arrData[1, 2] := 100;
+                arr3D[1, 2, 3] := arr3D[3, 2, 1] + 1;
+                """,
+                False,
+            ),
+            # Method chaining with arguments
+            (
+                """
+                fbBuilder.SetGain(1.5).SetOffset(0.0).Build();
+                pBase^.M_Execute(bStart := TRUE).M_Reset();
+                """,
+                False,
+            ),
+            # Unary not, minus, plus, deref, bit access
+            (
+                """
+                bFlag := NOT bIn;
+                nNeg := -nVal;
+                nPos := +nVal;
+                bBit := nWord.%X0;
+                nByte := nDword.%B1;
+                nBitLegacy := nWord.0;
+                """,
+                False,
+            ),
+            # All binary operators
+            (
+                """
+                x := a AND b OR c XOR d AND_THEN e OR_ELSE f;
+                bCmp := (x = y) AND (x <> y) AND (x < y) AND (x <= y) AND (x > y) AND (x >= y);
+                nMath := (a + b - c * d / e MOD f) ** 2;
+                """,
+                False,
+            ),
+            # Bounds operators
+            (
+                """
+                nLower := LOWER_BOUND(arrData, 1);
+                nUpper := UPPER_BOUND(arrData, 1);
+                """,
+                False,
+            ),
+            # Repeat / While / For / If / Case combinations
+            (
+                """
+                FOR i := 1 TO 10 BY 2 DO
+                    IF i = 5 THEN
+                        CONTINUE;
+                    ELSIF i = 9 THEN
+                        EXIT;
+                    END_IF;
+                END_FOR;
+
+                WHILE bRunning DO
+                    nCnt := nCnt + 1;
+                    IF nCnt > 100 THEN
+                        RETURN;
+                    END_IF;
+                END_WHILE;
+
+                REPEAT
+                    nCnt := nCnt - 1;
+                UNTIL nCnt <= 0
+                END_REPEAT;
+                """,
+                False,
+            ),
+            # Empty statements and standalone semicolons
+            (
+                """
+                ;
+                ;
+                nVal := 1;
+                ;
+                """,
+                False,
+            ),
+            # JMP and Labels
+            (
+                """
+                JMP JumpTarget;
+                JumpTarget:
+                nVal := 10;
+                100:
+                nVal := 20;
+                """,
+                False,
+            ),
+            # Interface declaration with multiple EXTENDS
+            (
+                """
+                INTERFACE I_Advanced EXTENDS I_Base1, I_Base2
+                """,
+                True,
+            ),
+            # Function declaration with modifiers and return type
+            (
+                """
+                FUNCTION INTERNAL F_Calculate : LREAL
+                VAR_INPUT
+                    fParamA : LREAL;
+                    fParamB : LREAL;
+                END_VAR
+                """,
+                True,
+            ),
+            # POU with EXTENDS and multiple IMPLEMENTS
+            (
+                """
+                FUNCTION_BLOCK PUBLIC ABSTRACT FB_SpecialDevice EXTENDS FB_BaseDevice IMPLEMENTS I_Device, I_Diagnostics, I_Observer
+                VAR_INPUT
+                    bEnable : BOOL;
+                END_VAR
+                VAR_OUTPUT
+                    bActive : BOOL;
+                END_VAR
+                VAR
+                    _nState : INT;
+                END_VAR
+                """,
+                True,
+            ),
+            # Subrange type definition
+            (
+                """
+                TYPE T_Subrange : INT(1..100) := 50;
+                END_TYPE
+                """,
+                True,
+            ),
+            # Multi-dimensional array alias
+            (
+                """
+                TYPE T_Matrix3D : ARRAY[1..3, 1..4, 1..5] OF LREAL;
+                END_TYPE
+                """,
+                True,
+            ),
+            # Union declaration
+            (
+                """
+                TYPE U_ByteWord :
+                UNION
+                    nWord : WORD;
+                    stBytes : ARRAY[0..1] OF BYTE;
+                END_UNION
+                END_TYPE
+                """,
+                True,
+            ),
+            # Struct with EXTENDS
+            (
+                """
+                TYPE ST_ExtendedConfig EXTENDS ST_BaseConfig :
+                STRUCT
+                    fGain : REAL := 1.0;
+                    sDescription : STRING(80);
+                END_STRUCT
+                END_TYPE
+                """,
+                True,
+            ),
+            # Varied literals (binary, hex, typed time, typed date, ltime)
+            (
+                """
+                nBin := 2#1010_1100;
+                nHex := 16#DEAD_BEEF;
+                nOct := 8#77;
+                tDuration := T#1D2H3M4S5MS;
+                tShort := TIME#500MS;
+                ltDuration := LTIME#1000NS;
+                dDate := DATE#2026-08-30;
+                todTime := TOD#15:30:00;
+                dtDateTime := DT#2026-08-30-15:30:00;
+                """,
+                False,
+            ),
+            # Function call returning pointer/interface and chained access
+            (
+                """
+                F_GetDevice().M_Start();
+                F_GetPointer()^ := 20;
+                F_GetArray()[1] := 10;
+                F_GetDevice().pNested^.field := 5;
+                """,
+                False,
+            ),
+            # Comments inside calls and expressions
+            (
+                """
+                fbMotor(
+                    (* enable *)
+                    bEnable := TRUE, // inline comment
+                    nSpeed := 1000
+                );
+                """,
+                False,
+            ),
+            # Nested struct and array initializations
+            (
+                """
+                VAR
+                    stComplex : ST_Complex := (
+                        nId := 1,
+                        arrSub := [1, 2, 3],
+                        stNested := (sName := 'Test', bFlag := TRUE)
+                    );
+                END_VAR
+                """,
+                True,
+            ),
+            # SUPER^ and THIS^ calls and method invocations
+            (
+                """
+                SUPER^();
+                SUPER^.M_Init(bStart := TRUE);
+                THIS^.M_LocalAction();
+                THIS^.fbSubTimer(IN := TRUE);
+                """,
+                False,
+            ),
+            # Pragmas inside IF and CASE bodies
+            (
+                """
+                IF bFlag THEN
+                    {region 'Nested Logic'}
+                    x := 10;
+                    {endregion}
+                END_IF;
+                """,
+                False,
+            ),
+            # Bit access in complex expressions
+            (
+                """
+                bFlag := stData.arrWords[i].%X5 OR (pWord^.%B0 = 16#FF);
+                """,
+                False,
+            ),
+            # Multiple statements on single line
+            (
+                """
+                a := 1; b := 2; c := 3; IF a = 1 THEN b := 10; END_IF;
+                """,
+                False,
+            ),
+            # Chained relational / boolean expressions
+            (
+                """
+                bValid := a < b AND b < c AND (c = d OR NOT e);
+                """,
+                False,
+            ),
+        ],
+    )
+    def test_syntax_battery_produces_zero_diagnostics(self, code: str, is_decl: bool):
+        if is_decl:
+            ast_node, cst_nodes, diags = parse_declaration(code)
+            assert not diags, f"Unexpected declaration diagnostics: {diags}"
+            assert ast_node is not None or len(cst_nodes) > 0
+        else:
+            stmts, cst_nodes, diags = parse_implementation(code)
+            assert not diags, f"Unexpected implementation diagnostics: {diags}"
+            assert len(stmts) > 0

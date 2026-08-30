@@ -31,6 +31,7 @@ class TestSolutionSyntaxParsing:
                 if not span.content.strip():
                     continue
                 ast_node, cst_nodes, diags = parse_declaration(span.content)
+                assert not diags, f"Unexpected declaration diagnostics in {file_path.name}: {diags}"
                 assert ast_node is not None or len(cst_nodes) > 0, f"Failed to parse declaration in {file_path.name}"
                 parsed_count += 1
 
@@ -54,7 +55,26 @@ class TestSolutionSyntaxParsing:
                 if not span.content.strip():
                     continue
                 stmts, cst_nodes, diags = parse_implementation(span.content)
+                assert not diags, f"Unexpected implementation diagnostics in {file_path.name}: {diags}"
                 assert isinstance(stmts, list), f"Expected list of statements in {file_path.name}"
                 impl_count += 1
 
         assert impl_count >= 20
+
+    def test_parse_all_formatter_fixtures_zero_diagnostics(self):
+        """Verifies that all 300+ formatter fixture files parse with zero false positive diagnostics."""
+        fixture_dir = Path(__file__).resolve().parents[2] / "formatter" / "fixtures"
+        fixture_files = [f for f in fixture_dir.rglob("*") if f.suffix.lower() in (".tcpou", ".tcdut", ".tcgvl", ".tcio")]
+        assert len(fixture_files) >= 100, f"Expected at least 100 fixture files, found {len(fixture_files)} at {fixture_dir}"
+
+        for f in fixture_files:
+            tc_doc = read_tc_xml_file(f)
+            for span in tc_doc.cdata_spans:
+                if not span.content.strip():
+                    continue
+                if span.is_declaration:
+                    ast_node, cst_nodes, diags = parse_declaration(span.content)
+                    assert not diags, f"Unexpected declaration diagnostics in fixture {f.name}: {diags}"
+                elif span.is_implementation:
+                    stmts, cst_nodes, diags = parse_implementation(span.content)
+                    assert not diags, f"Unexpected implementation diagnostics in fixture {f.name}: {diags}"
