@@ -20,6 +20,7 @@ import sys
 import glob
 import json
 import logging
+import threading
 import contextlib
 import xml.etree.ElementTree as ET
 from typing import Optional, List, Dict, Union
@@ -59,6 +60,10 @@ from infosys_mshc import (
     format_search_markdown,
     resolve_mshc_path,
 )
+import extension_ops
+
+# Automatically check & update VS Code extension in background on MCP startup
+threading.Thread(target=extension_ops.auto_update_if_needed, daemon=True).start()
 
 mcp = FastMCP("TwinCAT")
 
@@ -299,18 +304,93 @@ def twincat_plcproj_info(plcproj_path: str = "") -> str:
 
 
 # ================================================================
+#  twincat_workspace_symbols & twincat_symbol_lookup (Core Semantic)
+# ================================================================
+
+@mcp.tool()
+def twincat_workspace_symbols(
+    query: str = "",
+    plcproj_path: str = "",
+    limit: int = 50,
+) -> str:
+    """Search for symbols (POUs, DUTs, GVLs, methods, variables) across the TwinCAT project using twincat_core.
+
+    query: Search substring to filter symbol names (optional)
+    plcproj_path: Path to .plcproj file (optional, auto-detected if omitted)
+    limit: Max results to return (default: 50)"""
+    try:
+        from twincat_core.project import get_shared_workspace
+
+        p_path = plcproj_path or _auto_detect_plcproj()
+        workspace = get_shared_workspace(p_path if p_path else None)
+        symbols = workspace.find_symbols(query=query, limit=limit)
+
+        results = []
+        for s in symbols:
+            results.append({
+                "name": s.name,
+                "kind": s.kind.value,
+                "type_ref": s.type_ref,
+                "file": str(s.file_path) if s.file_path else "",
+                "line": s.span.start.line if s.span else 0,
+                "doc": s.doc_comment,
+            })
+        return _json({"total": len(results), "symbols": results})
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def twincat_symbol_lookup(
+    symbol_name: str,
+    scope_pou: str = "",
+    plcproj_path: str = "",
+) -> str:
+    """Resolve a symbol or member access chain (e.g. 'fbMotor.stParam.fSpeed', 'TON.IN', 'Tc2_Standard.CONCAT').
+
+    symbol_name: Identifier or chained member expression to resolve (e.g. 'fbAxis.M_GetStatus().bRunning')
+    scope_pou: Enclosing POU or method name for local context (optional)
+    plcproj_path: Path to .plcproj file (optional, auto-detected if omitted)"""
+    try:
+        from twincat_core.project import get_shared_workspace
+
+        p_path = plcproj_path or _auto_detect_plcproj()
+        workspace = get_shared_workspace(p_path if p_path else None)
+        sym = workspace.lookup_symbol(symbol_name, scope_pou=scope_pou or None)
+        if not sym:
+            return _json({
+                "found": False,
+                "symbol_name": symbol_name,
+                "message": f"Symbol '{symbol_name}' could not be resolved.",
+            })
+
+        return _json({
+            "found": True,
+            "name": sym.name,
+            "kind": sym.kind.value,
+            "type_ref": sym.type_ref,
+            "file": str(sym.file_path) if sym.file_path else "",
+            "line": sym.span.start.line if sym.span else 0,
+            "doc": sym.doc_comment,
+            "initial_value": sym.initial_value,
+        })
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+# ================================================================
 #  twincat_status
 # ================================================================
 
 @mcp.tool()
 def twincat_status() -> str:
-    """Diagnose TcXaeShell / MCP session health without opening a solution.
+    """Diagnose TcXaeShell / MCP session health and VS Code extension status without opening a solution.
 
     Reports XAE install/running state, per-instance solution paths and
     COM-busy flags (modal dialog), visible TcXaeShell message boxes,
     MCP session binding, SilentMode, recent auto-dismissed dialogs,
-    SysManager error text, twincat_runtime_started, and target_net_id
-    when a session is attached.
+    SysManager error text, twincat_runtime_started, target_net_id,
+    and VS Code / Cursor extension installation status.
 
     If ``dte_busy`` or ``blocking_dialogs`` is set: READ those fields.
     For ``auto_dismissable=true`` reload prompts call
@@ -318,6 +398,8 @@ def twincat_status() -> str:
     once. Do not narrate manual XAE clicking. Non-auto-dismissable dialogs
     → stop and tell the user the dialog text.
     """
+
+    ext_status = extension_ops.get_extension_status()
 
     if not HAS_WIN32:
         return _json({
@@ -328,9 +410,55 @@ def twincat_status() -> str:
             "blocking_dialogs": [],
             "dismissed_dialogs_recent": [],
             "message": "pywin32 not installed (Windows + TwinCAT XAE required)",
+            "vscode_extension": ext_status,
         })
     try:
-        return _json(_get_bridge().get_status())
+        status_dict = _as_dict(_get_bridge().get_status())
+        status_dict["vscode_extension"] = ext_status
+        return _json(status_dict)
+    except Exception as exc:
+        return _json({"error": str(exc), "vscode_extension": ext_status})
+
+
+# ================================================================
+#  twincat_extension_* tools
+# ================================================================
+
+@mcp.tool()
+def twincat_extension_status() -> str:
+    """Check the installation and version status of the TwinCAT 3 VS Code / Cursor extension.
+
+    Reports whether 'elektrobeckhoff.twincat-iecst' is installed in Cursor/VS Code,
+    its installed version, available local VSIX version, and whether an update is available.
+    """
+    try:
+        return _json(extension_ops.get_extension_status())
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def twincat_extension_install(force: bool = True) -> str:
+    """Install or update the TwinCAT 3 Structured Text VS Code / Cursor extension from local VSIX.
+
+    Builds or packages the .vsix package from the local repository if necessary, then invokes
+    the editor CLI ('cursor' or 'code') to install/update the extension with syntax highlighting,
+    virtual ST projection, and language server capabilities.
+    """
+    try:
+        return _json(extension_ops.install_extension(force=force))
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def twincat_extension_build() -> str:
+    """Build the local TwinCAT 3 VS Code extension VSIX package from source.
+
+    Packages all extension manifests, grammars, and bundled assets into twincat-iecst.vsix.
+    """
+    try:
+        return _json(extension_ops.build_vsix())
     except Exception as exc:
         return _json({"error": str(exc)})
 
