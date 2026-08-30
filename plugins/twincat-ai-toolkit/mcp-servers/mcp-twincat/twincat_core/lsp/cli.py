@@ -31,6 +31,10 @@ def main() -> None:
         handlers=log_handlers,
     )
 
+    if not args.verbose:
+        # Suppress verbose pygls RPC packet dumping and feature registration noise in production
+        logging.getLogger("pygls").setLevel(logging.WARNING)
+
     server = create_lsp_server()
 
     if args.tcp:

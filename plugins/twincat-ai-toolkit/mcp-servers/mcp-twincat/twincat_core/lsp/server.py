@@ -55,6 +55,8 @@ class TwinCatLanguageServer(LanguageServer):
         workspace_index: Optional[WorkspaceIndex] = None,
     ) -> None:
         super().__init__(name=name, version=version)
+        if not logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.getLogger("pygls").setLevel(logging.WARNING)
         self.workspace_index = workspace_index or WorkspaceIndex()
         self._setup_handlers()
 

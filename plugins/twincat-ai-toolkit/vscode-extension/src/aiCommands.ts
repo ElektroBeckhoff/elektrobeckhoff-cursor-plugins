@@ -98,13 +98,7 @@ function getTargetScopeInfo(uri?: vscode.Uri, uris?: vscode.Uri[]): TargetScopeI
 
   // Handle multi-selection from Explorer
   if (uris && uris.length > 1) {
-    const refs = uris.map((u) => {
-      let physical = u;
-      if (physical.scheme === TWINCAT_ST_SCHEME) {
-        physical = TwinCatVirtualDocumentProvider.toPhysicalUri(physical);
-      }
-      return `@${vscode.workspace.asRelativePath(physical, false).replace(/\\/g, '/')}`;
-    });
+    const refs = uris.map((u) => `@${vscode.workspace.asRelativePath(u, false).replace(/\\/g, '/')}`);
 
     return {
       uri: uris[0],
