@@ -1,0 +1,69 @@
+---
+description: >-
+  MCP TwinCAT3 fast syntax and semantic check awareness. When to use twincat_check_syntax.
+  File-based, headless, cross-platform, no XAE/COM needed.
+alwaysApply: false
+---
+
+# TwinCAT MCP Fast Syntax & Semantic Checker
+
+Use when the user asks to check syntax, validate code without opening Visual Studio / XAE, run a quick lint, or `/twincat3-cmd-check-syntax`. Detailed workflow: skill `twincat3-check-syntax`.
+
+## Tools (file-based, no COM/XAE session required)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_check_syntax` | Fast ST syntax, AST parsing, and semantic validation (TC-DECL-*, TC-STMT-*, TC-EXPR-*, TC-SEM-*) |
+
+No `twincat_open` needed. Operates directly on `.TcPOU`, `.TcDUT`, `.TcGVL`, `.TcIO`, `.plcproj`, or `.sln` files via `twincat_core` in milliseconds.
+
+## Core parameters (`twincat_check_syntax`)
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `path` | `""` | File, folder, `.plcproj`, or `.sln`. If empty, auto-detects project. |
+| `recursive` | `true` | Recurse into subfolders when path is a directory |
+| `include_warnings` | `true` | Include severity=WARNING diagnostics (e.g. TC-SEM-007 narrowing warnings) |
+
+## Checked Diagnostic Categories
+
+1. **Declaration Rules (`TC-DECL-001..007`)**:
+   - `TC-DECL-001`: `FUNCTION`s must declare an explicit return type
+   - `TC-DECL-002`: `PROPERTY`s must declare an explicit data type
+   - `TC-DECL-003`: `CONSTANT` variables must have an initial value
+   - `TC-DECL-004`: `VAR_IN_OUT` cannot have an initial value
+   - `TC-DECL-005`: `VAR_TEMP` cannot be `RETAIN` or `PERSISTENT`
+   - `TC-DECL-006`: `INTERFACE` declarations cannot contain `VAR` blocks
+   - `TC-DECL-007`: Array lower bound cannot exceed upper bound (`ARRAY[10..5]`)
+
+2. **Statement & Expression Rules (`TC-STMT-*`, `TC-EXPR-*`)**:
+   - `TC-STMT-001`: `EXIT` is only valid inside a loop (`FOR`, `WHILE`, `REPEAT`)
+   - `TC-STMT-002`: `CONTINUE` is only valid inside a loop
+   - `TC-STMT-004`: Undefined `JMP` target label
+   - `TC-EXPR-002`: Invalid assignment target (assigning to literal or non-lvalue)
+
+3. **Semantic Rules (`TC-SEM-001..007`)**:
+   - `TC-SEM-001`: Unknown data type in variable / struct field
+   - `TC-SEM-002`: Duplicate identifier in same scope
+   - `TC-SEM-003`: `FUNCTION_BLOCK` fails to implement all interface methods/properties
+   - `TC-SEM-004`: Cyclic inheritance detected (`EXTENDS`)
+   - `TC-SEM-005`: Cannot instantiate `ABSTRACT FUNCTION_BLOCK`
+   - `TC-SEM-006`: Incompatible type assignment or non-BOOL condition (ERROR)
+   - `TC-SEM-007`: Implicit narrowing, precision loss, or sign change (WARNING)
+
+## Typical usage
+
+**Single file check:**
+```
+twincat_check_syntax(path="POUs/FB_Motor.TcPOU")
+```
+
+**Project / Folder check:**
+```
+twincat_check_syntax(path="solution/twincat3-solution")
+```
+
+**Errors only (suppress warnings):**
+```
+twincat_check_syntax(include_warnings=false)
+```

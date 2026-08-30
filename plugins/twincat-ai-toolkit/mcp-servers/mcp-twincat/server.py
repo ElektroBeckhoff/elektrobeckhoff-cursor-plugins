@@ -379,6 +379,177 @@ def twincat_symbol_lookup(
 
 
 # ================================================================
+#  twincat_check_syntax (Fast Headless Syntax & Semantic Validator)
+# ================================================================
+
+@mcp.tool()
+def twincat_check_syntax(
+    path: str = "",
+    recursive: bool = True,
+    include_warnings: bool = True,
+) -> str:
+    """Validate TwinCAT 3 IEC 61131-3 Structured Text syntax and semantics using twincat_core.
+
+    Fast, headless validator (no Visual Studio or TcXaeShell required, works cross-platform).
+    Performs full ST syntax parsing, AST construction, and semantic verification:
+      - Lossless XML CDATA integrity
+      - Lexer & token errors
+      - Declaration rules (TC-DECL-001..007: explicit return types, constant inits, array bounds, etc.)
+      - Statement & expression rules (TC-STMT-*, TC-EXPR-*: loop bounds, jumps, assignment targets)
+      - Semantic rules (TC-SEM-001..007: unknown types, duplicate identifiers, interface conformance,
+        cyclic inheritance, abstract instantiations, type mismatches, narrowing/precision loss warnings)
+
+    path: File (.TcPOU, .TcDUT, .TcGVL, .TcIO), directory, .plcproj, or .sln. If empty, auto-detects project.
+    recursive: Scan subdirectories recursively when path is a directory (default: True).
+    include_warnings: Include severity=WARNING items (e.g. TC-SEM-007 narrowing warnings) (default: True).
+    """
+    try:
+        from pathlib import Path
+        from twincat_core.project import WorkspaceIndex
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+        from twincat_core.syntax.diagnostics import DiagnosticSeverity
+
+        target_path: Optional[Path] = None
+        if path:
+            p = Path(path).resolve()
+            if not p.exists():
+                return _json({"success": False, "error": f"Path does not exist: {path}"})
+            target_path = p
+        else:
+            auto_p = _auto_detect_plcproj()
+            if auto_p:
+                target_path = Path(auto_p).resolve()
+            else:
+                target_path = Path.cwd().resolve()
+
+        files_to_check: list[Path] = []
+        workspace: Optional[WorkspaceIndex] = None
+
+        if target_path.is_file():
+            if target_path.suffix.lower() == ".plcproj":
+                workspace = WorkspaceIndex.from_plcproj(target_path)
+                if workspace.project:
+                    files_to_check = [
+                        item.abs_path
+                        for item in workspace.project.compile_items.values()
+                        if not item.exclude_from_build and item.abs_path.is_file()
+                    ]
+            elif target_path.suffix.lower() == ".sln":
+                resolved = _resolve_sln(str(target_path))
+                if isinstance(resolved, dict) and not resolved.get("success", True):
+                    return _json(resolved)
+                plcproj_p = Path(resolved if isinstance(resolved, str) else resolved["plcproj_path"])
+                workspace = WorkspaceIndex.from_plcproj(plcproj_p)
+                if workspace.project:
+                    files_to_check = [
+                        item.abs_path
+                        for item in workspace.project.compile_items.values()
+                        if not item.exclude_from_build and item.abs_path.is_file()
+                    ]
+            elif target_path.suffix.lower() in (".tcpou", ".tcdut", ".tcgvl", ".tcio"):
+                # Single file: find if parent has plcproj to build full symbol context
+                plcs = list(target_path.parent.glob("*.plcproj")) or list(target_path.parent.parent.glob("*.plcproj"))
+                if plcs:
+                    workspace = WorkspaceIndex.from_plcproj(plcs[0])
+                else:
+                    workspace = WorkspaceIndex()
+                files_to_check = [target_path]
+            else:
+                return _json({"success": False, "error": f"Unsupported file type: {target_path.suffix}"})
+        elif target_path.is_dir():
+            plcs = list(target_path.glob("*.plcproj")) or list(target_path.glob("**/*.plcproj"))
+            if plcs:
+                workspace = WorkspaceIndex.from_plcproj(plcs[0])
+                if workspace.project:
+                    files_to_check = [
+                        item.abs_path
+                        for item in workspace.project.compile_items.values()
+                        if not item.exclude_from_build and item.abs_path.is_file()
+                    ]
+            else:
+                workspace = WorkspaceIndex()
+                pattern = "**/*" if recursive else "*"
+                candidates: list[Path] = []
+                for ext in (".TcPOU", ".TcDUT", ".TcGVL", ".TcIO"):
+                    candidates.extend(target_path.glob(f"{pattern}{ext}"))
+                    if ext.lower() != ext:
+                        candidates.extend(target_path.glob(f"{pattern}{ext.lower()}"))
+                seen_f: set[Path] = set()
+                for f in candidates:
+                    rf = f.resolve()
+                    if rf not in seen_f and rf.is_file():
+                        seen_f.add(rf)
+                        files_to_check.append(rf)
+
+        if not workspace:
+            workspace = WorkspaceIndex()
+
+        if not files_to_check:
+            return _json({
+                "success": True,
+                "path": str(target_path),
+                "total_files": 0,
+                "error_count": 0,
+                "warning_count": 0,
+                "message": "No TwinCAT source files found to validate.",
+                "diagnostics": [],
+            })
+
+        for f in files_to_check:
+            workspace.update_file(f)
+
+        diagnostics_list = []
+        error_count = 0
+        warning_count = 0
+
+        for f in files_to_check:
+            indexed = workspace.get_file(f)
+            if not indexed:
+                continue
+
+            file_diags = list(indexed.diagnostics)
+            semantic_diags = run_semantic_analysis(workspace, f)
+            file_diags.extend(semantic_diags)
+
+            for d in file_diags:
+                sev_str = "error" if d.severity == DiagnosticSeverity.ERROR else (
+                    "warning" if d.severity == DiagnosticSeverity.WARNING else "info"
+                )
+                if sev_str == "error":
+                    error_count += 1
+                elif sev_str == "warning":
+                    warning_count += 1
+                    if not include_warnings:
+                        continue
+                elif not include_warnings:
+                    continue
+
+                line_num = d.span.start.line if d.span else 1
+                col_num = d.span.start.col if d.span else 1
+
+                diagnostics_list.append({
+                    "file": f.name,
+                    "path": str(f),
+                    "line": line_num,
+                    "column": col_num,
+                    "severity": sev_str,
+                    "code": d.code or "TC-SYNTAX",
+                    "message": d.message,
+                })
+
+        return _json({
+            "success": error_count == 0,
+            "path": str(target_path),
+            "total_files": len(files_to_check),
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "diagnostics": diagnostics_list,
+        })
+    except Exception as exc:
+        return _json({"success": False, "error": str(exc)})
+
+
+# ================================================================
 #  twincat_status
 # ================================================================
 

@@ -9,7 +9,8 @@ REQUIRED_TOOLS = {
     "twincat_stweep_format",
     "twincat_stweep_format_progress",
     "twincat_stweep_format_cancel",
-    # Python formatter (no XAE)
+    # Python formatter & syntax checker (no XAE)
+    "twincat_check_syntax",
     "twincat_format",
     "twincat_format_progress",
     "twincat_format_validate",
