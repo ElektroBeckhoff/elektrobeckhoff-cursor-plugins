@@ -10,10 +10,11 @@ bug-report.md
 **/.pytest_cache/
 node_modules/
 **/node_modules/
-dist/
-**/dist/
 out/
 **/out/
-*.vsix
 .coverage
 *.egg-info/
+
+# Allow pre-bundled VS Code extension assets so extension works without Node/NPM
+!plugins/twincat-ai-toolkit/vscode-extension/dist/**
+!plugins/twincat-ai-toolkit/vscode-extension/*.vsix
