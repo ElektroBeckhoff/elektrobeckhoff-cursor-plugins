@@ -347,21 +347,23 @@ class SymbolResolver:
             return "PVOID"
 
         if isinstance(expr, CallExpr):
-            callee_type = self.infer_expression_type(expr.callee, current_scope)
-            if callee_type:
-                return callee_type
             if isinstance(expr.callee, IdentifierExpr):
-                func_sym = self.resolve_identifier(expr.callee.name, current_scope)
-                if func_sym and func_sym.type_ref:
-                    return func_sym.type_ref
-                # Standard IEC Conversion Functions & Builtins
+                # 1. Standard IEC Conversion Functions & Builtins
                 upper_callee = expr.callee.name.upper()
                 if upper_callee.startswith("TO_"):
                     return upper_callee[3:]
                 if "_TO_" in upper_callee:
                     return upper_callee.split("_TO_")[-1]
-                if upper_callee in ("SIZEOF", "LEN"):
+                if upper_callee in ("SIZEOF", "LEN", "BITADR", "INDEXOF"):
                     return "UDINT"
+                if upper_callee in ("LOWER_BOUND", "UPPER_BOUND"):
+                    return "DINT"
+                if upper_callee in ("__ISVALIDREF",):
+                    return "BOOL"
+                if upper_callee in ("__QUERYINTERFACE", "__QUERYPOINTER"):
+                    return "HRESULT"
+                if upper_callee in ("__POUNAME", "__POSITION"):
+                    return "STRING"
                 if upper_callee in ("CONCAT", "MID", "LEFT", "RIGHT", "INSERT", "DELETE", "REPLACE"):
                     return "STRING"
                 if upper_callee in ("WCONCAT", "WMID", "WLEFT", "WRIGHT", "WINSERT", "WDELETE", "WREPLACE"):
@@ -370,6 +372,15 @@ class SymbolResolver:
                     if expr.args:
                         return self.infer_expression_type(expr.args[0].value, current_scope) or "LREAL"
                     return "LREAL"
+
+                # 2. Scope-resolved functions / methods / POUs
+                func_sym = self.resolve_identifier(expr.callee.name, current_scope)
+                if func_sym and func_sym.type_ref:
+                    return func_sym.type_ref
+
+            callee_type = self.infer_expression_type(expr.callee, current_scope)
+            if callee_type:
+                return callee_type
             return None
 
         if isinstance(expr, BinaryExpr):

@@ -114,6 +114,11 @@
         "command": "twincat.ai.addComments",
         "title": "TwinCAT AI: Add Comments (* *)",
         "category": "TwinCAT AI"
+      },
+      {
+        "command": "twincat.ai.checkSyntax",
+        "title": "TwinCAT AI: Check Syntax & Diagnostics",
+        "category": "TwinCAT AI"
       }
     ],
     "submenus": [
@@ -154,16 +159,20 @@
       ],
       "twincat.ai.submenu": [
         {
-          "command": "twincat.ai.pagefaultAudit",
+          "command": "twincat.ai.checkSyntax",
           "group": "1_actions@1"
         },
         {
-          "command": "twincat.ai.codeReview",
+          "command": "twincat.ai.pagefaultAudit",
           "group": "1_actions@2"
         },
         {
-          "command": "twincat.ai.addComments",
+          "command": "twincat.ai.codeReview",
           "group": "1_actions@3"
+        },
+        {
+          "command": "twincat.ai.addComments",
+          "group": "1_actions@4"
         }
       ],
       "commandPalette": [
@@ -177,6 +186,10 @@
         },
         {
           "command": "twincat.restartServer"
+        },
+        {
+          "command": "twincat.ai.checkSyntax",
+          "when": "editorIsOpen"
         },
         {
           "command": "twincat.ai.pagefaultAudit",

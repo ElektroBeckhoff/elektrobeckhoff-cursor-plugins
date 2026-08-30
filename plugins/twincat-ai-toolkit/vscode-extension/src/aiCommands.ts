@@ -373,7 +373,24 @@ export function registerAiCommands(context: vscode.ExtensionContext) {
         ]
       );
 
-      await sendPromptToCursor(prompt, `Code Review: ${target.displayTitle}`);
+  // 4. TwinCAT 3 Fast Syntax & Diagnostics Check
+  context.subscriptions.push(
+    vscode.commands.registerCommand('twincat.ai.checkSyntax', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+      const target = getTargetScopeInfo(uri, uris);
+      if (!target) return;
+
+      const prompt = buildStandardAiPrompt(
+        '/twincat3-cmd-check-syntax',
+        target,
+        `Run fast headless syntax and semantic validation using twincat_check_syntax on ${target.ref}`,
+        [
+          'rules/twincat3-core.mdc',
+          'rules/twincat3-mcp-syntax.mdc',
+          'skills/twincat3-check-syntax/SKILL.md',
+        ]
+      );
+
+      await sendPromptToCursor(prompt, `Check Syntax: ${target.displayTitle}`);
     })
   );
 }

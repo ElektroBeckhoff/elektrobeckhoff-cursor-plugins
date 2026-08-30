@@ -261,6 +261,35 @@ class TestSemanticResolution:
         )
         assert resolver.infer_expression_type(cmp_expr, sym_table.global_scope) == "BOOL"
 
+        # 5. Standard built-ins and ExST type inferences
+        sizeof_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="SIZEOF"),
+            args=[],
+        )
+        assert resolver.infer_expression_type(sizeof_call, sym_table.global_scope) == "UDINT"
+
+        bound_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="UPPER_BOUND"),
+            args=[],
+        )
+        assert resolver.infer_expression_type(bound_call, sym_table.global_scope) == "DINT"
+
+        query_itf_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="__QUERYINTERFACE"),
+            args=[],
+        )
+        assert resolver.infer_expression_type(query_itf_call, sym_table.global_scope) == "HRESULT"
+
+        is_valid_ref_call = CallExpr(
+            span=dummy_span,
+            callee=IdentifierExpr(span=dummy_span, name="__ISVALIDREF"),
+            args=[],
+        )
+        assert resolver.infer_expression_type(is_valid_ref_call, sym_table.global_scope) == "BOOL"
+
 
 # =========================================================================
 # 3. Incremental WorkspaceIndex Tests
