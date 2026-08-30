@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="F_3Args" Id="{963d91d8-f2b8-4d5f-b5fe-1d4dc4983188}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION F_3Args : STRING(255) VAR_INPUT arg1 : STRING(255); arg2 : STRING(255); arg3 : STRING(255); END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[F_3Args := CONCAT(arg1, CONCAT(arg2, arg3));
+]]></ST> </Implementation> </POU> </TcPlcObject>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_Dyn" Id="{d9c56f1f-2624-4aee-a34d-8906d949dac4}">
+    <Declaration><![CDATA[{attribute 'enable_dynamic_creation'}
+TYPE ST_Syntax_Dyn :
+    STRUCT
+        nVal : INT;
+    END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

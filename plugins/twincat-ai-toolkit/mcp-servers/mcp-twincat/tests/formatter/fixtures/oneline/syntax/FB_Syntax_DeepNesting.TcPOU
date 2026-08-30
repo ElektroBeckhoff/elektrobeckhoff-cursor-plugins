@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_DeepNesting" Id="{60c4d6cf-efb1-49f5-80bb-0d765784f29d}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_DeepNesting VAR nOuter : INT; nInner : INT; nDeep  : INT; bFlag1 : BOOL; bFlag2 : BOOL; bFlag3 : BOOL; nTotal : DINT; END_VAR
+]]></Declaration> <Implementation> <ST><![CDATA[IF bFlag1 THEN
+FOR nOuter := 1 TO 5 DO
+IF bFlag2 THEN CASE nOuter OF 1: WHILE nInner < 3 DO IF bFlag3 THEN REPEAT
+nDeep := nDeep + 1;
+nTotal := nTotal + (nOuter * nInner * nDeep); UNTIL nDeep >= 5 END_REPEAT; ELSE
+nTotal := nTotal + 1;
+END_IF
+nInner := nInner + 1;
+END_WHILE 2..4:
+nTotal := nTotal + 10;
+ELSE
+nTotal := 0;
+END_CASE END_IF END_FOR END_IF ]]></ST> </Implementation> </POU> </TcPlcObject>

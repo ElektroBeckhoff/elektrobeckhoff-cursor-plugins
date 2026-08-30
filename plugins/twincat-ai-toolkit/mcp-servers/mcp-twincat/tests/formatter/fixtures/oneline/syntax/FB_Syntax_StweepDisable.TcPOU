@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_StweepDisable" Id="{c4547a05-dd71-43d1-afc7-284783fab01a}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_StweepDisable var nA : INT; nB      : int; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[nA := 1;
+
+
+{stweep.disable}
+nA := 99;
+nB := 88;
+{stweep.enable}
+(* @stweep.disable *)
+nA := 77;
+(* @stweep.enable *)
+
+
+nB := 2;
+]]></ST>
+</Implementation>
+</POU>
+</TcPlcObject>

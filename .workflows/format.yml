@@ -1,0 +1,91 @@
+# Copy to: <library-repo>/.github/workflows/format.yml
+#
+# Zero-change behavior (verified):
+#   - Formatter compares SHA-256 before write; unchanged files are not written.
+#   - CLI exits 0; summary e.g. "692 files checked, 692 unchanged".
+#   - git add "${LIB_INPUT}" + git diff --cached --quiet → no commit, job succeeds.
+
+name: Format (workflows file only)
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - '**/*.TcPOU'
+      - '**/*.TcDUT'
+      - '**/*.TcGVL'
+      - '**/*.TcIO'
+      - '.github/workflows/format.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-push-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  format-code:
+    runs-on: ubuntu-latest
+
+    env:
+      TOOLKIT_REPO: ElektroBeckhoff/elektrobeckhoff-cursor-plugins
+      TOOLKIT_REF: main
+      TOOLKIT_ROOT: toolkit/plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+
+    steps:
+      - name: Checkout aktuelles Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout TwinCAT AI Toolkit (formatter source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TOOLKIT_REPO }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: toolkit
+          sparse-checkout: |
+            plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat/formatter
+          sparse-checkout-cone-mode: true
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Repo-Pfade setzen
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "REPO_NAME=${REPO_NAME}" >> "$GITHUB_ENV"
+          echo "LIB_INPUT=${REPO_NAME}/${REPO_NAME}" >> "$GITHUB_ENV"
+          echo "Solution input: ${REPO_NAME}/${REPO_NAME}"
+
+      - name: Format ausführen
+        env:
+          PYTHONPATH: ${{ github.workspace }}/${{ env.TOOLKIT_ROOT }}
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pyc
+        run: |
+          set -euo pipefail
+          test -d "${LIB_INPUT}" || {
+            echo "ERROR: Solution folder not found: ${LIB_INPUT}"
+            ls -la
+            exit 1
+          }
+          python -B -m formatter "${LIB_INPUT}" --recursive
+
+      - name: Änderungen committen & pushen
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A -- "${LIB_INPUT}"
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen – nichts zu committen."
+            exit 0
+          fi
+
+          git commit -m "Format: update sources in '${LIB_INPUT}' (run ${{ github.run_number }}) [skip ci]"
+          git pull --rebase
+          git push

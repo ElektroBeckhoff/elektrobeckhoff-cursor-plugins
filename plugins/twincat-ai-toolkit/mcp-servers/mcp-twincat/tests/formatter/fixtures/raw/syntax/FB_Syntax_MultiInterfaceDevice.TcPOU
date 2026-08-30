@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_MultiInterfaceDevice" Id="{8cb04f98-bce6-427f-94ad-73a7aa9cfb42}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_MultiInterfaceDevice IMPLEMENTS I_Syntax_AdvancedDevice, I_Syntax_Widget
+VAR
+    _bRunning   : BOOL;
+    _stConfig   : ST_Syntax_ComplexTree;
+    _nErrCode   : DINT;
+    _sDevName   : STRING(80);
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[;
+]]></ST>
+    </Implementation>
+    <Method Name="FB_init" Id="{01bbffdc-7377-4c7b-bbf7-9f4c39dc0d1c}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+    bInitRetains : BOOL;
+    bInCopyCode  : BOOL;
+    sInitialName : STRING(80);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sDevName := sInitialName;
+FB_init   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FB_exit" Id="{887c71e8-7828-4442-9b2f-2f63854eb053}">
+      <Declaration><![CDATA[METHOD FB_exit : BOOL
+VAR_INPUT
+    bInCopyCode : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_bRunning := FALSE;
+FB_exit   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Configure" Id="{62b534ca-8798-469b-9860-fc3a51fef901}">
+      <Declaration><![CDATA[METHOD M_Configure : BOOL
+VAR_INPUT
+    stConfig : ST_Syntax_ComplexTree;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_stConfig   := stConfig;
+M_Configure := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_GetDiagnostics" Id="{900fc925-5d9c-4547-8a43-cf85347ffc64}">
+      <Declaration><![CDATA[METHOD M_GetDiagnostics : STRING(255)
+VAR_OUTPUT
+    nErrorCode : DINT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[nErrorCode       := _nErrCode;
+M_GetDiagnostics := 'Device OK';
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_GetValue" Id="{e6211874-883f-4279-b14e-030a21074fa8}">
+      <Declaration><![CDATA[METHOD M_GetValue : INT
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_GetValue := 42;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Init" Id="{728c7c91-d522-4a0b-9c71-33758b29352e}">
+      <Declaration><![CDATA[METHOD M_Init : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_Init := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Start" Id="{3a0a3821-4f30-4be6-8e11-e2e01dfd60e7}">
+      <Declaration><![CDATA[METHOD M_Start : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_bRunning := TRUE;
+M_Start   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stop" Id="{35dcfd25-9f5b-4c07-b397-bb78252ea93e}">
+      <Declaration><![CDATA[METHOD M_Stop : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_bRunning := FALSE;
+M_Stop    := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_IsRunning" Id="{b9788f41-0dc5-46ff-a5b6-79cfb721869e}">
+      <Declaration><![CDATA[PROPERTY P_IsRunning : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{f5d94716-e4d0-424b-ad34-6dbfa16e9102}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_IsRunning := _bRunning;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_Name" Id="{2154926d-de2c-40ee-a734-5322b86599f2}">
+      <Declaration><![CDATA[PROPERTY P_Name : STRING
+]]></Declaration>
+      <Get Name="Get" Id="{53c63b8c-93ba-46e3-aa7b-f567464634ad}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_Name := _sDevName;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

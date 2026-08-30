@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_WidgetBase" Id="{a3e34305-39bd-401e-826d-695855db68cd}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sample_WidgetBase IMPLEMENTS I_Sample_WidgetInterface
+VAR
+    _sAdsPath : STRING(255);
+    _sAttr1   : STRING(80);
+    _nCalls   : UDINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[;
+]]></ST>
+    </Implementation>
+    <Method Name="BuildAttributes" Id="{aa5156df-01bb-4d37-922f-796bfdfe7723}">
+      <Declaration><![CDATA[METHOD BuildAttributes : UDINT
+VAR_INPUT
+    nFlags : DWORD;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nCalls         := _nCalls + 1;
+BuildAttributes := _nCalls;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessCommand" Id="{6dc72b73-e4a9-4566-a0d8-547e4e44192e}">
+      <Declaration><![CDATA[METHOD ProcessCommand : BOOL
+VAR_INPUT
+    nCommandId : DINT;
+    fValue     : LREAL;
+END_VAR
+VAR_OUTPUT
+    bHandled   : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nCommandId = 1 THEN
+    bHandled       := TRUE;
+    ProcessCommand := TRUE;
+ELSE
+    bHandled       := FALSE;
+    ProcessCommand := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="AdsPath" Id="{f02b1906-9272-490d-9c35-9ea74e3ca803}">
+      <Declaration><![CDATA[PROPERTY AdsPath : STRING(255)
+]]></Declaration>
+      <Get Name="Get" Id="{2f2fa5e8-af38-42a5-a3a2-ed1338544c1a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[AdsPath := _sAdsPath;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="AttributeVariable1" Id="{3188c954-2131-4fa7-bb18-e4dad809d8c5}">
+      <Declaration><![CDATA[PROPERTY AttributeVariable1 : STRING(80)
+]]></Declaration>
+      <Get Name="Get" Id="{ef8501fa-ed4c-416a-8ffa-d9055c9e3ddc}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[AttributeVariable1 := _sAttr1;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{1c780ff0-aa58-4e3d-98aa-7bef5cc9a12a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_sAttr1 := AttributeVariable1;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <GVL Name="GVL_Sample_ShadingConfig" Id="{44994860-e766-4c02-8a2f-f3a30c707fc0}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL CONSTANT
+    cMaxFacadeZones        : INT   := 4;
+    fDefaultSunBlindAngle  : REAL  := 45.0;
+    fDefaultThresholdLux   : REAL  := 25000.0;
+    tDefaultTrackingPeriod : TIME  := T#1M;
+    bEnableAutoCalibration : BOOL  := TRUE;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="U_Syntax_MultiWordUnion" Id="{47d38b5a-cd4c-4a7c-b852-c0b91602a741}"> <Declaration><![CDATA[TYPE U_Syntax_MultiWordUnion : UNION nLWord    : LWORD; arrDWords : ARRAY[0..1] OF DWORD; arrWords  : ARRAY[0..3] OF WORD; arrBytes  : ARRAY[0..7] OF BYTE; END_UNION END_TYPE
+]]></Declaration> </DUT> </TcPlcObject>

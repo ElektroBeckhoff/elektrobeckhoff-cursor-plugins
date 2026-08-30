@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_Expressions" Id="{ea3aaa55-e829-4d95-8df9-0a4eaa4fcf2b}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_Expressions var nA    : int; nB : int; fR    : real; bFlag     : bool; sText : string; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[nA    := 1 + 2 * 3;
+nB    := (nA mod 4) + SHL(nA, 1);
+bFlag := (nA = nB) or (nA <> 0) and (nB >= 0);
+fR    := INT_TO_REAL(nA) / 2.0;
+sText := CONCAT('prefix_', INT_TO_STRING(nB));
+
+
+if bFlag xor false then
+nA := nA + 1;
+end_if ]]></ST> </Implementation> </POU> </TcPlcObject>

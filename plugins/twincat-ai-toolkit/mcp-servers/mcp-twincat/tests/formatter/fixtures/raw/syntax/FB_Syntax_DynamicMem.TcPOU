@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_DynamicMem" Id="{8dbdec44-c546-45af-a72b-f79993753434}" SpecialFunc="None">
+    <Declaration><![CDATA[function_block FB_Syntax_DynamicMem  
+var
+    pDyn   : pointer to ST_Syntax_Dyn;  
+    bNew    : bool := true;  
+    bDelete       : bool;  
+end_var  ]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[if bNew AND (pDyn = 0) then  
+    pDyn := __NEW(ST_Syntax_Dyn);  
+    bNew := false;  
+end_if  
+
+
+if bDelete then
+    __DELETE(pDyn);  
+    bDelete := false;  
+end_if  
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

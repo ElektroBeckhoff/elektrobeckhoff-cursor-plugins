@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="F_Syntax_GenericAny" Id="{e8111932-b7b5-4bfe-9892-d6aa4687d7b1}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION F_Syntax_GenericAny : BOOL
+VAR_INPUT
+    anyParam : ANY;
+END_VAR
+VAR
+    pByte : POINTER TO BYTE;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF anyParam.typeclass = __SYSTEM.TYPE_CLASS.TYPE_INT THEN
+    pByte := anyParam.pValue;
+    F_Syntax_GenericAny := (pByte <> 0);
+ELSE
+    F_Syntax_GenericAny := FALSE;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

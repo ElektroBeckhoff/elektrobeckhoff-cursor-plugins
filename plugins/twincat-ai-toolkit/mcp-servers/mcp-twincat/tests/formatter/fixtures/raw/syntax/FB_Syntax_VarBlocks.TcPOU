@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_VarBlocks" Id="{eee8e357-a8be-486a-9fc5-4058ba59f576}" SpecialFunc="None">
+    <Declaration><![CDATA[function_block FB_Syntax_VarBlocks  
+var constant  
+    cMaxCount : int := 10;  
+END_VAR  
+var_stat  
+    _nCalls : udint;  
+end_var  
+VAR_TEMP  
+    nScratch : int;
+end_var  
+var  
+    _bInit : bool;  
+end_var]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[if not _bInit then  
+    _nCalls := 0;
+    _bInit  := true;  
+end_if  
+
+
+_nCalls  := _nCalls + 1;
+nScratch := cMaxCount;  
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

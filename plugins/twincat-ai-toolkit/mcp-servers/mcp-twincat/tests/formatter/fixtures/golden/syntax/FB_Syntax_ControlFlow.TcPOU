@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ControlFlow" Id="{17e0787b-42d0-491b-b1be-62d0114ac7b5}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_ControlFlow
+VAR_INPUT
+    bEnable : BOOL;
+    nMode   : INT;
+    nValue  : INT;
+END_VAR
+VAR
+    _nStep : INT;
+    _bDone : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF bEnable AND NOT _bDone THEN
+    CASE nMode OF
+        0:
+            nValue := nValue + 1;
+        1:
+            nValue := nValue - 1;
+    ELSE
+        nValue := 0;
+    END_CASE
+
+    FOR _nStep := 1 TO 10 BY 2 DO
+        IF nValue > 100 THEN
+            EXIT;
+        END_IF
+    END_FOR
+
+    WHILE nValue > 0 DO
+        nValue := nValue - 1;
+    END_WHILE
+
+    REPEAT
+        nValue := nValue + 1;
+    UNTIL nValue >= 5
+    END_REPEAT
+
+    _bDone := TRUE;
+ELSIF NOT bEnable THEN
+    _bDone := FALSE;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="F_Syntax_Return" Id="{eb62f1ad-9919-4bda-95c5-95a3d80c402b}" SpecialFunc="None">
+    <Declaration><![CDATA[function F_Syntax_Return : bool  
+var_input  
+    nValue : int;  
+end_var  
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[if nValue < 0 then  
+    F_Syntax_Return := false;
+    return;  
+end_if  
+
+
+F_Syntax_Return := nValue > 0;  
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

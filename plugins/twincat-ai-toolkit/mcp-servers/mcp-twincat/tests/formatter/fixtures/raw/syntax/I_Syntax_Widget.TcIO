@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Syntax_Widget" Id="{82848a68-ef61-408e-ac30-65608590b957}">
+    <Declaration><![CDATA[INTERFACE I_Syntax_Widget EXTENDS __System.IQueryInterface
+]]></Declaration>
+    <Method Name="M_GetValue" Id="{78409f0b-e366-4d15-9455-6f500c60c8d8}">
+      <Declaration><![CDATA[method M_GetValue : int
+]]></Declaration>
+    </Method>
+    <Method Name="M_Init" Id="{5899f78d-24ab-4969-b34b-894490a47980}">
+      <Declaration><![CDATA[method M_Init : bool
+]]></Declaration>
+    </Method>
+    <Property Name="P_Name" Id="{2154926d-de2c-40ee-a734-5322b86599f2}">
+      <Declaration><![CDATA[property P_Name : string
+]]></Declaration>
+      <Get Name="Get" Id="{53c63b8c-93ba-46e3-aa7b-f567464634ad}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+  </Itf>
+</TcPlcObject>

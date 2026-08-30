@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <GVL Name="GVL_Syntax_Global" Id="{f85e7ddd-6af3-415f-b7ca-7d94f9a52f74}"> <Declaration><![CDATA[var_global constant cTimeout : TIME := T#5S; end_var var_global retain nBootCount    : udint; end_var
+]]></Declaration> </GVL> </TcPlcObject>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <GVL Name="GVL_Syntax_Config" Id="{c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_CONFIG
+    MAIN.fbMotor.bEnable AT %QX0.0 : BOOL;
+    MAIN.fbMotor.nSpeed  AT %QW2   : INT;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_AssignAlignmentHeuristics" Id="{f5c73001-c184-4132-b889-b189554178aa}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_AssignAlignmentHeuristics
+VAR
+    stDeviceControl : ST_Syntax_Mini;
+    bCmdA           : BOOL;
+    bCmdB           : BOOL;
+    bCmdC           : BOOL;
+    nShort          : INT;
+    nVeryLongVariableNameForAlignment : DINT;
+    nOther          : DINT;
+    nIdx            : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. Chained assignments
+bCmdA := bCmdB := FALSE;
+bCmdA := bCmdB := TRUE;
+
+
+// 2. 3-line qualified assignment group with same base variable
+stDeviceControl.nId := 10;
+stDeviceControl.bActive := TRUE;
+stDeviceControl.sName := 'DeviceMain';
+
+
+// 3. Simple assignment group alignment
+nShort := 1;
+nVeryLongVariableNameForAlignment := 200;
+nOther := 3;
+
+
+// 4. FOR-loop assignment alignment
+FOR nIdx := 1 TO 5 DO
+    stDeviceControl.nId := nIdx;
+    stDeviceControl.bActive := FALSE;
+END_FOR
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

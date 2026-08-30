@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ConditionalCompile" Id="{9b4230a4-288c-47e8-b242-cf02e486d584}" SpecialFunc="None">
+    <Declaration><![CDATA[function_block FB_Syntax_ConditionalCompile  
+var  
+    nValue : int;  
+{IF defined(pou: FB_Syntax_ConditionalCompile)}  
+    bFeature : bool;  
+{ELSE}
+    nLegacy : int;  
+{END_IF}  
+end_var  
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[{IF defined(pou: FB_Syntax_ConditionalCompile)}  
+nValue := 1;
+{ELSE}  
+nValue := 2;
+{END_IF}  
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

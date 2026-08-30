@@ -1,0 +1,1015 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_BatchRecipeExecutionEngine" Id="{6f7d985a-c1eb-4b59-972f-38403d125c2b}" SpecialFunc="None">
+    <Declaration><![CDATA[(*******************************************************************************
+ * POU Name:    FB_Sample_BatchRecipeExecutionEngine
+ * Description: Massive multi-stage chemical & pharmaceutical batch recipe 
+ *              execution engine featuring 16-state sequential control,
+ *              non-linear thermodynamics, adaptive dosing integration,
+ *              tolerance checking matrices, multidimensional arrays,
+ *              audit trails, methods, actions, and properties.
+ *******************************************************************************)
+{attribute 'reflection'}
+{attribute 'no_explicit_call' := 'Run cyclic supervisor via instance call'}
+FUNCTION_BLOCK FB_Sample_BatchRecipeExecutionEngine
+VAR_INPUT
+    bMasterEnable            : BOOL := FALSE;                       (* Master supervisor enable *)
+    bStartBatchCommand       : BOOL := FALSE;                       (* Initiate new batch processing cycle *)
+    bHoldBatchCommand        : BOOL := FALSE;                       (* Pause active processing stage *)
+    bResumeBatchCommand      : BOOL := FALSE;                       (* Resume held processing stage *)
+    bAbortBatchCommand       : BOOL := FALSE;                       (* Immediate emergency batch abort *)
+    bAcknowledgeAlarms       : BOOL := FALSE;                       (* Alarm acknowledgment pulse *)
+    bManualOverrideActive    : BOOL := FALSE;                       (* Manual override permit *)
+    bSanitizationBypass      : BOOL := FALSE;                       (* Maintenance CIP bypass mode *)
+    nSelectedRecipeId        : DINT := 101;                         (* Target recipe identifier [100..999] *)
+    nTargetBatchUnits        : UDINT := 500;                        (* Target units to produce in current run *)
+    nProductionPriorityLevel : INT := 2;                            (* 1=Low, 2=Standard, 3=Urgent, 4=Critical *)
+    fTargetVolume_L          : LREAL := 2500.0;                     (* Main reactor target liquid volume [L] *)
+    fTargetTemperature_C     : LREAL := 68.5;                       (* Target reaction temperature in [C] *)
+    fAgitatorSetpoint_RPM    : REAL := 320.0;                       (* Active mixing speed setpoint [RPM] *)
+    fPressureCeiling_Bar     : LREAL := 4.2;                        (* Maximum reactor overpressure limit [Bar] *)
+    fMinimumViscosityThreshold : REAL := 0.85;                      (* Lowest fluid viscosity allowed *)
+    tMaxDosingDuration       : TIME := T#45S;                       (* Maximum allowable dosing timeout *)
+    tThermalHoldDuration     : TIME := T#2M30S;                     (* Reaction soak duration *)
+    tSamplingInterval        : TIME := T#200MS;                     (* Telemetry acquisition tick *)
+    tDegasDwellTime          : TIME := T#15S;                       (* De-aeration dwell duration *)
+    sBatchSerialNumber       : STRING(80) := 'BATCH-2026-CH-9941'; (* Serialized tracking code *)
+    arrStageTolerances       : ARRAY[1..6] OF REAL := [0.01, 0.02, 0.05, 0.08, 0.10, 0.15];
+END_VAR
+VAR_OUTPUT
+    bBatchInExecution        : BOOL;                                (* TRUE when recipe sequence is progressing *)
+    bBatchPausedInHold       : BOOL;                                (* TRUE when batch is paused in safe hold *)
+    bBatchSuccessfullyDone   : BOOL;                                (* Set high on successful recipe cycle end *)
+    bCriticalAlarmTripped    : BOOL;                                (* High on active alarm / shutdown trip *)
+    bReactorAgitatorInterlock: BOOL;                                (* Safety interlock status for agitator motor *)
+    bVesselVentingActive     : BOOL;                                (* Relief valve opened status *)
+    eCurrentBatchPhase       : INT;                                 (* 0=Idle, 10=PreCheck, 20=Dosing, 30=Agitation... *)
+    nActiveStepNumber        : INT;                                 (* Internal sub-sequence execution step *)
+    nCompletedBatchCount     : UDINT;                               (* Lifetime completed batch counter *)
+    fActualLiquidVolume_L    : LREAL;                               (* Current measured liquid volume [L] *)
+    fActualTemperature_C     : LREAL;                               (* Current core reaction temperature [C] *)
+    fActualPressure_Bar      : LREAL;                               (* Measured internal headspace pressure [Bar] *)
+    fActualAgitatorSpeed_RPM : REAL;                                (* Tachometer feedback from agitator shaft *)
+    fReactionYieldPercent    : REAL;                                (* Calculated chemical conversion yield % *)
+    fProcessThermalDuty_kW   : LREAL;                               (* Computed thermal heating/cooling power *)
+    fEstimatedViscosity_cP   : REAL;                                (* Dynamic viscosity estimator *)
+    nSystemErrorCode         : UDINT;                               (* 0=OK, 16#E101=Overpressure, 16#E102=ThermalRunaway *)
+    sDetailedStatusMessage   : STRING(255);                         (* Operator readable diagnostic line *)
+    tElapsedTimeInActiveStep : TIME;                                (* Step execution stopwatch *)
+END_VAR
+VAR_IN_OUT
+    stDiagnostics            : ST_Sample_DiagnosticsStruct;         (* Shared plant diagnostic bus *)
+END_VAR
+VAR
+    // --- 1. Subordinate Function Blocks and Timers ---
+    _fbSubController         : FB_Sample_StateMachineController;
+    _fbTelemetryRingBuffer   : FB_Sample_DataRingBuffer;
+    _fbRTrigStart            : R_TRIG;
+    _fbRTrigHold             : R_TRIG;
+    _fbRTrigResume           : R_TRIG;
+    _fbRTrigAbort            : R_TRIG;
+    _fbRTrigAckAlarms        : R_TRIG;
+    _fbTonStepWatchdog       : TON;
+    _fbTonSamplingTicker     : TON;
+    _fbTonThermalSoakTimer   : TON;
+    _fbTonPurgeSafetyTimer   : TON;
+    _fbTonDegasDwellTimer    : TON;
+    _fbTonAgitatorRampTimer  : TON;
+
+    // --- 2. State Machine Engine Registers ---
+    _nMasterState            : INT := 0;                            (* Master batch sequencer index *)
+    _nPreviousState          : INT := 0;                            (* Prior state before hold / interrupt *)
+    _nSubStateStep           : INT := 0;                            (* Secondary sub-state counter *)
+    _nRetryCounter           : INT := 0;                            (* Retry attempt accumulator *)
+    _nActiveRecipeIndex      : INT := 1;                            (* Recipe table row selector *)
+    _bHoldLatchActive        : BOOL;                                (* Hold condition latch *)
+    _bEmergencyDumpActive    : BOOL;                                (* Emergency dump valve trigger *)
+    _bThermalRunawayDetected : BOOL;                                (* Exotherm anomaly detected *)
+
+    // --- 3. Thermodynamic and Kinematic Process Variables ---
+    _fIntegratedMassFlow_kg  : LREAL;                               (* Dosed material mass accumulator *)
+    _fHeatExchangerDeltaT_K  : LREAL;                               (* Jacket-to-core temperature difference *)
+    _fThermalConductivity    : REAL := 0.58;                        (* Media thermal conductivity [W/mK] *)
+    _fPID_IntegralAccum      : LREAL;                               (* Internal thermal PID accumulator *)
+    _fPID_DerivativePrevErr  : LREAL;                               (* Previous cycle thermal error *)
+    _fPeakObservedPressure   : LREAL := 0.0;                        (* Maximum recorded headspace pressure *)
+    _fCumulativeThermalEnergy: LREAL := 0.0;                        (* Total Joules absorbed by batch *)
+
+    // --- 4. Matrices, Lookups, and Recipe Buffers ---
+    _arrRecipeMatrix         : ARRAY[1..4, 1..6] OF LREAL := [
+        100.0, 25.0, 50.0, 1.0, 5.0, 0.01,
+        250.0, 45.0, 120.0, 2.5, 10.0, 0.02,
+        500.0, 68.5, 320.0, 4.2, 15.0, 0.05,
+        1000.0, 85.0, 450.0, 6.0, 25.0, 0.08
+    ];
+    _arrDosingComponentFlows : ARRAY[1..5] OF LREAL := [12.5, 8.4, 3.2, 1.1, 0.5];
+    _arrQualityVarianceLog   : ARRAY[1..8] OF REAL := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    _arrRawTelemetryLog      : ARRAY[1..16] OF LREAL;
+    _arrCalibrationOffsets   : ARRAY[1..4] OF LREAL := [0.0, 0.0, 0.0, 0.0];
+
+    // --- 5. Internal Strings and Diagnostic Text ---
+    _sActiveStepName         : STRING(80) := 'IDLE_STANDBY';
+    _sRecipeTitle            : STRING(80) := 'DEFAULT_SYNTHESIS_RECIPE';
+    _sAuditTrailLatest       : STRING(255);
+    _sOperatorNotes          : STRING(80) := 'NO_OPERATOR_OVERRIDE_ACTIVE';
+END_VAR
+VAR_TEMP
+    _nTempLoopIdxA           : INT;
+    _nTempLoopIdxB           : INT;
+    _nTempArrayScan          : INT;
+    _fTempMassSum            : LREAL;
+    _fTempEnergyJoules       : LREAL;
+    _fTempErrorDelta         : LREAL;
+    _fTempCorrectionFactor   : REAL;
+    _bTempConditionMet       : BOOL;
+    _bTempSafetyInterlockOk  : BOOL;
+END_VAR
+VAR CONSTANT
+    cMaxAllowedPressure_Bar  : LREAL := 7.5;
+    cMaxAllowedTemp_C        : LREAL := 115.0;
+    cMinimumAgitationSpeed   : REAL := 50.0;
+    cSpecificHeatCapacity    : LREAL := 4186.0;                    (* Water equivalent J/(kg*K) *)
+    cGravitationalAccel      : LREAL := 9.80665;
+    cAtmosphericPressure_Bar : LREAL := 1.01325;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================================
+// 1. EVALUATE HARDWARE INPUT TRIGGERS & SAFETY INTERLOCKS
+// =============================================================================
+{region "Safety Interlock and Signal Ingestion"}
+_fbRTrigStart(CLK := bStartBatchCommand);
+_fbRTrigHold(CLK := bHoldBatchCommand);
+_fbRTrigResume(CLK := bResumeBatchCommand);
+_fbRTrigAbort(CLK := bAbortBatchCommand);
+_fbRTrigAckAlarms(CLK := bAcknowledgeAlarms);
+
+// Reset alarm latch on acknowledgment
+IF _fbRTrigAckAlarms.Q THEN
+    bCriticalAlarmTripped := FALSE;
+    nSystemErrorCode      := 0;
+    sDetailedStatusMessage:= 'Alarms cleared by operator acknowledgment.';
+END_IF
+
+// Emergency abort always forces state to safety shutdown
+IF _fbRTrigAbort.Q OR (bMasterEnable = FALSE AND _nMasterState > 0) THEN
+    _nMasterState       := 900; // Emergency Shutdown & Depressurize
+    _bEmergencyDumpActive:= TRUE;
+    sDetailedStatusMessage:= 'EMERGENCY ABORT TRIGGERED - Depressurizing reactor.';
+END_IF
+
+// Cyclic Step Watchdog Timer
+_fbTonStepWatchdog(IN := (_nMasterState > 0 AND _nMasterState < 800), PT := tMaxDosingDuration);
+
+IF _fbTonStepWatchdog.Q AND NOT bCriticalAlarmTripped THEN
+    bCriticalAlarmTripped := TRUE;
+    nSystemErrorCode      := 16#E001; // Step timeout fault
+    sDetailedStatusMessage:= 'CRITICAL FAULT: Active process step exceeded maximum watchdog duration.';
+    _nMasterState         := 800;     // Fault Hold
+END_IF
+
+// Cyclic Telemetry Sampler Ticker
+_fbTonSamplingTicker(IN := NOT _fbTonSamplingTicker.Q, PT := tSamplingInterval);
+
+IF _fbTonSamplingTicker.Q AND bMasterEnable THEN
+    _fbTelemetryRingBuffer.M_Push(fValue := fActualTemperature_C);
+    A_UpdateSensorAggregations();
+END_IF
+
+// Track peak pressure observed during batch
+IF fActualPressure_Bar > _fPeakObservedPressure THEN
+    _fPeakObservedPressure := fActualPressure_Bar;
+END_IF
+
+// Safety interlock check for agitator motor
+A_CheckSafetyInterlocks();
+{endregion}
+
+// =============================================================================
+// 2. MASTER RECIPE EXECUTION SEQUENCER (16-STATE ENGINE)
+// =============================================================================
+CASE _nMasterState OF
+
+    0:
+        // STATE 0: IDLE STANDBY
+        _sActiveStepName         := 'IDLE_STANDBY';
+        bBatchInExecution        := FALSE;
+        bBatchPausedInHold       := FALSE;
+        bBatchSuccessfullyDone   := FALSE;
+        _bHoldLatchActive        := FALSE;
+        _bThermalRunawayDetected := FALSE;
+        _nSubStateStep           := 0;
+        _nRetryCounter           := 0;
+        fActualAgitatorSpeed_RPM := 0.0;
+        fProcessThermalDuty_kW   := 0.0;
+
+        IF _fbRTrigStart.Q AND bMasterEnable AND NOT bCriticalAlarmTripped THEN
+            IF nSelectedRecipeId >= 100 AND_THEN nSelectedRecipeId <= 999 THEN
+                _bTempSafetyInterlockOk := TRUE;
+                A_PerformSanityDiagnostics();
+                
+                IF _bTempSafetyInterlockOk THEN
+                    _nMasterState     := 10; // Proceed to Recipe Ingestion & PreCheck
+                    bBatchInExecution := TRUE;
+                    sDetailedStatusMessage := 'Batch cycle initiated. Verifying recipe parameters...';
+                ELSE
+                    nSystemErrorCode := 16#E010;
+                    sDetailedStatusMessage := 'Cannot start batch: Pre-startup safety diagnostics failed.';
+                END_IF
+            ELSE
+                nSystemErrorCode := 16#E011;
+                sDetailedStatusMessage := 'Cannot start batch: Invalid Recipe ID provided.';
+            END_IF
+        END_IF
+
+    10:
+        // STATE 10: RECIPE INGESTION & MATRIX LOOKUP
+        _sActiveStepName := 'RECIPE_INGESTION_AND_PRECHECK';
+        _nSubStateStep   := 1;
+
+        _bTempConditionMet := M_LoadRecipeParameters(nRecipeId := nSelectedRecipeId);
+
+        IF _bTempConditionMet THEN
+            _fIntegratedMassFlow_kg := 0.0;
+            _fPID_IntegralAccum     := 0.0;
+            _fPID_DerivativePrevErr := 0.0;
+            _fCumulativeThermalEnergy:= 0.0;
+            _fPeakObservedPressure  := cAtmosphericPressure_Bar;
+            fActualLiquidVolume_L   := 50.0; // Residual tare volume
+            fActualTemperature_C    := 22.0; // Ambient starting temp
+            fActualPressure_Bar     := cAtmosphericPressure_Bar;
+            _nMasterState           := 20;   // Advance to Inert Gas Purging
+            sDetailedStatusMessage  := 'Recipe loaded successfully. Initiating nitrogen purge.';
+        ELSE
+            nSystemErrorCode := 16#E020;
+            sDetailedStatusMessage := 'Recipe loading failed: Incompatible parameter constraints.';
+            _nMasterState    := 800; // Fault state
+        END_IF
+
+    20:
+        // STATE 20: INERT GAS PURGE & OXYGEN DISPLACEMENT
+        _sActiveStepName := 'NITROGEN_INERT_PURGE';
+        _nSubStateStep   := 2;
+
+        _fbTonPurgeSafetyTimer(IN := TRUE, PT := T#3S);
+
+        IF _fbTonPurgeSafetyTimer.Q THEN
+            _fbTonPurgeSafetyTimer(IN := FALSE);
+            _nMasterState          := 30; // Advance to Liquid Pre-Dosing
+            sDetailedStatusMessage := 'Purge cycle complete. Commencing raw material dosing.';
+        END_IF
+
+    30:
+        // STATE 30: RAW MATERIAL LIQUID DOSING
+        _sActiveStepName := 'RAW_MATERIAL_DOSING';
+        _nSubStateStep   := 3;
+
+        // Check for hold request
+        IF _fbRTrigHold.Q THEN
+            _nPreviousState := 30;
+            _nMasterState   := 700; // Pause in safe hold
+        ELSE
+            _bTempConditionMet := M_ExecuteDosingSequence(fTargetVol := fTargetVolume_L, fCurrentVol := fActualLiquidVolume_L, arrFlowRates := _arrDosingComponentFlows);
+
+            IF _bTempConditionMet THEN
+                _nMasterState          := 35; // Advance to De-Aeration Dwell
+                sDetailedStatusMessage := 'Dosing complete. Commencing de-aeration dwell.';
+            ELSIF fActualPressure_Bar > fPressureCeiling_Bar THEN
+                nSystemErrorCode := 16#E030;
+                sDetailedStatusMessage := 'Overpressure condition detected during liquid dosing!';
+                _nMasterState    := 800;
+            END_IF
+        END_IF
+
+    35:
+        // STATE 35: DE-AERATION & HEADSPACE STABILIZATION
+        _sActiveStepName := 'DE_AERATION_HEADSPACE_DWELL';
+        _nSubStateStep   := 4;
+
+        _fbTonDegasDwellTimer(IN := TRUE, PT := tDegasDwellTime);
+
+        IF _fbTonDegasDwellTimer.Q THEN
+            _fbTonDegasDwellTimer(IN := FALSE);
+            _nMasterState          := 40; // Advance to Agitation Ramp
+            sDetailedStatusMessage := 'De-aeration complete. Commencing agitator speed ramp.';
+        END_IF
+
+    40:
+        // STATE 40: AGITATION ACCELERATION & VISCOSITY ADAPTATION
+        _sActiveStepName := 'AGITATION_SPEED_RAMP';
+        _nSubStateStep   := 5;
+
+        IF fActualAgitatorSpeed_RPM < fAgitatorSetpoint_RPM THEN
+            fActualAgitatorSpeed_RPM := fActualAgitatorSpeed_RPM + 15.0;
+            IF fActualAgitatorSpeed_RPM > fAgitatorSetpoint_RPM THEN
+                fActualAgitatorSpeed_RPM := fAgitatorSetpoint_RPM;
+            END_IF
+        END_IF
+
+        fEstimatedViscosity_cP := M_CalculateDynamicViscosity(fTemperature := fActualTemperature_C, fAgitationRPM := fActualAgitatorSpeed_RPM);
+
+        IF fActualAgitatorSpeed_RPM >= fAgitatorSetpoint_RPM THEN
+            _nMasterState          := 50; // Advance to Thermal Ramp & Reaction
+            sDetailedStatusMessage := 'Agitator at target speed. Engaging heating jacket.';
+        END_IF
+
+    50:
+        // STATE 50: THERMAL HEATING RAMP & TEMPERATURE SOAK
+        _sActiveStepName := 'THERMAL_HEATING_RAMP';
+        _nSubStateStep   := 6;
+
+        M_RegulateThermalEquilibrium(fTargetTemp := fTargetTemperature_C, fCoreTemp := fActualTemperature_C, fJacketDeltaT := _fHeatExchangerDeltaT_K, fDutyOutput => fProcessThermalDuty_kW);
+
+        // Check if temperature reached thermal equilibrium band
+        IF ABS(fActualTemperature_C - fTargetTemperature_C) <= 0.75 THEN
+            _fbTonThermalSoakTimer(IN := TRUE, PT := tThermalHoldDuration);
+            sDetailedStatusMessage := 'Thermal equilibrium reached. Maintaining reaction soak.';
+
+            IF _fbTonThermalSoakTimer.Q THEN
+                _fbTonThermalSoakTimer(IN := FALSE);
+                _nMasterState          := 60; // Advance to Quality Gate Evaluation
+                sDetailedStatusMessage := 'Reaction soak completed. Evaluating quality metrics.';
+            END_IF
+        ELSE
+            _fbTonThermalSoakTimer(IN := FALSE);
+        END_IF
+
+    60:
+        // STATE 60: QUALITY ASSURANCE & SPECTRAL DENSITY EVALUATION
+        _sActiveStepName := 'QUALITY_ASSURANCE_GATE';
+        _nSubStateStep   := 7;
+
+        _bTempConditionMet := M_MonitorQualityAssuranceGate(arrTolerances := arrStageTolerances, fYieldPercent => fReactionYieldPercent);
+
+        IF _bTempConditionMet AND fReactionYieldPercent >= 92.5 THEN
+            _nMasterState          := 70; // Advance to Product Cooling & Quench
+            sDetailedStatusMessage := 'Quality gate passed. Beginning controlled cooling quench.';
+        ELSE
+            IF _nRetryCounter < 2 THEN
+                _nRetryCounter := _nRetryCounter + 1;
+                _nMasterState  := 50; // Re-enter thermal soak to complete conversion
+                sDetailedStatusMessage := 'Quality gate borderline. Extending thermal conversion.';
+            ELSE
+                nSystemErrorCode := 16#E060;
+                sDetailedStatusMessage := 'Quality gate failed: Yield below minimum threshold.';
+                _nMasterState    := 800; // Fault hold
+            END_IF
+        END_IF
+
+    70:
+        // STATE 70: PRODUCT COOLING & THERMAL QUENCH
+        _sActiveStepName := 'CONTROLLED_PRODUCT_COOLING';
+        _nSubStateStep   := 8;
+
+        IF fActualTemperature_C > 30.0 THEN
+            fActualTemperature_C   := fActualTemperature_C - 2.5;
+            fProcessThermalDuty_kW := -35.0; // Active chilled cooling
+        ELSE
+            fProcessThermalDuty_kW := 0.0;
+            _nMasterState          := 80; // Advance to Discharge Sequence
+            sDetailedStatusMessage := 'Cooling complete. Ready for product discharge.';
+        END_IF
+
+    80:
+        // STATE 80: PRODUCT DISCHARGE SEQUENCE
+        _sActiveStepName := 'PRODUCT_DISCHARGE';
+        _nSubStateStep   := 9;
+
+        IF fActualLiquidVolume_L > 10.0 THEN
+            fActualLiquidVolume_L := fActualLiquidVolume_L - 85.0;
+            IF fActualLiquidVolume_L < 10.0 THEN
+                fActualLiquidVolume_L := 10.0;
+            END_IF
+        ELSE
+            IF bSanitizationBypass THEN
+                _nMasterState          := 100; // Skip CIP, jump to Completion
+                sDetailedStatusMessage := 'CIP bypass enabled. Finalizing batch audit log.';
+            ELSE
+                _nMasterState          := 90; // Advance to Clean-In-Place (CIP)
+                sDetailedStatusMessage := 'Discharge complete. Commencing CIP sanitation cycle.';
+            END_IF
+        END_IF
+
+    90:
+        // STATE 90: CLEAN-IN-PLACE (CIP) SANITATION SEQUENCE
+        _sActiveStepName := 'CLEAN_IN_PLACE_CIP';
+        _nSubStateStep   := 10;
+
+        // Sub-controller execution for wash sequence
+        _fbSubController(bStart := TRUE, bStop := FALSE, bReset := FALSE, tStepTimeout := T#4S);
+
+        IF _fbSubController.eCurrentState = 90 THEN
+            _fbSubController(bStart := FALSE, bStop := TRUE, bReset := TRUE);
+            _nMasterState          := 100; // Batch Completion
+            sDetailedStatusMessage := 'CIP cycle finished. Finalizing batch audit log.';
+        END_IF
+
+    100:
+        // STATE 100: BATCH COMPLETION & AUDIT GENERATION
+        _sActiveStepName       := 'BATCH_COMPLETED_SUCCESS';
+        bBatchInExecution      := FALSE;
+        bBatchSuccessfullyDone := TRUE;
+        nCompletedBatchCount   := nCompletedBatchCount + 1;
+        
+        M_GenerateAuditTrailSummary(sSerial := sBatchSerialNumber);
+        A_CalculateEnergyConsumption();
+
+        sDetailedStatusMessage := 'Batch process successfully finished with full audit compliance.';
+        _nMasterState          := 0; // Return to Standby
+
+    700:
+        // STATE 700: PAUSED IN SAFE HOLD
+        _sActiveStepName   := 'PAUSED_SAFE_HOLD';
+        bBatchPausedInHold := TRUE;
+        bBatchInExecution  := FALSE;
+        fProcessThermalDuty_kW := 0.0;
+
+        IF _fbRTrigResume.Q AND NOT bCriticalAlarmTripped THEN
+            bBatchPausedInHold := FALSE;
+            bBatchInExecution  := TRUE;
+            _nMasterState      := _nPreviousState;
+            sDetailedStatusMessage := 'Process resumed from operator hold.';
+        END_IF
+
+    800:
+        // STATE 800: FAULT STATE & ALARM TRIP
+        _sActiveStepName      := 'FAULT_ALARM_HOLD';
+        bCriticalAlarmTripped := TRUE;
+        bBatchInExecution     := FALSE;
+        fProcessThermalDuty_kW:= 0.0;
+        fActualAgitatorSpeed_RPM := 0.0;
+
+        IF _fbRTrigAckAlarms.Q AND nSystemErrorCode = 0 THEN
+            _nMasterState          := 0;
+            sDetailedStatusMessage := 'Fault state reset. Engine returned to idle.';
+        END_IF
+
+    900:
+        // STATE 900: EMERGENCY DEPRESSURIZE & DUMP
+        _sActiveStepName := 'EMERGENCY_DEPRESSURIZE_DUMP';
+        M_EmergencyDepressurizeAndDump();
+
+        IF fActualPressure_Bar <= 1.05 AND fActualLiquidVolume_L <= 5.0 THEN
+            _bEmergencyDumpActive  := FALSE;
+            _nMasterState          := 800; // Transition to Fault state
+            sDetailedStatusMessage := 'Emergency depressurization complete. Awaiting supervisor inspection.';
+        END_IF
+
+    ELSE
+        _nMasterState    := 800;
+        nSystemErrorCode := 16#E999;
+        sDetailedStatusMessage := 'FATAL: Unknown state machine index encountered.';
+END_CASE
+
+eCurrentBatchPhase := _nMasterState;
+nActiveStepNumber  := _nSubStateStep;
+]]></ST>
+    </Implementation>
+    <Method Name="M_LoadRecipeParameters" Id="{65418bfe-c17a-4874-af3b-2b96027f2901}">
+      <Declaration><![CDATA[METHOD M_LoadRecipeParameters : BOOL
+VAR_INPUT
+    nRecipeId : DINT;
+END_VAR
+VAR
+    _nRowIndex    : INT;
+    _nColIndex    : INT;
+    _fTargetMass  : LREAL;
+    _fDensityCorr : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nRecipeId < 100 OR nRecipeId > 999 THEN
+    M_LoadRecipeParameters := FALSE;
+    RETURN;
+END_IF
+
+// Multi-tier recipe row selection based on recipe identifier
+IF nRecipeId >= 100 AND nRecipeId < 200 THEN
+    _nRowIndex := 1;
+    _sRecipeTitle := 'STANDARD_ORGANIC_SYNTHESIS';
+ELSIF nRecipeId >= 200 AND nRecipeId < 400 THEN
+    _nRowIndex := 2;
+    _sRecipeTitle := 'HIGH_VISCOSITY_POLYMERIC_BLEND';
+ELSIF nRecipeId >= 400 AND nRecipeId < 700 THEN
+    _nRowIndex := 3;
+    _sRecipeTitle := 'EXOTHERMIC_CATALYTIC_REACTION';
+ELSE
+    _nRowIndex := 4;
+    _sRecipeTitle := 'SPECIALTY_PHARMACEUTICAL_BATCH';
+END_IF
+
+_nActiveRecipeIndex := _nRowIndex;
+
+// Extract recipe parameters from internal recipe matrix
+fTargetVolume_L      := _arrRecipeMatrix[_nRowIndex, 1];
+fTargetTemperature_C := _arrRecipeMatrix[_nRowIndex, 2];
+fAgitatorSetpoint_RPM:= TO_REAL(_arrRecipeMatrix[_nRowIndex, 3]);
+fPressureCeiling_Bar := _arrRecipeMatrix[_nRowIndex, 4];
+
+// Validate thermodynamic sanity
+IF fTargetTemperature_C > cMaxAllowedTemp_C OR_ELSE fPressureCeiling_Bar > cMaxAllowedPressure_Bar THEN
+    M_LoadRecipeParameters := FALSE;
+    RETURN;
+END_IF
+
+// Calculate predicted mass from volume and thermal expansion curve
+_fDensityCorr := 1.0 - (TO_REAL(fTargetTemperature_C - 20.0) * 0.00045);
+_fTargetMass  := fTargetVolume_L * TO_LREAL(_fDensityCorr);
+
+M_LoadRecipeParameters := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteDosingSequence" Id="{99efb28f-f628-455c-92dc-826c37451c83}">
+      <Declaration><![CDATA[METHOD M_ExecuteDosingSequence : BOOL
+VAR_INPUT
+    fTargetVol   : LREAL;
+    fCurrentVol  : LREAL;
+    arrFlowRates : ARRAY[1..5] OF LREAL;
+END_VAR
+VAR
+    _nCompIdx    : INT;
+    _fTotalFlow  : LREAL := 0.0;
+    _fIncrement  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fTargetVol <= 0.0 THEN
+    M_ExecuteDosingSequence := FALSE;
+    RETURN;
+END_IF
+
+// Aggregate flow rate contributions across all 5 dosing pumps
+FOR _nCompIdx := 1 TO 5 DO
+    IF arrFlowRates[_nCompIdx] > 0.0 THEN
+        _fTotalFlow := _fTotalFlow + arrFlowRates[_nCompIdx];
+    END_IF
+END_FOR
+
+// Scale step volume increment based on aggregate flow rate
+_fIncrement := (_fTotalFlow * 0.25) / 60.0;
+fActualLiquidVolume_L := fActualLiquidVolume_L + _fIncrement;
+_fIntegratedMassFlow_kg := _fIntegratedMassFlow_kg + (_fIncrement * 1.025);
+
+// Update vessel headspace pressure pneumatics
+fActualPressure_Bar := cAtmosphericPressure_Bar + ((fActualLiquidVolume_L / fTargetVol) * 1.85);
+
+// Check if vessel dosing is complete
+IF fActualLiquidVolume_L >= fTargetVol THEN
+    fActualLiquidVolume_L   := fTargetVol;
+    M_ExecuteDosingSequence := TRUE;
+ELSE
+    M_ExecuteDosingSequence := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_RegulateThermalEquilibrium" Id="{0a99a51e-a323-42e6-aa76-85f3a5aa678d}">
+      <Declaration><![CDATA[METHOD M_RegulateThermalEquilibrium : BOOL
+VAR_INPUT
+    fTargetTemp   : LREAL;
+    fCoreTemp     : LREAL;
+    fJacketDeltaT : LREAL;
+END_VAR
+VAR_OUTPUT
+    fDutyOutput   : LREAL;
+END_VAR
+VAR
+    _fKp          : LREAL := 4.5;
+    _fKi          : LREAL := 0.08;
+    _fKd          : LREAL := 1.2;
+    _fError       : LREAL;
+    _fP_Term      : LREAL;
+    _fI_Term      : LREAL;
+    _fD_Term      : LREAL;
+    _fTotalOutput : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fError := fTargetTemp - fCoreTemp;
+
+// Proportional Term
+_fP_Term := _fKp * _fError;
+
+// Integral Term with Anti-Windup Clamping
+_fPID_IntegralAccum := _fPID_IntegralAccum + (_fError * 0.1);
+IF _fPID_IntegralAccum > 500.0 THEN
+    _fPID_IntegralAccum := 500.0;
+ELSIF _fPID_IntegralAccum < -500.0 THEN
+    _fPID_IntegralAccum := -500.0;
+END_IF
+_fI_Term := _fKi * _fPID_IntegralAccum;
+
+// Derivative Term
+_fD_Term := _fKd * (_fError - _fPID_DerivativePrevErr);
+_fPID_DerivativePrevErr := _fError;
+
+// Combined PID Thermal Duty
+_fTotalOutput := _fP_Term + _fI_Term + _fD_Term;
+
+// Clamp Thermal Output to [-100.0 kW Chilling .. +100.0 kW Heating]
+IF _fTotalOutput > 100.0 THEN
+    fDutyOutput := 100.0;
+ELSIF _fTotalOutput < -100.0 THEN
+    fDutyOutput := -100.0;
+ELSE
+    fDutyOutput := _fTotalOutput;
+END_IF
+
+// Simulate thermodynamic heat transfer response on core temperature
+IF fDutyOutput > 0.0 THEN
+    fActualTemperature_C := fActualTemperature_C + (fDutyOutput * 0.012);
+ELSE
+    fActualTemperature_C := fActualTemperature_C + (fDutyOutput * 0.018);
+END_IF
+
+M_RegulateThermalEquilibrium := (ABS(_fError) < 0.5);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_MonitorQualityAssuranceGate" Id="{6a01c0de-0ac1-43d1-bcc7-c89bad5c7dce}">
+      <Declaration><![CDATA[METHOD M_MonitorQualityAssuranceGate : BOOL
+VAR_INPUT
+    arrTolerances : ARRAY[1..6] OF REAL;
+END_VAR
+VAR_OUTPUT
+    fYieldPercent : REAL;
+END_VAR
+VAR
+    _nIdx         : INT;
+    _fVarianceSum : REAL := 0.0;
+    _fMeanVar     : REAL;
+    _bAllWithinTol: BOOL := TRUE;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Iterate over tolerance metrics
+FOR _nIdx := 1 TO 6 DO
+    _arrQualityVarianceLog[_nIdx] := TO_REAL(ABS(fActualTemperature_C - fTargetTemperature_C) / fTargetTemperature_C);
+    _fVarianceSum := _fVarianceSum + _arrQualityVarianceLog[_nIdx];
+
+    IF _arrQualityVarianceLog[_nIdx] > arrTolerances[_nIdx] THEN
+        _bAllWithinTol := FALSE;
+    END_IF
+END_FOR
+
+_fMeanVar := _fVarianceSum / 6.0;
+
+// Derive chemical synthesis yield percentage from variance metrics
+IF _bAllWithinTol THEN
+    fYieldPercent := 98.5 - (_fMeanVar * 100.0);
+    IF fYieldPercent > 99.8 THEN
+        fYieldPercent := 99.8;
+    END_IF
+    M_MonitorQualityAssuranceGate := TRUE;
+ELSE
+    fYieldPercent := 88.0 - (_fMeanVar * 120.0);
+    M_MonitorQualityAssuranceGate := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_GenerateAuditTrailSummary" Id="{e26e8e1b-1408-420c-b72c-b816528b33b4}">
+      <Declaration><![CDATA[METHOD M_GenerateAuditTrailSummary : BOOL
+VAR_INPUT
+    sSerial : STRING(80);
+END_VAR
+VAR
+    _sBatchCode : STRING(80);
+    _sYieldText : STRING(30);
+    _sTempText  : STRING(30);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sBatchCode := sSerial;
+_sYieldText := REAL_TO_STRING(fReactionYieldPercent);
+_sTempText  := LREAL_TO_STRING(fActualTemperature_C);
+
+_sAuditTrailLatest := CONCAT('BATCH COMPLIANCE AUDIT | ID: ', _sBatchCode);
+_sAuditTrailLatest := CONCAT(_sAuditTrailLatest, ' | Yield: ');
+_sAuditTrailLatest := CONCAT(_sAuditTrailLatest, _sYieldText);
+_sAuditTrailLatest := CONCAT(_sAuditTrailLatest, '% | Final Temp: ');
+_sAuditTrailLatest := CONCAT(_sAuditTrailLatest, _sTempText);
+_sAuditTrailLatest := CONCAT(_sAuditTrailLatest, ' C | Status: VALIDATED_PASSED');
+
+sDetailedStatusMessage      := _sAuditTrailLatest;
+M_GenerateAuditTrailSummary := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EmergencyDepressurizeAndDump" Id="{3c08a249-4b42-4b87-8b95-55b1d9431e3d}">
+      <Declaration><![CDATA[METHOD M_EmergencyDepressurizeAndDump : BOOL
+VAR
+    _fPressureDropRate : LREAL := 0.25;
+    _fLiquidDumpRate   : LREAL := 150.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Depressurize vessel towards atmospheric baseline
+IF fActualPressure_Bar > cAtmosphericPressure_Bar THEN
+    fActualPressure_Bar := fActualPressure_Bar - _fPressureDropRate;
+    IF fActualPressure_Bar < cAtmosphericPressure_Bar THEN
+        fActualPressure_Bar := cAtmosphericPressure_Bar;
+    END_IF
+END_IF
+
+// Open emergency bottom dump valve to quench pit
+IF fActualLiquidVolume_L > 0.0 THEN
+    fActualLiquidVolume_L := fActualLiquidVolume_L - _fLiquidDumpRate;
+    IF fActualLiquidVolume_L < 0.0 THEN
+        fActualLiquidVolume_L := 0.0;
+    END_IF
+END_IF
+
+// Stop all heating/cooling systems immediately
+fProcessThermalDuty_kW   := 0.0;
+fActualAgitatorSpeed_RPM := 0.0;
+
+M_EmergencyDepressurizeAndDump := (fActualPressure_Bar <= cAtmosphericPressure_Bar AND fActualLiquidVolume_L <= 0.0);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalibrateVesselSensors" Id="{08f10625-d29a-40ee-add3-dc23438e08ef}">
+      <Declaration><![CDATA[METHOD M_CalibrateVesselSensors : BOOL
+VAR_INPUT
+    arrReferencePressures : ARRAY[1..4] OF LREAL;
+    arrReferenceTemps     : ARRAY[1..4] OF LREAL;
+END_VAR
+VAR
+    _nIndex : INT;
+    _fDelta : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIndex := 1 TO 4 DO
+    _fDelta := arrReferencePressures[_nIndex] - cAtmosphericPressure_Bar;
+    _arrCalibrationOffsets[_nIndex] := _fDelta * 0.01;
+END_FOR
+
+M_CalibrateVesselSensors := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalculateDynamicViscosity" Id="{d2692c20-4aef-4b7c-8c26-9e94ee334278}">
+      <Declaration><![CDATA[METHOD M_CalculateDynamicViscosity : REAL
+VAR_INPUT
+    fTemperature  : LREAL;
+    fAgitationRPM : REAL;
+END_VAR
+VAR
+    _fBaseViscosity : REAL := 1.25;
+    _fShearThinning : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fShearThinning := 1.0 / (1.0 + (fAgitationRPM * 0.002));
+M_CalculateDynamicViscosity := _fBaseViscosity * _fShearThinning * TO_REAL(EXP(-0.015 * (fTemperature - 20.0)));
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeReactionKinetics" Id="{591c89de-dc24-4a08-956a-54791c6f474c}">
+      <Declaration><![CDATA[METHOD M_ComputeReactionKinetics : LREAL
+VAR_INPUT
+    fConcentrationA : LREAL;
+    fConcentrationB : LREAL;
+    fCoreTempK      : LREAL;
+END_VAR
+VAR
+    _fActivationEnergy : LREAL := 45000.0; // J/mol
+    _fGasConstant      : LREAL := 8.31446;  // J/(mol*K)
+    _fPreExpFactor     : LREAL := 1.25E6;
+    _fRateConstant     : LREAL;
+    _fReactionRate     : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fCoreTempK <= 273.15 THEN
+    M_ComputeReactionKinetics := 0.0;
+    RETURN;
+END_IF
+
+// Arrhenius reaction rate constant approximation: k = A * exp(-Ea / (R * T))
+_fRateConstant := _fPreExpFactor * EXP(-_fActivationEnergy / (_fGasConstant * fCoreTempK));
+
+// Second-order rate law: r = k * [A] * [B]
+_fReactionRate := _fRateConstant * fConcentrationA * fConcentrationB;
+
+M_ComputeReactionKinetics := _fReactionRate;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FormatBatchReportPayload" Id="{35e2f1df-c379-4792-bce9-a9fe5dc4e2ec}">
+      <Declaration><![CDATA[METHOD M_FormatBatchReportPayload : STRING(255)
+VAR_INPUT
+    sBatchTag : STRING(50);
+END_VAR
+VAR
+    _sResult : STRING(255);
+    _sVolume : STRING(30);
+    _sYield  : STRING(30);
+    _sPress  : STRING(30);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sVolume := LREAL_TO_STRING(fActualLiquidVolume_L);
+_sYield  := REAL_TO_STRING(fReactionYieldPercent);
+_sPress  := LREAL_TO_STRING(fActualPressure_Bar);
+
+_sResult := CONCAT('{"batch_id":"', sBatchTag);
+_sResult := CONCAT(_sResult, '","volume_l":');
+_sResult := CONCAT(_sResult, _sVolume);
+_sResult := CONCAT(_sResult, ',"yield_pct":');
+_sResult := CONCAT(_sResult, _sYield);
+_sResult := CONCAT(_sResult, ',"pressure_bar":');
+_sResult := CONCAT(_sResult, _sPress);
+_sResult := CONCAT(_sResult, ',"status":"COMPLETE"}');
+
+M_FormatBatchReportPayload := _sResult;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ValidateQualityAssuranceMatrix" Id="{c6ecc38c-b83c-4b45-a39c-ca4ddbaa0c8a}">
+      <Declaration><![CDATA[METHOD M_ValidateQualityAssuranceMatrix : BOOL
+VAR_INPUT
+    arrReferenceMatrix : ARRAY[1..4, 1..6] OF LREAL;
+    fTightTolerance    : LREAL;
+END_VAR
+VAR
+    _nRow     : INT;
+    _nCol     : INT;
+    _fDelta   : LREAL;
+    _bPassed  : BOOL := TRUE;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nRow := 1 TO 4 DO
+    FOR _nCol := 1 TO 6 DO
+        _fDelta := ABS(_arrRecipeMatrix[_nRow, _nCol] - arrReferenceMatrix[_nRow, _nCol]);
+        IF _fDelta > fTightTolerance THEN
+            _bPassed := FALSE;
+            EXIT;
+        END_IF
+    END_FOR
+    IF NOT _bPassed THEN
+        EXIT;
+    END_IF
+END_FOR
+
+M_ValidateQualityAssuranceMatrix := _bPassed;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EstimateExothermicRunawayRisk" Id="{55a5e9d0-550d-4d67-a199-852632c565d2}">
+      <Declaration><![CDATA[METHOD PUBLIC M_EstimateExothermicRunawayRisk : REAL
+VAR_INPUT
+    fReactionRate_mol_L_s : LREAL;
+    fCoolingCapacity_kW   : LREAL;
+    fHeatOfReaction_kJ_mol: LREAL;
+END_VAR
+VAR
+    _fHeatGeneration_kW   : LREAL;
+    _fRunawayRiskRatio    : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Calculate instantaneous heat generation rate
+_fHeatGeneration_kW := fReactionRate_mol_L_s * fHeatOfReaction_kJ_mol * fActualLiquidVolume_L;
+
+IF fCoolingCapacity_kW > 0.001 THEN
+    _fRunawayRiskRatio := _fHeatGeneration_kW / fCoolingCapacity_kW;
+ELSE
+    _fRunawayRiskRatio := 10.0;
+END_IF
+
+IF _fRunawayRiskRatio > 1.0 THEN
+    bCriticalAlarmTripped := TRUE;
+    sDetailedStatusMessage:= 'THERMAL RUNAWAY RISK: Heat generation exceeds cooling capacity!';
+END_IF
+
+M_EstimateExothermicRunawayRisk := TO_REAL(_fRunawayRiskRatio);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_ActiveRecipeName" Id="{c9492d86-a036-42ff-83a6-4a4365915230}">
+      <Declaration><![CDATA[PROPERTY P_ActiveRecipeName : STRING(80)]]></Declaration>
+      <Get Name="Get" Id="{a41976a5-dde0-4e69-be80-07b8d96a34ba}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_ActiveRecipeName := _sRecipeTitle;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{2c9f1ff1-215c-46df-bb3e-0dd8cfd3c534}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_sRecipeTitle := P_ActiveRecipeName;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="P_OverallBatchProgress" Id="{a856b1ef-4e8c-4b3d-a399-7e7c4528e43a}">
+      <Declaration><![CDATA[PROPERTY P_OverallBatchProgress : REAL]]></Declaration>
+      <Get Name="Get" Id="{4c5b9f81-3fcd-40f5-a3c1-b91138d342f4}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF _nMasterState = 0 THEN
+    P_OverallBatchProgress := 0.0;
+ELSIF _nMasterState >= 100 THEN
+    P_OverallBatchProgress := 100.0;
+ELSE
+    P_OverallBatchProgress := (TO_REAL(_nMasterState) / 100.0) * 100.0;
+END_IF
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_ReactorThermodynamicHealth" Id="{d77f4aa8-b770-4b6c-85a2-075c18129aa1}">
+      <Declaration><![CDATA[PROPERTY P_ReactorThermodynamicHealth : REAL]]></Declaration>
+      <Get Name="Get" Id="{3232bc25-02ab-4ed9-b47a-30d76aafb32a}">
+        <Declaration><![CDATA[VAR
+    _fHealthIndex : REAL := 100.0;
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF fActualPressure_Bar > (fPressureCeiling_Bar * 0.9) THEN
+    _fHealthIndex := _fHealthIndex - 35.0;
+END_IF
+
+IF fActualTemperature_C > (cMaxAllowedTemp_C * 0.85) THEN
+    _fHealthIndex := _fHealthIndex - 40.0;
+END_IF
+
+IF _fHealthIndex < 0.0 THEN
+    _fHealthIndex := 0.0;
+END_IF
+
+P_ReactorThermodynamicHealth := _fHealthIndex;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_DosingAccuracyPct" Id="{091e221f-ad8a-4802-8423-4607e4b953b7}">
+      <Declaration><![CDATA[PROPERTY P_DosingAccuracyPct : REAL]]></Declaration>
+      <Get Name="Get" Id="{9e9cdd35-9841-4793-9590-351a61b142a1}">
+        <Declaration><![CDATA[VAR
+    _fDev : LREAL;
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF fTargetVolume_L > 0.0 THEN
+    _fDev := ABS(fActualLiquidVolume_L - fTargetVolume_L) / fTargetVolume_L;
+    P_DosingAccuracyPct := TO_REAL((1.0 - _fDev) * 100.0);
+ELSE
+    P_DosingAccuracyPct := 100.0;
+END_IF
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Action Name="A_CalculateEnergyConsumption" Id="{fa0d1f10-1e0e-4b23-af49-6cfa6d1e80aa}">
+      <Implementation>
+        <ST><![CDATA[// Compute total thermal energy integrated over batch execution
+_fTempEnergyJoules := fActualLiquidVolume_L * cSpecificHeatCapacity * (fActualTemperature_C - 20.0);
+fProcessThermalDuty_kW := _fTempEnergyJoules / (3600.0 * 1000.0);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_UpdateSensorAggregations" Id="{4cbff7b1-1e1a-4c37-be54-7c9d6dacac0b}">
+      <Implementation>
+        <ST><![CDATA[// Update plant diagnostics structure
+stDiagnostics.nLightCount       := 4;
+stDiagnostics.fArtificialLevelSum:= TO_REAL(fActualLiquidVolume_L * 0.1);
+stDiagnostics.fHumiditySensor   := TO_REAL(fActualTemperature_C * 0.5);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_PerformSanityDiagnostics" Id="{bc1251e0-d8be-43d7-983b-8f4d85ef27f7}">
+      <Implementation>
+        <ST><![CDATA[// Validate all physical sensors before allowing batch sequence launch
+_bTempSafetyInterlockOk := (fActualPressure_Bar < cMaxAllowedPressure_Bar)
+                           AND_THEN (fActualTemperature_C < cMaxAllowedTemp_C)
+                           AND_THEN (NOT bCriticalAlarmTripped);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_CheckSafetyInterlocks" Id="{2ca23b08-65ae-4622-8ab6-77679b0a14f9}">
+      <Implementation>
+        <ST><![CDATA[// Ensure agitator cannot run if vessel is empty or overpressurized
+bReactorAgitatorInterlock := (fActualLiquidVolume_L >= 25.0)
+                             AND_THEN (fActualPressure_Bar <= fPressureCeiling_Bar)
+                             AND_THEN (NOT bCriticalAlarmTripped);
+
+IF NOT bReactorAgitatorInterlock THEN
+    fActualAgitatorSpeed_RPM := 0.0;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+  </POU>
+</TcPlcObject>

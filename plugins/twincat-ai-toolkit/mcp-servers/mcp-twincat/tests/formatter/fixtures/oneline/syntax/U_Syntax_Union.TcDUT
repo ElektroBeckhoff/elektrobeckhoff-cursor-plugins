@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="U_Syntax_Union" Id="{bd1ef978-742e-44fd-8696-5e9fa8e2bfa7}"> <Declaration><![CDATA[type U_Syntax_Union : union dwRaw : dword; fValue : real; aBytes : array[0..3] of byte; nInt32 : dint; end_union end_type
+]]></Declaration> </DUT> </TcPlcObject>

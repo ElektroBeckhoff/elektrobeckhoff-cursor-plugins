@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="ST_Syntax_Mini" Id="{b4e196bd-4e4f-43f2-bf0d-fce6511685f0}"> <Declaration><![CDATA[type ST_Syntax_Mini : struct nId     : int; bActive : bool; sName   : string(32); end_struct end_type
+]]></Declaration> </DUT> </TcPlcObject>

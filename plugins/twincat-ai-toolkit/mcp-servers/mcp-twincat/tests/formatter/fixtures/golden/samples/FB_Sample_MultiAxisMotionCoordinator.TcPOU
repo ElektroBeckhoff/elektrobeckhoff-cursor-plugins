@@ -1,0 +1,1009 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_MultiAxisMotionCoordinator" Id="{a492777d-8d5c-48e9-9102-ff3762cc2ea5}" SpecialFunc="None">
+    <Declaration><![CDATA[(*******************************************************************************
+ * POU Name:    FB_Sample_MultiAxisMotionCoordinator
+ * Description: High-performance multi-axis kinematic path and motion 
+ *              synchronization coordinator featuring 3D inverse kinematics,
+ *              piecewise cubic spline interpolation, electronic camming,
+ *              3D spatial collision boundary checking, dynamic feedforward,
+ *              quintic polynomial camming, S-curve jerk profiling,
+ *              methods, actions, and properties (>1000 lines).
+ *******************************************************************************)
+{attribute 'reflection'}
+{attribute 'no_explicit_call' := 'Run cyclic motion coordinator via instance call'}
+FUNCTION_BLOCK FB_Sample_MultiAxisMotionCoordinator
+VAR_INPUT
+    bMasterMotionEnable      : BOOL                 := FALSE;   (* Master axis enable permission *)
+    bStartTrajectoryCommand  : BOOL                 := FALSE;   (* Execute pre-planned trajectory path *)
+    bPauseMotionCommand      : BOOL                 := FALSE;   (* Soft pause on current path vector *)
+    bResumeMotionCommand     : BOOL                 := FALSE;   (* Resume trajectory from hold *)
+    bEmergencyStopCommand    : BOOL                 := FALSE;   (* Immediate category 1 deceleration stop *)
+    bResetMotionAlarms       : BOOL                 := FALSE;   (* Alarm acknowledgment pulse *)
+    bCollisionOverrideActive : BOOL                 := FALSE;   (* Manual collision zone bypass *)
+    bEnableFlyingSawSync     : BOOL                 := FALSE;   (* Enable synchronized cutting axis *)
+    nMotionProfileMode       : INT                  := 1;       (* 1=CubicSpline, 2=Trapezoidal, 3=ElectronicCam *)
+    nActiveTrajectoryId      : DINT                 := 2001;    (* Path segment trajectory ID *)
+    nCamTableSelectorIndex   : INT                  := 1;       (* Active cam profile identifier *)
+    fMasterVelocity_mms      : LREAL                := 150.0;   (* Coordinated tool center point speed [mm/s] *)
+    fTargetX_mm              : LREAL                := 350.0;   (* Target Cartesian X coordinate [mm] *)
+    fTargetY_mm              : LREAL                := 220.0;   (* Target Cartesian Y coordinate [mm] *)
+    fTargetZ_mm              : LREAL                := 185.0;   (* Target Cartesian Z coordinate [mm] *)
+    fTargetRotation_deg      : LREAL                := 45.0;    (* Target tool orientation angle [deg] *)
+    fJerkLimit_mms3          : LREAL                := 2500.0;  (* Maximum allowed motion jerk [mm/s^3] *)
+    fAccelerationLimit_mms2  : LREAL                := 1200.0;  (* Maximum tangential acceleration [mm/s^2] *)
+    fFlyingSawLeadDistance   : LREAL                := 45.0;    (* Synchronization distance lead [mm] *)
+    tMotionWatchdogTimeout   : TIME                 := T#30S;   (* Max allowable time per path segment *)
+    tInterpolationCycleTime  : TIME                 := T#2MS;   (* Servo update interval *)
+    tSettleDwellDuration     : TIME                 := T#150MS; (* Target settlement dwell time *)
+    arrAxisFeedforwardGains  : ARRAY[1..6] OF LREAL := [1.2, 1.2, 1.0, 0.8, 0.5, 0.5];
+    arrJointMaxTorqueLimits  : ARRAY[1..6] OF LREAL := [150.0, 150.0, 120.0, 80.0, 45.0, 25.0];
+END_VAR
+VAR_OUTPUT
+    bMotionInExecution       : BOOL;        (* TRUE when axes are actively interpolating *)
+    bAxesInSynchronism       : BOOL;        (* TRUE when all slave axes follow master *)
+    bTrajectoryTargetReached : BOOL;        (* Path completion indicator *)
+    bMotionFaultTripped      : BOOL;        (* High on tracking error or safety trip *)
+    bCollisionWarningActive  : BOOL;        (* Proximity alert inside collision envelope *)
+    bFlyingSawLocked         : BOOL;        (* Flying saw synchronous lock high *)
+    bTorqueLimitExceeded     : BOOL;        (* High when joint motor torque exceeds limit *)
+    eCurrentMotionState      : INT;         (* 0=Idle, 10=Homing, 20=PreSync, 30=GearIn... *)
+    nActiveSplineSegmentIdx  : INT;         (* Currently interpolating spline index *)
+    nTotalTrajectoriesDone   : UDINT;       (* Completed trajectory path counter *)
+    fActualCartesianX_mm     : LREAL;       (* Current TCP X position [mm] *)
+    fActualCartesianY_mm     : LREAL;       (* Current TCP Y position [mm] *)
+    fActualCartesianZ_mm     : LREAL;       (* Current TCP Z position [mm] *)
+    fActualCartesianRot_deg  : LREAL;       (* Current TCP Orientation [deg] *)
+    fActualTangentialSpeed   : LREAL;       (* Magnitude of TCP velocity vector [mm/s] *)
+    fActualTangentialAccel   : LREAL;       (* Tangential acceleration magnitude [mm/s^2] *)
+    fTrackingErrorNorm_mm    : LREAL;       (* Euclidean norm of position deviation *)
+    nMotionErrorCode         : UDINT;       (* 0=OK, 16#F101=LagError, 16#F102=Collision *)
+    sMotionDiagnosticStatus  : STRING(255); (* Operator readable diagnostic line *)
+    tExecutionTimeInSegment  : TIME;        (* Segment stopwatch *)
+END_VAR
+VAR_IN_OUT
+    stDiagnostics : ST_Sample_DiagnosticsStruct; (* Shared plant diagnostic bus *)
+END_VAR
+VAR
+    // --- 1. Subordinate Function Blocks and Timers ---
+    _fbStateController       : FB_Sample_StateMachineController;
+    _fbLookaheadRingBuffer   : FB_Sample_DataRingBuffer;
+    _fbRTrigStart            : R_TRIG;
+    _fbRTrigPause            : R_TRIG;
+    _fbRTrigResume           : R_TRIG;
+    _fbRTrigEStop            : R_TRIG;
+    _fbRTrigResetAlarms      : R_TRIG;
+    _fbTonSegmentWatchdog    : TON;
+    _fbTonSyncDwellTimer     : TON;
+    _fbTonBrakeReleaseTimer  : TON;
+    _fbTonHomingTimeout      : TON;
+    _fbTonFlyingSawLockTimer : TON;
+    _fbTonSettleTimer        : TON;
+
+    // --- 2. State Machine Engine Registers ---
+    _nMasterMotionState      : INT  := 0;     (* Master coordinator state index *)
+    _nPreviousMotionState    : INT  := 0;     (* Saved state prior to pause/hold *)
+    _nSplinePointCounter     : INT  := 0;     (* Current spline waypoint index *)
+    _nRetryHomingCount       : INT  := 0;     (* Homing retry counter *)
+    _bBrakesReleased         : BOOL := FALSE; (* Mechanical holding brake status *)
+    _bLookaheadBufferReady   : BOOL := FALSE; (* Path buffer status *)
+    _bCamProfileInterpolated : BOOL := FALSE; (* Cam table calculation complete *)
+
+    // --- 3. Multi-Axis Joint & Kinematic Registers ---
+    _arrJointPositions_deg   : ARRAY[1..6] OF LREAL; (* Joint feedback angles [deg] *)
+    _arrJointVelocities_degs : ARRAY[1..6] OF LREAL; (* Joint angular velocities [deg/s] *)
+    _arrJointTorques_Nm      : ARRAY[1..6] OF LREAL; (* Dynamic motor torque feedback [Nm] *)
+    _arrJointSetpoints_deg   : ARRAY[1..6] OF LREAL; (* Joint target command positions *)
+    _arrJointTrackingErrors  : ARRAY[1..6] OF LREAL; (* Per-joint position lag *)
+
+    // --- 4. Spline Coefficients and Trajectory Matrices ---
+    _arrCubicSplineMatrix    : ARRAY[1..8, 1..4] OF LREAL := [
+        0.0, 0.0, 150.0, 0.0,
+        0.002, -0.05, 120.0, 50.0,
+        -0.001, 0.03, 90.0, 120.0,
+        0.0005, -0.01, 150.0, 200.0,
+        0.0, 0.02, 110.0, 250.0,
+        -0.003, 0.04, 80.0, 300.0,
+        0.001, -0.02, 130.0, 320.0,
+        0.0, 0.0, 0.0, 350.0
+    ];
+    _arrCollisionBoundingBox : ARRAY[1..6] OF LREAL := [-50.0, 600.0, -100.0, 500.0, 0.0, 450.0];
+    _arrFeedforwardTorqueCmd : ARRAY[1..6] OF LREAL;
+    _arrTransformMatrix4x4   : ARRAY[1..4, 1..4] OF LREAL;
+    _arrQuinticCamPolynomial : ARRAY[1..6] OF LREAL;
+    _arrRawTelemetryHistory  : ARRAY[1..16] OF LREAL;
+
+    // --- 5. Internal Strings and Diagnostic Text ---
+    _sActiveMotionSegmentTag : STRING(80) := 'STANDSTILL_IDLE';
+    _sTrajectoryName         : STRING(80) := 'PRIMARY_CUBIC_PATH_PLAN';
+    _sMotionAuditLog         : STRING(255);
+END_VAR
+VAR_TEMP
+    _nTempAxisIndex        : INT;
+    _nTempSplineScan       : INT;
+    _fTempDistanceDelta    : LREAL;
+    _fTempVelocityNorm     : LREAL;
+    _fTempErrorSumSquares  : LREAL;
+    _fTempCalculatedAngle  : LREAL;
+    _bTempTrajectoryValid  : BOOL;
+    _bTempWithinSafetyZone : BOOL;
+END_VAR
+VAR CONSTANT
+    cMaxCartesianSpeed_mms  : LREAL := 1500.0;
+    cMaxCartesianAccel_mms2 : LREAL := 3000.0;
+    cMaxAllowedLagError_mm  : LREAL := 5.0;
+    cArmLengthLink1_mm      : LREAL := 250.0;
+    cArmLengthLink2_mm      : LREAL := 220.0;
+    cArmLengthLink3_mm      : LREAL := 180.0;
+    cPI_Constant            : LREAL := 3.141592653589793;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================================
+// 1. SIGNAL INGESTION, HARDWARE TRIGGERS & SAFETY GATES
+// =============================================================================
+{region "Motion Safety and Hardware Interlocks"}
+    _fbRTrigStart(CLK := bStartTrajectoryCommand);
+    _fbRTrigPause(CLK := bPauseMotionCommand);
+    _fbRTrigResume(CLK := bResumeMotionCommand);
+    _fbRTrigEStop(CLK := bEmergencyStopCommand);
+    _fbRTrigResetAlarms(CLK := bResetMotionAlarms);
+
+    // Alarm reset latch on operator pulse
+    IF _fbRTrigResetAlarms.Q THEN
+        bMotionFaultTripped     := FALSE;
+        nMotionErrorCode        := 0;
+        sMotionDiagnosticStatus := 'Motion alarms cleared by operator.';
+END_IF
+
+    // Emergency stop forces immediate deceleration and brake engagement
+    IF _fbRTrigEStop.Q OR (bMasterMotionEnable = FALSE AND _nMasterMotionState > 0) THEN
+        _nMasterMotionState     := 900; // Emergency Stop State
+        sMotionDiagnosticStatus := 'EMERGENCY STOP TRIGGERED - Halting coordinated axes.';
+END_IF
+
+    // Segment execution watchdog timer
+    _fbTonSegmentWatchdog(IN := (_nMasterMotionState > 0 AND _nMasterMotionState < 800), PT := tMotionWatchdogTimeout);
+
+    IF _fbTonSegmentWatchdog.Q AND NOT bMotionFaultTripped THEN
+        bMotionFaultTripped := TRUE;
+        nMotionErrorCode        := 16#F001; // Motion segment timeout
+        sMotionDiagnosticStatus := 'MOTION FAULT: Active trajectory segment exceeded watchdog limit.';
+        _nMasterMotionState     := 800;     // Fault Hold
+END_IF
+
+    // Check 3D Spatial Collision Boundary Envelope
+    _bTempWithinSafetyZone := M_Check3DSpatialCollisionEnvelope(fX := fActualCartesianX_mm, fY := fActualCartesianY_mm, fZ := fActualCartesianZ_mm);
+
+    IF NOT _bTempWithinSafetyZone AND NOT bCollisionOverrideActive THEN
+        bCollisionWarningActive := TRUE;
+        IF _nMasterMotionState = 50 THEN
+            bMotionFaultTripped := TRUE;
+            nMotionErrorCode        := 16#F002; // Collision boundary violation
+            sMotionDiagnosticStatus := 'CRITICAL: Tool Center Point exited safe kinematic envelope!';
+            _nMasterMotionState     := 800;
+    END_IF
+    ELSE
+        bCollisionWarningActive := FALSE;
+END_IF
+
+    // Compute dynamic feedforward and tracking error norm
+    A_ComputeFeedforwardTorque();
+    A_UpdateAxisFeedbackMatrices();
+    A_ValidateJointTorqueLimits();
+    A_SynchronizeVirtualMasterClock();
+{endregion}
+
+// =============================================================================
+// 2. MASTER MOTION COORDINATOR SEQUENCER (10-STATE ENGINE)
+// =============================================================================
+CASE _nMasterMotionState OF
+
+    0:
+        // STATE 0: STANDSTILL IDLE
+        _sActiveMotionSegmentTag := 'STANDSTILL_IDLE';
+        bMotionInExecution       := FALSE;
+        bAxesInSynchronism       := FALSE;
+        bTrajectoryTargetReached := FALSE;
+        bFlyingSawLocked         := FALSE;
+        fActualTangentialSpeed   := 0.0;
+        fActualTangentialAccel   := 0.0;
+        nActiveSplineSegmentIdx  := 0;
+
+        IF _fbRTrigStart.Q AND bMasterMotionEnable AND NOT bMotionFaultTripped THEN
+            _nMasterMotionState     := 10; // Proceed to Homing Sequence
+            bMotionInExecution      := TRUE;
+            sMotionDiagnosticStatus := 'Starting motion cycle. Verifying axis homing...';
+        END_IF
+
+    10:
+        // STATE 10: HOMING & ABSOLUTE CALIBRATION SEQUENCE
+        _sActiveMotionSegmentTag := 'HOMING_CALIBRATION_SEQUENCE';
+        _fbTonHomingTimeout(IN := TRUE, PT := T#2S);
+
+        IF _fbTonHomingTimeout.Q THEN
+            _fbTonHomingTimeout(IN := FALSE);
+            _arrJointPositions_deg[1] := 0.0;
+            _arrJointPositions_deg[2] := 0.0;
+            _arrJointPositions_deg[3] := 0.0;
+            _arrJointPositions_deg[4] := 0.0;
+            _arrJointPositions_deg[5] := 0.0;
+            _arrJointPositions_deg[6] := 0.0;
+
+            fActualCartesianX_mm     := 150.0;
+            fActualCartesianY_mm     := 0.0;
+            fActualCartesianZ_mm     := 250.0;
+            fActualCartesianRot_deg  := 0.0;
+
+            _nMasterMotionState     := 20; // Proceed to Mechanical Brake Release
+            sMotionDiagnosticStatus := 'Homing completed. Releasing mechanical holding brakes.';
+        END_IF
+
+    20:
+        // STATE 20: MECHANICAL BRAKE RELEASE & TORQUE PRELOAD
+        _sActiveMotionSegmentTag := 'MECHANICAL_BRAKE_RELEASE';
+        _fbTonBrakeReleaseTimer(IN := TRUE, PT := T#500MS);
+
+        IF _fbTonBrakeReleaseTimer.Q THEN
+            _fbTonBrakeReleaseTimer(IN := FALSE);
+            _bBrakesReleased := TRUE;
+            _nMasterMotionState     := 30; // Proceed to Pre-Sync Gear In
+            sMotionDiagnosticStatus := 'Brakes released. Synchronizing slave axis drives.';
+        END_IF
+
+    30:
+        // STATE 30: ELECTRONIC GEAR-IN & PHASE SYNCHRONIZATION
+        _sActiveMotionSegmentTag := 'ELECTRONIC_GEAR_IN';
+
+        _fbTonSyncDwellTimer(IN := TRUE, PT := T#800MS);
+
+        IF _fbTonSyncDwellTimer.Q THEN
+            _fbTonSyncDwellTimer(IN := FALSE);
+            bAxesInSynchronism := TRUE;
+            _nMasterMotionState     := 35; // Advance to Quintic Cam Profile Calculation
+            sMotionDiagnosticStatus := 'Electronic gearing locked. Calculating quintic cam table.';
+        END_IF
+
+    35:
+        // STATE 35: QUINTIC POLYNOMIAL CAM TABLE INTERPOLATION
+        _sActiveMotionSegmentTag := 'CAM_TABLE_QUINTIC_FIT';
+
+        _bCamProfileInterpolated := M_Compute5thOrderPolynomialCam(fStartPos := 0.0, fEndPos := fTargetX_mm, fMaxVel := fMasterVelocity_mms);
+
+        IF _bCamProfileInterpolated THEN
+            _nMasterMotionState     := 40; // Proceed to Trajectory Plan Ingestion
+            sMotionDiagnosticStatus := 'Cam table generated. Ingesting cubic spline path.';
+        ELSE
+            nMotionErrorCode        := 16#F035;
+            sMotionDiagnosticStatus := 'Cam table fitting failed: Boundary conditions infeasible.';
+            _nMasterMotionState     := 800;
+        END_IF
+
+    40:
+        // STATE 40: TRAJECTORY PLAN INGESTION & SPLINE FITTING
+        _sActiveMotionSegmentTag := 'TRAJECTORY_SPLINE_PLANNING';
+
+        _bTempTrajectoryValid := M_PlanCubicSplineTrajectory(nTrajectoryId := nActiveTrajectoryId, fTargetSpeed := fMasterVelocity_mms, arrCoefficients := _arrCubicSplineMatrix);
+
+        IF _bTempTrajectoryValid THEN
+            _nSplinePointCounter    := 1;
+            nActiveSplineSegmentIdx := 1;
+            _nMasterMotionState     := 50; // Proceed to Coordinated Path Execution
+            sMotionDiagnosticStatus := 'Spline coefficients verified. Executing coordinated motion.';
+        ELSE
+            nMotionErrorCode        := 16#F040;
+            sMotionDiagnosticStatus := 'Spline trajectory planning failed: Kinematic singularity!';
+            _nMasterMotionState     := 800; // Fault hold
+        END_IF
+
+    50:
+        // STATE 50: COORDINATED TRAJECTORY EXECUTION & PATH TRACKING
+        _sActiveMotionSegmentTag := 'COORDINATED_PATH_EXECUTION';
+
+        // Check for pause request
+        IF _fbRTrigPause.Q THEN
+            _nPreviousMotionState   := 50;
+            _nMasterMotionState     := 700; // Pause in safe vector hold
+        ELSE
+            M_ExecuteCoordinatedTrajectory(
+                    nSegmentIdx  := _nSplinePointCounter,
+                    fMasterSpeed := fMasterVelocity_mms,
+                    fTargetX     := fTargetX_mm,
+                    fTargetY     := fTargetY_mm,
+                    fTargetZ     := fTargetZ_mm,
+                    fTargetRot   := fTargetRotation_deg);
+
+            fTrackingErrorNorm_mm := M_EvaluateAxisTrackingErrorNorm();
+
+            IF fTrackingErrorNorm_mm > cMaxAllowedLagError_mm THEN
+                nMotionErrorCode        := 16#F050;
+                sMotionDiagnosticStatus := 'Lag error exceeded safety threshold during execution!';
+                _nMasterMotionState     := 800;
+            ELSIF bTrajectoryTargetReached THEN
+                IF bEnableFlyingSawSync THEN
+                    _nMasterMotionState     := 55; // Advance to Flying Saw Sync
+                    sMotionDiagnosticStatus := 'Trajectory complete. Engaging flying saw synchronous cutting.';
+                ELSE
+                    _nMasterMotionState     := 60; // Advance to Target Settlement
+                    sMotionDiagnosticStatus := 'Trajectory endpoint reached. Commencing settling dwell.';
+                END_IF
+            END_IF
+        END_IF
+
+    55:
+        // STATE 55: FLYING SAW SYNCHRONOUS CUTTING & TRACKING
+        _sActiveMotionSegmentTag := 'FLYING_SAW_SYNCHRONOUS_CUT';
+
+        _fbTonFlyingSawLockTimer(IN := TRUE, PT := T#500MS);
+
+        IF _fbTonFlyingSawLockTimer.Q THEN
+            _fbTonFlyingSawLockTimer(IN := FALSE);
+            bFlyingSawLocked := TRUE;
+            _nMasterMotionState     := 60; // Advance to Target Settlement
+            sMotionDiagnosticStatus := 'Flying saw cut completed. Settling axes.';
+        END_IF
+
+    60:
+        // STATE 60: TARGET SETTLING & POSITION VERIFICATION
+        _sActiveMotionSegmentTag := 'TARGET_SETTLING_VERIFICATION';
+
+        IF fActualTangentialSpeed > 1.0 THEN
+            fActualTangentialSpeed := fActualTangentialSpeed - 25.0;
+
+            IF fActualTangentialSpeed < 0.0 THEN
+                fActualTangentialSpeed := 0.0;
+            END_IF
+        ELSE
+            fActualTangentialSpeed   := 0.0;
+            _fbTonSettleTimer(IN := TRUE, PT := tSettleDwellDuration);
+
+            IF _fbTonSettleTimer.Q THEN
+                _fbTonSettleTimer(IN := FALSE);
+                bTrajectoryTargetReached := TRUE;
+                _nMasterMotionState      := 100; // Motion Complete
+                sMotionDiagnosticStatus  := 'Position verified within target tolerance band.';
+            END_IF
+        END_IF
+
+    100:
+        // STATE 100: MOTION CYCLE COMPLETED SUCCESSFULLY
+        _sActiveMotionSegmentTag := 'MOTION_COMPLETED_SUCCESS';
+        bMotionInExecution       := FALSE;
+        nTotalTrajectoriesDone   := nTotalTrajectoriesDone + 1;
+        A_BroadcastMotionTelemetry();
+
+        sMotionDiagnosticStatus  := 'Coordinated motion cycle successfully concluded.';
+        _nMasterMotionState      := 0; // Return to Standstill
+
+    700:
+        // STATE 700: PAUSED IN SAFE VECTOR HOLD
+        _sActiveMotionSegmentTag := 'PAUSED_VECTOR_HOLD';
+        fActualTangentialSpeed   := 0.0;
+
+        IF _fbRTrigResume.Q AND NOT bMotionFaultTripped THEN
+            _nMasterMotionState      := _nPreviousMotionState;
+            sMotionDiagnosticStatus  := 'Motion resumed from operator hold.';
+        END_IF
+
+    800:
+        // STATE 800: FAULT STATE & HOLDING BRAKE ENGAGE
+        _sActiveMotionSegmentTag := 'FAULT_SAFETY_LOCKDOWN';
+        bMotionFaultTripped      := TRUE;
+        bMotionInExecution       := FALSE;
+        fActualTangentialSpeed   := 0.0;
+        _bBrakesReleased         := FALSE;
+
+        IF _fbRTrigResetAlarms.Q AND nMotionErrorCode = 0 THEN
+            _nMasterMotionState      := 0;
+            sMotionDiagnosticStatus  := 'Fault state cleared. Coordinator returned to standstill.';
+        END_IF
+
+    900:
+        // STATE 900: EMERGENCY CONTROLLED DECELERATION STOP
+        _sActiveMotionSegmentTag := 'EMERGENCY_STOP_DECEL';
+        M_AbortMotionControlledStop(fDecelRate := fAccelerationLimit_mms2 * 2.0);
+
+        IF fActualTangentialSpeed <= 0.01 THEN
+            _bBrakesReleased := FALSE;
+            _nMasterMotionState      := 800; // Transition to Fault State
+            sMotionDiagnosticStatus  := 'Emergency deceleration complete. Brakes locked.';
+        END_IF
+
+ELSE
+    _nMasterMotionState     := 800;
+    nMotionErrorCode        := 16#F999;
+    sMotionDiagnosticStatus := 'FATAL: Unknown motion coordinator state index encountered.';
+END_CASE
+
+eCurrentMotionState := _nMasterMotionState;
+]]></ST>
+    </Implementation>
+    <Action Name="A_BroadcastMotionTelemetry" Id="{54662253-020b-4f20-b78a-507d3c36c2cc}">
+      <Implementation>
+        <ST><![CDATA[// Format trajectory audit line
+_sMotionAuditLog := CONCAT('MOTION SEGMENT COMPLETED | ID: ', DINT_TO_STRING(nActiveTrajectoryId));
+_sMotionAuditLog := CONCAT(_sMotionAuditLog, ' | Final Speed: ');
+_sMotionAuditLog := CONCAT(_sMotionAuditLog, LREAL_TO_STRING(fActualTangentialSpeed));
+_sMotionAuditLog := CONCAT(_sMotionAuditLog, ' mm/s');
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_CheckSafetyBrakeEngagement" Id="{d4854830-2f9a-424a-a451-4f3e01e042a0}">
+      <Implementation>
+        <ST><![CDATA[// Safety brake interlock monitoring
+IF _nMasterMotionState = 0 OR _nMasterMotionState >= 800 THEN
+    _bBrakesReleased := FALSE;
+ELSE
+    _bBrakesReleased := TRUE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ComputeFeedforwardTorque" Id="{8b8f22e3-5410-423f-88bf-650641eb154f}">
+      <Implementation>
+        <ST><![CDATA[// Calculate dynamic feedforward compensation
+M_ComputeFeedforwardTorques(arrGains := arrAxisFeedforwardGains);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_SynchronizeVirtualMasterClock" Id="{97dbdc03-cd2f-4435-900e-224ef19bbd5f}">
+      <Implementation>
+        <ST><![CDATA[// Virtual master axis synchronization clock tick
+IF bAxesInSynchronism THEN
+    fActualTangentialAccel := (fMasterVelocity_mms - fActualTangentialSpeed) / 0.002;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_UpdateAxisFeedbackMatrices" Id="{5d4dd296-e6b7-4517-95ef-0a65967e5e1e}">
+      <Implementation>
+        <ST><![CDATA[// Update diagnostic feedback telemetry
+stDiagnostics.nBlindCount              := 6;
+stDiagnostics.fBlindPositionSum        := TO_REAL(fActualCartesianX_mm);
+stDiagnostics.fDeskBrightnessSensorLux := TO_REAL(fActualTangentialSpeed);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ValidateJointTorqueLimits" Id="{fbd94cf6-09b8-4c68-a9ad-88fbb84fbeb6}">
+      <Implementation>
+        <ST><![CDATA[// Check motor current torque against safety thresholds
+bTorqueLimitExceeded := FALSE;
+
+FOR _nTempAxisIndex := 1 TO 6 DO
+    IF ABS(_arrJointTorques_Nm[_nTempAxisIndex]) > arrJointMaxTorqueLimits[_nTempAxisIndex] THEN
+        bTorqueLimitExceeded := TRUE;
+    END_IF
+END_FOR
+]]></ST>
+      </Implementation>
+    </Action>
+    <Method Name="M_AbortMotionControlledStop" Id="{ddf05992-e6b7-4d21-985b-8062ecfb62eb}">
+      <Declaration><![CDATA[METHOD M_AbortMotionControlledStop : BOOL
+VAR_INPUT
+    fDecelRate : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fActualTangentialSpeed > 0.0 THEN
+    fActualTangentialSpeed := fActualTangentialSpeed - (fDecelRate * 0.002);
+
+    IF fActualTangentialSpeed < 0.0 THEN
+        fActualTangentialSpeed := 0.0;
+    END_IF
+END_IF
+
+M_AbortMotionControlledStop := (fActualTangentialSpeed <= 0.0);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Calculate4x4HomogeneousTransform" Id="{b05a0b95-0d4d-46bf-beb9-6963ff215e7c}">
+      <Declaration><![CDATA[METHOD M_Calculate4x4HomogeneousTransform : BOOL
+VAR_INPUT
+    fRollDeg  : LREAL;
+    fPitchDeg : LREAL;
+    fYawDeg   : LREAL;
+    fTransX   : LREAL;
+    fTransY   : LREAL;
+    fTransZ   : LREAL;
+END_VAR
+VAR
+    _fRadRoll  : LREAL;
+    _fRadPitch : LREAL;
+    _fRadYaw   : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fRadRoll  := fRollDeg * cPI_Constant / 180.0;
+_fRadPitch := fPitchDeg * cPI_Constant / 180.0;
+_fRadYaw   := fYawDeg * cPI_Constant / 180.0;
+
+// Setup Homogeneous 4x4 Transformation Matrix
+_arrTransformMatrix4x4[1, 1] := COS(_fRadYaw) * COS(_fRadPitch);
+_arrTransformMatrix4x4[1, 2] := (COS(_fRadYaw) * SIN(_fRadPitch) * SIN(_fRadRoll)) - (SIN(_fRadYaw) * COS(_fRadRoll));
+_arrTransformMatrix4x4[1, 3] := (COS(_fRadYaw) * SIN(_fRadPitch) * COS(_fRadRoll)) + (SIN(_fRadYaw) * SIN(_fRadRoll));
+_arrTransformMatrix4x4[1, 4] := fTransX;
+
+_arrTransformMatrix4x4[2, 1] := SIN(_fRadYaw) * COS(_fRadPitch);
+_arrTransformMatrix4x4[2, 2] := (SIN(_fRadYaw) * SIN(_fRadPitch) * SIN(_fRadRoll)) + (COS(_fRadYaw) * COS(_fRadRoll));
+_arrTransformMatrix4x4[2, 3] := (SIN(_fRadYaw) * SIN(_fRadPitch) * COS(_fRadRoll)) - (COS(_fRadYaw) * SIN(_fRadRoll));
+_arrTransformMatrix4x4[2, 4] := fTransY;
+
+_arrTransformMatrix4x4[3, 1] := -SIN(_fRadPitch);
+_arrTransformMatrix4x4[3, 2] := COS(_fRadPitch) * SIN(_fRadRoll);
+_arrTransformMatrix4x4[3, 3] := COS(_fRadPitch) * COS(_fRadRoll);
+_arrTransformMatrix4x4[3, 4] := fTransZ;
+
+_arrTransformMatrix4x4[4, 1] := 0.0;
+_arrTransformMatrix4x4[4, 2] := 0.0;
+_arrTransformMatrix4x4[4, 3] := 0.0;
+_arrTransformMatrix4x4[4, 4] := 1.0;
+
+M_Calculate4x4HomogeneousTransform := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalculateKinematicConditionNumber" Id="{2426b099-03a5-44b1-9274-47c26b90b834}">
+      <Declaration><![CDATA[METHOD M_CalculateKinematicConditionNumber : LREAL
+VAR_INPUT
+    arrJointsDeg : ARRAY[1..6] OF LREAL;
+END_VAR
+VAR
+    _fRadElbow : LREAL;
+    _fSinElbow : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fRadElbow := arrJointsDeg[3] * cPI_Constant / 180.0;
+_fSinElbow := ABS(SIN(_fRadElbow));
+
+// Singularity measure approaches 0 at arm full extension or collapse
+IF _fSinElbow < 0.0001 THEN
+    M_CalculateKinematicConditionNumber := 0.0001;
+ELSE
+    M_CalculateKinematicConditionNumber := _fSinElbow;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalibrateRotaryEncoders" Id="{d6a1757e-212d-484b-8c2a-1b234fe8109b}">
+      <Declaration><![CDATA[METHOD M_CalibrateRotaryEncoders : BOOL
+VAR_INPUT
+    arrEncoderRawCounts : ARRAY[1..6] OF DINT;
+END_VAR
+VAR
+    _nAxisIdx : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nAxisIdx := 1 TO 6 DO
+    _arrJointPositions_deg[_nAxisIdx] := TO_LREAL(arrEncoderRawCounts[_nAxisIdx]) * (360.0 / 1048576.0);
+END_FOR
+
+M_CalibrateRotaryEncoders := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Check3DSpatialCollisionEnvelope" Id="{3978ede4-d12f-4e4c-a366-e3dd40d7e582}">
+      <Declaration><![CDATA[METHOD M_Check3DSpatialCollisionEnvelope : BOOL
+VAR_INPUT
+    fX : LREAL;
+    fY : LREAL;
+    fZ : LREAL;
+END_VAR
+VAR
+    _bInsideX : BOOL;
+    _bInsideY : BOOL;
+    _bInsideZ : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_bInsideX := (fX >= _arrCollisionBoundingBox[1]) AND_THEN (fX <= _arrCollisionBoundingBox[2]);
+_bInsideY := (fY >= _arrCollisionBoundingBox[3]) AND_THEN (fY <= _arrCollisionBoundingBox[4]);
+_bInsideZ := (fZ >= _arrCollisionBoundingBox[5]) AND_THEN (fZ <= _arrCollisionBoundingBox[6]);
+
+M_Check3DSpatialCollisionEnvelope := (_bInsideX AND _bInsideY AND _bInsideZ);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Compute5thOrderPolynomialCam" Id="{6cd745ea-4b31-4097-ae49-17f9769a2b41}">
+      <Declaration><![CDATA[METHOD M_Compute5thOrderPolynomialCam : BOOL
+VAR_INPUT
+    fStartPos : LREAL;
+    fEndPos   : LREAL;
+    fMaxVel   : LREAL;
+END_VAR
+VAR
+    _fDeltaPos : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fDeltaPos := fEndPos - fStartPos;
+
+IF _fDeltaPos = 0.0 THEN
+    M_Compute5thOrderPolynomialCam := FALSE;
+    RETURN;
+END_IF
+
+// Quintic polynomial coefficients for jerk-free start and stop: s(u) = 10u^3 - 15u^4 + 6u^5
+_arrQuinticCamPolynomial[1] := 0.0;
+_arrQuinticCamPolynomial[2] := 0.0;
+_arrQuinticCamPolynomial[3] := 0.0;
+_arrQuinticCamPolynomial[4] := 10.0 * _fDeltaPos;
+_arrQuinticCamPolynomial[5] := -15.0 * _fDeltaPos;
+_arrQuinticCamPolynomial[6] := 6.0 * _fDeltaPos;
+
+M_Compute5thOrderPolynomialCam := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeBSplineBasis" Id="{c91174ce-7635-4fdf-ba3e-49aa33311c76}">
+      <Declaration><![CDATA[METHOD M_ComputeBSplineBasis : LREAL
+VAR_INPUT
+    nDegree : INT;
+    fU      : LREAL;
+    arrKnot : ARRAY[1..12] OF LREAL;
+END_VAR
+VAR
+    _fN1 : LREAL := 0.0;
+    _fN2 : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fU >= arrKnot[1] AND fU < arrKnot[2] THEN
+    _fN1 := 1.0;
+END_IF
+
+IF fU >= arrKnot[2] AND fU <= arrKnot[3] THEN
+    _fN2 := 1.0;
+END_IF
+
+M_ComputeBSplineBasis := (0.5 * _fN1) + (0.5 * _fN2);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeFeedforwardTorques" Id="{1f4812d8-5351-415f-a320-5d4e8a5bb6b1}">
+      <Declaration><![CDATA[METHOD M_ComputeFeedforwardTorques : BOOL
+VAR_INPUT
+    arrGains : ARRAY[1..6] OF LREAL;
+END_VAR
+VAR
+    _nIdx : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 6 DO
+    _arrFeedforwardTorqueCmd[_nIdx] := _arrJointVelocities_degs[_nIdx] * arrGains[_nIdx] * 0.05;
+END_FOR
+
+M_ComputeFeedforwardTorques := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EvaluateAxisTrackingErrorNorm" Id="{42169c5a-8a10-4c62-9f6c-761a3380aba0}">
+      <Declaration><![CDATA[METHOD M_EvaluateAxisTrackingErrorNorm : LREAL
+VAR
+    _nIdx   : INT;
+    _fSumSq : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 6 DO
+    _arrJointTrackingErrors[_nIdx] := _arrJointSetpoints_deg[_nIdx] - _arrJointPositions_deg[_nIdx];
+    _fSumSq                        := _fSumSq + (_arrJointTrackingErrors[_nIdx] * _arrJointTrackingErrors[_nIdx]);
+END_FOR
+
+M_EvaluateAxisTrackingErrorNorm := SQRT(_fSumSq);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteCoordinatedTrajectory" Id="{41923b06-088e-4cb8-9df4-622cefc9a81b}">
+      <Declaration><![CDATA[METHOD M_ExecuteCoordinatedTrajectory : BOOL
+VAR_INPUT
+    nSegmentIdx  : INT;
+    fMasterSpeed : LREAL;
+    fTargetX     : LREAL;
+    fTargetY     : LREAL;
+    fTargetZ     : LREAL;
+    fTargetRot   : LREAL;
+END_VAR
+VAR
+    _fStepDist : LREAL := 1.25;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Increment Cartesian TCP position towards target point
+IF fActualCartesianX_mm < fTargetX THEN
+    fActualCartesianX_mm := fActualCartesianX_mm + _fStepDist;
+
+    IF fActualCartesianX_mm > fTargetX THEN
+        fActualCartesianX_mm := fTargetX;
+    END_IF
+END_IF
+
+IF fActualCartesianY_mm < fTargetY THEN
+    fActualCartesianY_mm := fActualCartesianY_mm + _fStepDist;
+
+    IF fActualCartesianY_mm > fTargetY THEN
+        fActualCartesianY_mm := fTargetY;
+    END_IF
+END_IF
+
+IF fActualCartesianZ_mm < fTargetZ THEN
+    fActualCartesianZ_mm := fActualCartesianZ_mm + _fStepDist;
+
+    IF fActualCartesianZ_mm > fTargetZ THEN
+        fActualCartesianZ_mm := fTargetZ;
+    END_IF
+END_IF
+
+fActualTangentialSpeed := fMasterSpeed;
+
+IF fActualCartesianX_mm >= fTargetX AND_THEN fActualCartesianY_mm >= fTargetY AND_THEN fActualCartesianZ_mm >= fTargetZ THEN
+    bTrajectoryTargetReached       := TRUE;
+    M_ExecuteCoordinatedTrajectory := TRUE;
+ELSE
+    bTrajectoryTargetReached       := FALSE;
+    M_ExecuteCoordinatedTrajectory := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FilterAxisJitterAndLag" Id="{4dd23cef-8745-48df-92e3-7304c141cd9d}">
+      <Declaration><![CDATA[METHOD M_FilterAxisJitterAndLag : LREAL
+VAR_INPUT
+    fRawValue     : LREAL;
+    fPrevFiltered : LREAL;
+    fFilterAlpha  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_FilterAxisJitterAndLag := (fFilterAlpha * fRawValue) + ((1.0 - fFilterAlpha) * fPrevFiltered);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FilterVelocityJitterSavgol" Id="{e01ba1a3-cbc0-4101-8371-50ee030ea5eb}">
+      <Declaration><![CDATA[METHOD M_FilterVelocityJitterSavgol : LREAL
+VAR_INPUT
+    arrHistory5 : ARRAY[1..5] OF LREAL;
+END_VAR
+VAR
+    _fFilteredVelocity : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 5-point quadratic Savitzky-Golay derivative filter convolution weights
+_fFilteredVelocity := (-2.0 * arrHistory5[1]) - (1.0 * arrHistory5[2]) + (0.0 * arrHistory5[3]) + (1.0 * arrHistory5[4]) + (2.0 * arrHistory5[5]);
+_fFilteredVelocity := _fFilteredVelocity / (10.0 * 0.002);
+
+M_FilterVelocityJitterSavgol := _fFilteredVelocity;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FormatMotionStatusJSON" Id="{85b720f5-d92a-48ec-b0d9-84baae5d5887}">
+      <Declaration><![CDATA[METHOD M_FormatMotionStatusJSON : STRING(255)
+VAR_INPUT
+    sTag : STRING(50);
+END_VAR
+VAR
+    _sResult : STRING(255);
+    _sX      : STRING(30);
+    _sY      : STRING(30);
+    _sZ      : STRING(30);
+    _sSpeed  : STRING(30);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sX     := LREAL_TO_STRING(fActualCartesianX_mm);
+_sY     := LREAL_TO_STRING(fActualCartesianY_mm);
+_sZ     := LREAL_TO_STRING(fActualCartesianZ_mm);
+_sSpeed := LREAL_TO_STRING(fActualTangentialSpeed);
+
+_sResult := CONCAT('{"axis_tag":"', sTag);
+_sResult := CONCAT(_sResult, '","x_mm":');
+_sResult := CONCAT(_sResult, _sX);
+_sResult := CONCAT(_sResult, ',"y_mm":');
+_sResult := CONCAT(_sResult, _sY);
+_sResult := CONCAT(_sResult, ',"z_mm":');
+_sResult := CONCAT(_sResult, _sZ);
+_sResult := CONCAT(_sResult, ',"speed_mms":');
+_sResult := CONCAT(_sResult, _sSpeed);
+_sResult := CONCAT(_sResult, ',"sync":true}');
+
+M_FormatMotionStatusJSON := _sResult;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_PlanCubicSplineTrajectory" Id="{2e43ab00-10ee-4cea-aeef-c2830418d429}">
+      <Declaration><![CDATA[METHOD M_PlanCubicSplineTrajectory : BOOL
+VAR_INPUT
+    nTrajectoryId   : DINT;
+    fTargetSpeed    : LREAL;
+    arrCoefficients : ARRAY[1..8, 1..4] OF LREAL;
+END_VAR
+VAR
+    _nIndex   : INT;
+    _fSumNorm : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nTrajectoryId <= 0 OR fTargetSpeed <= 0.0 THEN
+    M_PlanCubicSplineTrajectory := FALSE;
+    RETURN;
+END_IF
+
+FOR _nIndex := 1 TO 8 DO
+    _fSumNorm := _fSumNorm + ABS(arrCoefficients[_nIndex, 3]);
+END_FOR
+
+M_PlanCubicSplineTrajectory := (_fSumNorm > 10.0);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SolveForwardKinematics3D" Id="{c5eea959-4784-480f-9d51-6336d188ffcc}">
+      <Declaration><![CDATA[METHOD M_SolveForwardKinematics3D : BOOL
+VAR_INPUT
+    arrJointsDeg : ARRAY[1..6] OF LREAL;
+END_VAR
+VAR_OUTPUT
+    fTcpX : LREAL;
+    fTcpY : LREAL;
+    fTcpZ : LREAL;
+END_VAR
+VAR
+    _fRad1 : LREAL;
+    _fRad2 : LREAL;
+    _fRad3 : LREAL;
+    _fR12  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fRad1 := arrJointsDeg[1] * cPI_Constant / 180.0;
+_fRad2 := arrJointsDeg[2] * cPI_Constant / 180.0;
+_fRad3 := arrJointsDeg[3] * cPI_Constant / 180.0;
+
+_fR12 := (cArmLengthLink1_mm * COS(_fRad2)) + (cArmLengthLink2_mm * COS(_fRad2 + _fRad3));
+
+fTcpX := _fR12 * COS(_fRad1);
+fTcpY := _fR12 * SIN(_fRad1);
+fTcpZ := (cArmLengthLink1_mm * SIN(_fRad2)) + (cArmLengthLink2_mm * SIN(_fRad2 + _fRad3)) + cArmLengthLink3_mm;
+
+M_SolveForwardKinematics3D := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SolveInverseKinematics3D" Id="{e1a57bae-6384-4edd-82fa-844b3edba043}">
+      <Declaration><![CDATA[METHOD M_SolveInverseKinematics3D : BOOL
+VAR_INPUT
+    fCartX : LREAL;
+    fCartY : LREAL;
+    fCartZ : LREAL;
+END_VAR
+VAR_OUTPUT
+    arrJoints : ARRAY[1..6] OF LREAL;
+END_VAR
+VAR
+    _fRadiusXY : LREAL;
+    _fDist3D   : LREAL;
+    _fTheta1   : LREAL;
+    _fTheta2   : LREAL;
+    _fTheta3   : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fRadiusXY := SQRT((fCartX * fCartX) + (fCartY * fCartY));
+_fDist3D   := SQRT((_fRadiusXY * _fRadiusXY) + (fCartZ * fCartZ));
+
+IF _fDist3D > (cArmLengthLink1_mm + cArmLengthLink2_mm + cArmLengthLink3_mm) THEN
+    M_SolveInverseKinematics3D := FALSE;
+    RETURN;
+END_IF
+
+// Base Joint Rotation (Theta 1)
+_fTheta1 := (180.0 / cPI_Constant) * (fCartY / (ABS(fCartX) + 0.001));
+
+// Shoulder Joint Pitch (Theta 2)
+_fTheta2 := (180.0 / cPI_Constant) * (fCartZ / (_fDist3D + 0.001));
+
+// Elbow Joint Pitch (Theta 3)
+_fTheta3 := 90.0 - _fTheta2;
+
+arrJoints[1] := _fTheta1;
+arrJoints[2] := _fTheta2;
+arrJoints[3] := _fTheta3;
+arrJoints[4] := 0.0;
+arrJoints[5] := 0.0;
+arrJoints[6] := 0.0;
+
+M_SolveInverseKinematics3D := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_ActiveSplineSegment" Id="{ba5a1f41-4a3e-4829-9f9b-16d4b6d483b3}">
+      <Declaration><![CDATA[PROPERTY P_ActiveSplineSegment : INT
+]]></Declaration>
+      <Get Name="Get" Id="{9fdb880c-ce0c-4fed-b1cf-7c3fb94ce5de}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_ActiveSplineSegment := nActiveSplineSegmentIdx;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_CartesianTrackingErrorNorm" Id="{bd27ce7a-982f-4d72-931a-0a79d0cb7202}">
+      <Declaration><![CDATA[PROPERTY P_CartesianTrackingErrorNorm : LREAL
+]]></Declaration>
+      <Get Name="Get" Id="{e8b8b76d-566c-42d0-9997-5bc9dc016f6d}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_CartesianTrackingErrorNorm := fTrackingErrorNorm_mm;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_CoordinatedTangentialSpeed" Id="{5a6109ec-3a32-443e-91ce-a833fc7e2642}">
+      <Declaration><![CDATA[PROPERTY P_CoordinatedTangentialSpeed : LREAL
+]]></Declaration>
+      <Get Name="Get" Id="{8db1e574-17da-4e7e-86b5-e5f7873b96bd}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_CoordinatedTangentialSpeed := fActualTangentialSpeed;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{2d18c721-ed2d-4dd1-a5d3-fc189fe522bc}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fMasterVelocity_mms := P_CoordinatedTangentialSpeed;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="P_KinematicAxesSynchronized" Id="{18382e0c-7a5f-4c89-900d-fa874c0ae3d8}">
+      <Declaration><![CDATA[PROPERTY P_KinematicAxesSynchronized : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{5df34a79-a5ff-4992-b75a-a7d286455d83}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_KinematicAxesSynchronized := bAxesInSynchronism;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_KinematicRedundancyIndex" Id="{81e0848b-9636-4c8d-8b43-d3a61baf6a12}">
+      <Declaration><![CDATA[PROPERTY P_KinematicRedundancyIndex : REAL
+]]></Declaration>
+      <Get Name="Get" Id="{911d2643-e536-4442-a08a-8e5d46844224}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_KinematicRedundancyIndex := 1.0;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_LookaheadBufferFillCount" Id="{bb351fb2-c23d-48b9-bd47-f37d97168d5c}">
+      <Declaration><![CDATA[PROPERTY P_LookaheadBufferFillCount : INT
+]]></Declaration>
+      <Get Name="Get" Id="{5fa0503a-a245-409f-b9a9-ff311ee7b240}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_LookaheadBufferFillCount := _fbLookaheadRingBuffer.nCount;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

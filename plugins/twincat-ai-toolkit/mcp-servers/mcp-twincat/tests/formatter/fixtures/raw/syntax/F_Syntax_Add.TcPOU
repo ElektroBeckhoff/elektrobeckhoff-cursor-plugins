@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="F_Syntax_Add" Id="{6878b729-ff80-4549-bc9e-e896f41ec564}" SpecialFunc="None">
+    <Declaration><![CDATA[function F_Syntax_Add : int
+var_input
+    nA : int;  
+    nB : int;  
+end_var]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[F_Syntax_Add := nA + nB;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

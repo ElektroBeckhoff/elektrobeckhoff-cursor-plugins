@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_TimeDate" Id="{16aa0c7e-080c-4dd9-a376-f526e76a8a6a}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_TimeDate
+VAR
+    tDuration   : TIME  := T#10S;
+    tDelay      : TIME  := TIME#500MS;
+    tComplex    : TIME  := T#1D2H3M4S500MS;
+    ltDuration  : LTIME := LTIME#1000NS;
+    dDate       : DATE  := D#2026-08-21;
+    todTime     : TOD   := TOD#16:30:00;
+    dtTimestamp : DT    := DT#2026-08-21-16:30:00;
+    tSum        : TIME;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[tSum := tDuration + tDelay;
+
+IF tSum > T#5S THEN
+    tDuration := T#1S;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

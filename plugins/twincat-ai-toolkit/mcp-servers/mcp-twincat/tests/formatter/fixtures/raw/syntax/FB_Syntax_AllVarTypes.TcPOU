@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_AllVarTypes" Id="{16f3eec8-975b-4ef2-b30d-c2242bcdb630}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_AllVarTypes
+VAR_INPUT
+    bEnable     : BOOL;
+    nTargetVal  : DINT := 100;
+    fFactor     : LREAL;
+END_VAR
+VAR_OUTPUT
+    bBusy       : BOOL;
+    bDone       : BOOL;
+    bError      : BOOL;
+    nActualVal  : DINT;
+END_VAR
+VAR_IN_OUT
+    stData      : ST_Syntax_Mini;
+END_VAR
+VAR
+    _nInternalCounter : DINT;
+    _fbTonDelay       : TON;
+END_VAR
+VAR_TEMP
+    nTempIdx : INT;
+    fTempSum : LREAL;
+END_VAR
+VAR_STAT
+    nGlobalRunCount : UDINT;
+END_VAR
+VAR CONSTANT
+    cMaxLimit : DINT := 1000;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[nTempIdx := 0;
+fTempSum := 0.0;
+
+
+IF bEnable THEN
+    bBusy := TRUE;
+    bDone := FALSE;
+    _nInternalCounter := _nInternalCounter + 1;
+    IF _nInternalCounter >= nTargetVal THEN
+        bDone := TRUE;
+        bBusy := FALSE;
+    END_IF
+ELSE
+    bBusy := FALSE;
+    bDone := FALSE;
+END_IF
+
+
+nActualVal := _nInternalCounter;
+stData.nId := TO_INT(_nInternalCounter);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

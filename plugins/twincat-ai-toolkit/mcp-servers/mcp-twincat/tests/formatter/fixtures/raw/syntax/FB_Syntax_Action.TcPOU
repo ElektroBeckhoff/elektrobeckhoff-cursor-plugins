@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_Action" Id="{0efbec70-18ed-41e5-a179-e4fee62f3278}" SpecialFunc="None">
+    <Declaration><![CDATA[function_block FB_Syntax_Action  
+var  
+    _nCounter : int;
+end_var
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_nCounter := _nCounter + 1;
+]]></ST>
+    </Implementation>
+    <Action Name="A_Reset" Id="{151a03be-b987-4adc-ae5a-9f21f38aeda5}">
+      <Implementation>
+        <ST><![CDATA[_nCounter := 0;
+]]></ST>
+      </Implementation>
+    </Action>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <GVL Name="GVL_Syntax_Address" Id="{c0f546e2-e66f-4137-95fc-87f0e029462f}"> <Declaration><![CDATA[var_global bInput    AT %I0.0 : bool; nAnalog   AT %I2    : int; bOutput   AT %Q0.0 : bool; nSetpoint AT %Q4   : dint; end_var
+]]></Declaration> </GVL> </TcPlcObject>

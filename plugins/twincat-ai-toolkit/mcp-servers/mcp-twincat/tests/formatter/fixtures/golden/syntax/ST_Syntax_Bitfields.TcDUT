@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_Bitfields" Id="{114239da-90a7-44ca-9d3e-d9984b8f1425}">
+    <Declaration><![CDATA[TYPE ST_Syntax_Bitfields :
+    STRUCT
+        bBit0    : bit;
+        bBit1    : bit;
+        bBit2    : bit;
+        bBit3    : bit;
+        nPadding : BYTE;
+    END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

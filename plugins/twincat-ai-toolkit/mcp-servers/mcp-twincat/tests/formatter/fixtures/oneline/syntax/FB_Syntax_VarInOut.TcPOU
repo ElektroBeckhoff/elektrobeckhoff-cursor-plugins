@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_VarInOut" Id="{d14581f1-1e3d-4b96-964c-55be4b83bf4d}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_VarInOut VAR_INPUT nFactor : INT := 1; END_VAR VAR_IN_OUT nCounter : INT; END_VAR VAR _stLocal  : ST_Syntax_Mini; _nScratch : INT; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[_nScratch      := nCounter * nFactor;
+nCounter       := _nScratch;
+_stLocal.nId   := nCounter;
+_stLocal.sName := 'Updated'; ]]></ST> </Implementation> <Method Name="M_Process" Id="{c5793e1a-4d2a-43cf-8a03-7f12e9b87b21}"> <Declaration><![CDATA[METHOD M_Process : INT VAR_INPUT nDelta : INT; END_VAR VAR_INST _nInstanceCounter : INT; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[_nInstanceCounter := _nInstanceCounter + nDelta;
+M_Process         := _nInstanceCounter; ]]></ST> </Implementation> </Method> </POU> </TcPlcObject>

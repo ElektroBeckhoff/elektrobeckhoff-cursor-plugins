@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_PragmasAndRegions" Id="{c5bb7cf4-24a4-40f8-a529-2dcf6478d7ed}" SpecialFunc="None"> <Declaration><![CDATA[{attribute 'qualified_only'} {attribute 'no_explicit_call' := 'do not call this POU directly'} FUNCTION_BLOCK FB_Syntax_PragmasAndRegions VAR {attribute 'hide'} _nInternal : DINT;
+
+
+{attribute 'TcEncoding' := 'UTF-8'} _sUtfText : STRING(255) := 'Special text'; END_VAR
+]]></Declaration> <Implementation> <ST><![CDATA[{region "Initialization Section"}
+_nInternal := 0;
+{endregion}
+
+
+{region "Conditional Logic"}
+{IF defined (VARIABLE_EXISTS)}
+_nInternal := 100;
+{ELSIF defined (OTHER_VAR)}
+_nInternal := 200;
+{ELSE}
+_nInternal := 300;
+{END_IF}
+{endregion}
+
+
+// Disable region test
+{stweep.disable}
+_nInternal    :=1+2;   // unformatted spacing
+{stweep.enable}
+]]></ST>
+</Implementation>
+</POU>
+</TcPlcObject>

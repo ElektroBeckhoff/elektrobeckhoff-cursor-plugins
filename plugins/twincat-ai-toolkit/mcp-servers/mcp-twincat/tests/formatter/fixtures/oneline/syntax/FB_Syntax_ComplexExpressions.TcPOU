@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_ComplexExpressions" Id="{de03998a-bdc3-42a8-8bda-0e461c20cf48}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_ComplexExpressions VAR bA       : BOOL; bB       : BOOL; bC       : BOOL; bD       : BOOL; bResult  : BOOL; fVal1    : LREAL := 3.14159; fVal2    : LREAL := 2.71828; fVal3    : LREAL := 1.41421; fOut     : LREAL; nIndex   : INT := 2; arrData  : ARRAY[0..9] OF DINT := [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]; pData    : POINTER TO DINT; dwMask   : DWORD := 16#FF00AA55; dwResult : DWORD; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[// 1. Chained boolean operators with ExST short-circuiting
+bResult := (bA AND_THEN bB) OR_ELSE (bC AND NOT bD) OR (bA XOR bC);
+
+
+// 2. Nested mathematical function calls and precedence
+fOut := LIMIT(0.0, SQRT(ABS(SIN(fVal1) * COS(fVal2) + EXPT(fVal3, 2.0))), 100.0);
+
+
+// 3. Selection operators (SEL, MUX, MIN, MAX)
+fOut := SEL(bResult, MIN(fVal1, fVal2), MAX(fVal2, fVal3));
+fOut := MUX(nIndex, 0.0, fVal1, fVal2, fVal3, 99.9);
+
+
+// 4. Bitwise shifts and mask operations
+dwResult := (SHL(dwMask, 4) OR SHR(dwMask, 2)) AND 16#FFFF0000 XOR 16#0000FFFF;
+
+
+// 5. Pointers and address resolution
+pData := ADR(arrData[nIndex]); IF pData <> 0 THEN
+pData^ := pData^ + 1;
+END_IF ]]></ST> </Implementation> </POU> </TcPlcObject>

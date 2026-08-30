@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="U_Syntax_ExhaustiveComments" Id="{9e36812a-d83b-42c0-8a56-249c1f159e83}">
+    <Declaration><![CDATA[(*******************************************************************************
+ * Union: U_Syntax_ExhaustiveComments
+ * Description: Union testing comments on fields.
+ *******************************************************************************)
+TYPE U_Syntax_ExhaustiveComments : UNION nRawDword : DWORD;                  (* 32-bit raw register value *)
+arrBytes  : ARRAY[0..3] OF BYTE;   // 4-byte byte access
+arrWords  : ARRAY[0..1] OF WORD;   (* 2-word word access *) END_UNION END_TYPE
+]]></Declaration> </DUT> </TcPlcObject>

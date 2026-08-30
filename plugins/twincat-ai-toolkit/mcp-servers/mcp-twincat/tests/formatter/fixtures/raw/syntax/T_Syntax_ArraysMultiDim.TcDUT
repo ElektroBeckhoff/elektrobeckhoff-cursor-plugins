@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="T_Syntax_ArraysMultiDim" Id="{9c619800-0069-47fd-a737-2b9f71608199}">
+    <Declaration><![CDATA[TYPE T_Syntax_ArraysMultiDim :
+STRUCT
+    arr1D : ARRAY[0..9] OF INT;
+    arr2D : ARRAY[1..3, 1..4] OF REAL;
+    arr3D : ARRAY[-2..2, 0..5, 1..2] OF DINT;
+    arrSub : ARRAY[0..100] OF BYTE;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

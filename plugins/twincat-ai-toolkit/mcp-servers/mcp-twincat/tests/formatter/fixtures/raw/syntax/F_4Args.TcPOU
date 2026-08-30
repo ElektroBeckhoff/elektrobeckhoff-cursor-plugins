@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="F_4Args" Id="{6bde4f3e-6453-454d-b420-343d56666e26}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION F_4Args : INT
+VAR_INPUT
+    a : INT;
+    b : INT;
+    c : INT;
+    d : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[F_4Args := a + b + c + d;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

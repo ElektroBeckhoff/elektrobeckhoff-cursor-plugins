@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ExhaustivePragmas" Id="{c4f899a0-ce64-4d92-b46e-bba5ab93338f}" SpecialFunc="None">
+    <Declaration><![CDATA[{attribute 'hide_all_locals'}
+FUNCTION_BLOCK FB_Syntax_ExhaustivePragmas
+VAR
+    {attribute 'displaymode':='hex'}
+    _dwHexStatus : DWORD := 16#DEADBEEF;
+
+    {attribute 'TcEncoding' := 'UTF-8'}
+    _sUtf8String : STRING(100) := 'TwinCAT 3 Structured Text';
+
+    _nValue : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[{region "Initialization Block"}
+    _nValue := 0;
+{endregion}
+
+{region "Conditional Feature Matrix"}
+    {IF defined (FEATURE_ALPHA)}
+        _nValue := 100;
+    {ELSIF defined (FEATURE_BETA)}
+        _nValue := 200;
+    {ELSE}
+        _nValue := 300;
+    {END_IF}
+{endregion}
+
+{stweep.disable}
+// Raw unformatted section
+_nValue:=1+2;
+_dwHexStatus:=16#FF;
+{stweep.enable}
+(* @stweep.disable *)
+_nValue := 999;
+(* @stweep.enable *)
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

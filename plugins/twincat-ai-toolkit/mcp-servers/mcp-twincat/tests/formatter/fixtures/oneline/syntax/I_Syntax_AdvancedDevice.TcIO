@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <Itf Name="I_Syntax_AdvancedDevice" Id="{bb81855f-e08e-4c54-bae4-a3ed4fc19652}"> <Declaration><![CDATA[INTERFACE I_Syntax_AdvancedDevice EXTENDS I_Syntax_BaseDevice
+]]></Declaration> <Method Name="M_Configure" Id="{e89cb159-6076-40ea-bc53-12a853453ef4}"> <Declaration><![CDATA[METHOD M_Configure : BOOL VAR_INPUT stConfig : ST_Syntax_ComplexTree; END_VAR
+]]></Declaration> </Method> <Method Name="M_GetDiagnostics" Id="{bc88c238-0bad-415b-9832-18420694ed9e}"> <Declaration><![CDATA[METHOD M_GetDiagnostics : STRING(255) VAR_OUTPUT nErrorCode : DINT; END_VAR
+]]></Declaration> </Method> </Itf> </TcPlcObject>

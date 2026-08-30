@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_DeepControlFlow" Id="{9e2e16e5-d2b4-4191-b2ef-2bfd24294bf3}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_DeepControlFlow VAR_INPUT bExecute : BOOL; nMode    : INT; nLimit   : INT; END_VAR VAR_OUTPUT bDone    : BOOL; bBusy    : BOOL; bError   : BOOL; nResult  : DINT; END_VAR VAR _i       : INT; _j       : INT; _k       : INT; _nAcc    : DINT; _bFlag   : BOOL; END_VAR
+]]></Declaration> <Implementation> <ST><![CDATA[IF bExecute THEN
+bBusy  := TRUE;
+bDone  := FALSE;
+bError := FALSE;
+_nAcc  := 0;
+
+
+FOR _i := 1 TO nLimit DO IF _i MOD 2 = 0 THEN
+_j := 0;
+WHILE _j < 5 DO
+_j := _j + 1;
+REPEAT
+_k := _k + 1;
+CASE nMode OF 0:
+_nAcc := _nAcc + _i * _j;
+1..5: IF _k > 10 THEN
+FOR _k := 1 TO 3 DO
+WHILE _nAcc < 1000 DO IF _bFlag THEN
+_nAcc := _nAcc + 50;
+ELSE
+_nAcc := _nAcc + 10;
+EXIT; END_IF END_WHILE END_FOR ELSE
+_nAcc := _nAcc + 1;
+END_IF ELSE
+_nAcc := -1;
+bError := TRUE; END_CASE UNTIL _k >= 15 END_REPEAT END_WHILE ELSIF _i = 7 THEN CONTINUE; ELSE
+_nAcc := _nAcc + 1;
+END_IF END_FOR
+
+
+nResult := _nAcc;
+bBusy   := FALSE;
+bDone   := TRUE; ELSE
+bBusy := FALSE;
+END_IF ]]></ST> </Implementation> </POU> </TcPlcObject>

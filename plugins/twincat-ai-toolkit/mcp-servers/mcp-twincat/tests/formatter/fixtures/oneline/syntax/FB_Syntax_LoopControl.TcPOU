@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_LoopControl" Id="{3468b669-d4e1-44e3-a0ae-a6939e12f169}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_LoopControl VAR nSum        : DINT; nCountdown  : INT; nStepState  : INT; bFound      : BOOL; arrBuffer   : ARRAY[1..10] OF INT; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[nSum := 0;
+
+
+// FOR loop forward
+FOR nCountdown := 1 TO 10 DO
+arrBuffer[nCountdown] := nCountdown * 2;
+nSum := nSum + arrBuffer[nCountdown]; END_FOR
+
+
+// FOR loop backwards with step
+FOR nCountdown := 10 TO 1 BY -2 DO IF arrBuffer[nCountdown] > 10 THEN CONTINUE; END_IF
+nSum := nSum - arrBuffer[nCountdown];
+END_FOR
+
+
+// WHILE loop with EXIT
+nCountdown := 1; WHILE nCountdown <= 10 DO IF arrBuffer[nCountdown] = 6 THEN
+bFound := TRUE;
+EXIT; END_IF
+nCountdown := nCountdown + 1;
+END_WHILE
+
+
+// REPEAT UNTIL loop
+nCountdown := 5; REPEAT
+nCountdown := nCountdown - 1;
+UNTIL nCountdown <= 0 END_REPEAT
+
+
+// CASE with ranges and comma lists
+CASE nStepState OF 0:
+nSum := 0;
+1..5:
+nSum := nSum + 10;
+6, 7, 8:
+nSum := nSum + 20;
+9..15, 20..25:
+nSum := nSum + 50;
+ELSE
+nSum := -1;
+END_CASE ]]></ST> </Implementation> </POU> </TcPlcObject>

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_NestedLogCall" Id="{a26829e4-93f0-4cd2-bd33-c63d57c55ceb}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_NestedLogCall
+VAR
+    _sPath         : STRING(255);
+    _fbChild       : FB_Syntax_Calls;
+    _tValue        : TIME := T#2S500MS;
+    _sLog          : STRING(255);
+    _sNested10     : STRING(255);
+    _sReport       : STRING(255);
+    _sFormatted    : STRING(255);
+    _nResult       : INT;
+    _nNestedMath10 : INT;
+    _nIndex        : INT := 1;
+    _fRealResult   : REAL;
+    _arrData       : ARRAY[1..10] OF INT;
+    _bCondition    : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// -----------------------------------------------------------------------------
+// 1. Original 3-level CONCAT log call within nested IF
+// -----------------------------------------------------------------------------
+IF TRUE THEN
+    IF FALSE THEN
+        ;
+    ELSE
+        _sLog := CONCAT('_fbChild: ', CONCAT(INT_TO_STRING(_fbChild.stParam.nId), CONCAT(' Value: ', INT_TO_STRING(_fbChild.nResult))));
+    END_IF
+END_IF
+
+
+// -----------------------------------------------------------------------------
+// 2. Deeply nested 10-level CONCAT string call
+// -----------------------------------------------------------------------------
+_sNested10 := CONCAT('1:', CONCAT('2:', CONCAT('3:', CONCAT('4:', CONCAT('5:', CONCAT('6:', CONCAT('7:', CONCAT('8:', CONCAT('9:', '10')))))))));
+
+
+// -----------------------------------------------------------------------------
+// 3. Deeply nested 10-level arithmetic / function call chain
+// -----------------------------------------------------------------------------
+_nNestedMath10 := F_Syntax_Add(1, F_Syntax_Add(2, F_Syntax_Add(3, F_Syntax_Add(4, F_Syntax_Add(5, F_Syntax_Add(6, F_Syntax_Add(7, F_Syntax_Add(8, F_Syntax_Add(9, 10)))))))));
+
+
+// -----------------------------------------------------------------------------
+// 4. Nested math pipeline with standard functions: MAX, MIN, LIMIT, ABS, SQRT
+// -----------------------------------------------------------------------------
+_nResult := MAX(0, MIN(1000, LIMIT(10, ABS(F_Syntax_Add(F_Syntax_Add(10, 20), F_Syntax_Add(30, F_Syntax_Add(40, 50)))), 500)));
+
+
+_fRealResult := SQRT(INT_TO_REAL(MAX(1, MIN(100, F_Syntax_Add(F_Syntax_Add(1, 2), F_Syntax_Add(3, F_Syntax_Add(4, 5)))))));
+
+
+// -----------------------------------------------------------------------------
+// 5. Nested MUX and SEL calls with nested arguments
+// -----------------------------------------------------------------------------
+_nResult := MUX(_nIndex, F_Syntax_Add(1, 1), SEL(_bCondition, F_Syntax_Add(2, F_Syntax_Add(3, 4)), F_Syntax_Add(5, F_Syntax_Add(6, F_Syntax_Add(7, 8)))), F_Syntax_Add(9, 10));
+
+
+// -----------------------------------------------------------------------------
+// 6. Nested Named Parameter calls (nA := ..., nB := ...)
+// -----------------------------------------------------------------------------
+_nResult := F_Syntax_Add(nA := F_Syntax_Add(nA := F_Syntax_Add(nA := 1, nB := 2), nB := 3), nB := F_Syntax_Add(nA := 4, nB := F_Syntax_Add(nA := 5, nB := 6)));
+
+
+// -----------------------------------------------------------------------------
+// 7. Nested Calls as Array Index Expressions and Assignments
+// -----------------------------------------------------------------------------
+_arrData[F_Syntax_Add(1, F_Syntax_Add(0, 1))] := F_Syntax_Add(F_Syntax_Add(1, 2), F_Syntax_Add(3, F_Syntax_Add(4, 5)));
+
+
+// -----------------------------------------------------------------------------
+// 8. Nested Calls inside Control Flow Conditionals (IF, CASE, WHILE)
+// -----------------------------------------------------------------------------
+IF (F_Syntax_Add(F_Syntax_Add(1, 2), F_Syntax_Add(3, 4)) > 5)
+    AND (F_Syntax_Add(5, F_Syntax_Add(6, 7)) < 100)
+THEN
+    _bCondition := TRUE;
+ELSIF (F_Syntax_Add(1, F_Syntax_Add(2, F_Syntax_Add(3, 4))) = 10) THEN
+    _bCondition := FALSE;
+END_IF
+
+
+// -----------------------------------------------------------------------------
+// 9. 10-level nested Boolean negation and type conversions
+// -----------------------------------------------------------------------------
+_bCondition := NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (F_Syntax_Add(1, 2) = 3)))))))));
+_sFormatted := TO_STRING(TO_DINT(TO_REAL(TO_INT(TO_BYTE(TO_WORD(TO_DWORD(TO_UDINT(TO_LREAL(F_Syntax_Add(10, 20))))))))));
+
+
+// -----------------------------------------------------------------------------
+// 10. 10-level nested MIN/MAX chain and 10-level nested parentheses arithmetic
+// -----------------------------------------------------------------------------
+_nResult := MIN(100, MIN(90, MIN(80, MIN(70, MIN(60, MIN(50, MIN(40, MIN(30, MIN(20, MAX(1, 10))))))))));
+_nResult := (1 + (2 * (3 + (4 * (5 + (6 * (7 + (8 * (9 + F_Syntax_Add(1, 2))))))))));
+
+
+// -----------------------------------------------------------------------------
+// 11. Multi-parameter 5-argument function calls with nested arguments
+// -----------------------------------------------------------------------------
+_nResult := F_5Args(
+    a := F_Syntax_Add(1, 2),
+    b := F_Syntax_Add(3, 4),
+    c := F_Syntax_Add(5, 6),
+    d := F_Syntax_Add(7, 8),
+    e := F_Syntax_Add(9, 10));
+
+
+// -----------------------------------------------------------------------------
+// 12. Nested Logging / String Conversion Formatting
+// -----------------------------------------------------------------------------
+_sReport := CONCAT('Prefix: ', CONCAT(INT_TO_STRING(_fbChild.stParam.nId), CONCAT(' | Result: ', CONCAT(INT_TO_STRING(F_Syntax_Add(F_Syntax_Add(1, 2), F_Syntax_Add(3, 4))), CONCAT(' | Time: ', TO_STRING(_tValue))))));
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

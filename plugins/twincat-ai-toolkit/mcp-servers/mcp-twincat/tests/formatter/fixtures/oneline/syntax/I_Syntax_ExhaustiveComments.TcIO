@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <Itf Name="I_Syntax_ExhaustiveComments" Id="{04b92435-2295-4863-8358-e8cfc52a4b25}">
+    <Declaration><![CDATA[(*******************************************************************************
+ * Interface: I_Syntax_ExhaustiveComments
+ * Description: Interface with doc comments and parameter comments.
+ *******************************************************************************)
+INTERFACE I_Syntax_ExhaustiveComments EXTENDS __SYSTEM.IQueryInterface
+]]></Declaration> <Method Name="ExecuteCommand" Id="{e2a49e42-99b4-48c9-a149-042046df65ef}">
+<Declaration><![CDATA[/// <summary>Executes a device command.</summary>
+METHOD ExecuteCommand : BOOL VAR_INPUT nCmdId : DINT; (* Command identifier *)
+fParam : LREAL; // Command parameter value
+END_VAR VAR_OUTPUT nStatus : UDINT; (* Result status code *) END_VAR
+]]></Declaration> </Method> <Property Name="P_Operational" Id="{94fb8abc-6a0f-428b-b1d4-841267d6148b}">
+<Declaration><![CDATA[/// <summary>True when device is ready.</summary>
+PROPERTY P_Operational : BOOL
+]]></Declaration> <Get Name="Get" Id="{11809c1f-fb9e-4194-886d-5f89d4e34ddc}"> <Declaration><![CDATA[VAR END_VAR
+]]></Declaration> </Get> </Property> </Itf> </TcPlcObject>

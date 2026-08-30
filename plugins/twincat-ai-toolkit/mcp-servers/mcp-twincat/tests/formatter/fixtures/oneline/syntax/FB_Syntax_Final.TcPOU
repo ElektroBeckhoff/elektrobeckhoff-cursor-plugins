@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_Final" Id="{2d0a4735-e35b-4a3e-a618-594a67464bce}" SpecialFunc="None"> <Declaration><![CDATA[function_block FINAL FB_Syntax_Final extends FB_Syntax_Derived var _nValue    : int; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[_nValue := _nValue + 1;
+]]></ST> </Implementation> </POU> </TcPlcObject>

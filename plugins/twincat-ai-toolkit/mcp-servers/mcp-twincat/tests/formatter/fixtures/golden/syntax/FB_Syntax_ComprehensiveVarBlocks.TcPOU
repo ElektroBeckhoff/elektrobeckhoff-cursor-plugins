@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ComprehensiveVarBlocks" Id="{665b726d-2cd3-4906-8ed4-9705c8a599f9}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_ComprehensiveVarBlocks
+VAR_INPUT
+    bStart  : BOOL;
+    nTarget : DINT;
+END_VAR
+VAR_OUTPUT
+    bReady   : BOOL;
+    nCurrent : DINT;
+END_VAR
+VAR_IN_OUT
+    stShared : ST_Syntax_ComplexTree;
+END_VAR
+VAR
+    _nInternalCounter : DINT;
+    _bActive          : BOOL;
+END_VAR
+VAR_STAT
+    _nGlobalCallCount : UDINT;
+END_VAR
+VAR_TEMP
+    _nTempLoopIndex : INT;
+    _fIntermediate  : LREAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_nGlobalCallCount := _nGlobalCallCount + 1;
+_nTempLoopIndex   := 0;
+_fIntermediate    := 1.0;
+
+IF bStart THEN
+    _bActive          := TRUE;
+    _nInternalCounter := _nInternalCounter + 1;
+    nCurrent          := _nInternalCounter;
+    bReady            := (_nInternalCounter >= nTarget);
+ELSE
+    _bActive := FALSE;
+    bReady   := FALSE;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

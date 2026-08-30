@@ -1,0 +1,46 @@
+---
+description: Verification rules and procedures for TwinCAT3 Formatter test fixtures (raw, golden, oneline, 4-gate fixpoint, STweep sync).
+alwaysApply: false
+---
+
+# TwinCAT 3 Formatter Fixtures & Canonical Verification Rules
+
+Applies when working on the ST formatter (`mcp-twincat/formatter/`), test fixtures (`tests/formatter/fixtures/`), or canonical verification scripts.
+
+## The Tripartite Fixture Structure
+
+```
+tests/formatter/fixtures/
+├── raw/       <-- Input / unformatted files (.TcPOU, .TcDUT, .TcGVL, .TcIO)
+├── golden/    <-- Canonical reference formatted files (100% byte-exact)
+└── oneline/   <-- Single-line stress test files
+```
+
+## The 4-Gate Fixpoint Requirement (`verify_4gate_fixpoint.py`)
+
+All 98+ fixture files must pass all 4 gates without any failures:
+1. **Gate 1 (Raw -> Golden)**: `format(raw) == golden` (100% byte match).
+2. **Gate 2 (Golden -> Golden)**: `format(golden) == golden` (Idempotence, 0 changes).
+3. **Gate 3 (Fixpoint Golden)**: `format(collapse(golden)) == golden`.
+4. **Gate 4 (Fixpoint Raw)**: `format(collapse(raw)) == golden`.
+
+Command:
+```bash
+python tests/formatter/scripts/verify_4gate_fixpoint.py --all
+```
+
+## TwinCAT 3 Compiler & XAE Verification
+
+All fixtures in `raw` and `golden` must be 100% syntactically valid TwinCAT 3 code.
+Run `twincat_check_all_objects` in `twincat3-solution.sln` to confirm:
+- `errors == 0`
+- All GUIDs are valid `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}` format.
+
+## Workflow for New/Modified Fixtures
+
+1. Add/modify in `fixtures/raw/`.
+2. Verify with `twincat_check_all_objects` in TwinCAT solution (0 errors).
+3. Format and write to `fixtures/golden/`.
+4. Run `python tests/formatter/scripts/generate_oneline_stress_fixtures.py`.
+5. Run `python tests/formatter/scripts/verify_4gate_fixpoint.py --all`.
+6. Run `pytest tests/formatter/tests`.

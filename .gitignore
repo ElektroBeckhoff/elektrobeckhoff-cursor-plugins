@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 *.pyo
 bug-report.md
+.temp/
+**/.temp/
+.cache/
+**/.cache/
+

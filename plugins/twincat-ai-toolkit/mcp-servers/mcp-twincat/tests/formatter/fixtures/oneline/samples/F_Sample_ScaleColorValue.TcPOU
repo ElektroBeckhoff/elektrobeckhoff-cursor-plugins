@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="F_Sample_ScaleColorValue" Id="{fa644505-294d-4982-831a-8bf2df6e47e6}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION F_Sample_ScaleColorValue : USINT VAR_INPUT nColorValue         : USINT; nActualLevelPercent : UINT; (* [0-100%] - Actual output-value in Percent *) END_VAR VAR rFactor : REAL; rResult : REAL; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[(* Prozentfaktor berechnen *)
+rFactor := UINT_TO_REAL(nActualLevelPercent) / 100.0;
+
+
+(* Farbwert skalieren *)
+rResult := USINT_TO_REAL(nColorValue) * rFactor;
+
+
+(* Ergebnis begrenzen und rückwandeln *)
+IF rResult > 255.0 THEN
+F_Sample_ScaleColorValue := 255;
+ELSIF rResult < 0.0 THEN
+F_Sample_ScaleColorValue := 0;
+ELSE
+F_Sample_ScaleColorValue := REAL_TO_USINT(rResult);
+END_IF ]]></ST> </Implementation> </POU> </TcPlcObject>

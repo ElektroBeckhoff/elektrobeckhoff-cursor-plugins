@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_StringLiterals" Id="{7f7e0906-1c46-418f-975c-e13d57e4a30a}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_StringLiterals var sA  : string(255); sB  : string(255); wsC : WSTRING(128); sD  : string(255); sE  : string(255); end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[sA  := 'part1 $' part2';
+sB  := 'price $$100';
+wsC := "wide string literal";
+sD  := 'ae oe ue';
+sE  := CONCAT('abc', 'def');
+]]></ST> </Implementation> </POU> </TcPlcObject>

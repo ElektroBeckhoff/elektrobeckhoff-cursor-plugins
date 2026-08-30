@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <GVL Name="GVL_Syntax_Literals" Id="{5a8d9612-e788-4e6b-8b93-3441c31b3149}"> <Declaration><![CDATA[var_global todClock           : TOD  := TOD#19:00:00; dtEvent            : DT   := DT#2024-01-15-12:30:00; nTyped             : dint := dint#42; nAux, nAux2, nAux3: udint; end_var
+]]></Declaration> </GVL> </TcPlcObject>

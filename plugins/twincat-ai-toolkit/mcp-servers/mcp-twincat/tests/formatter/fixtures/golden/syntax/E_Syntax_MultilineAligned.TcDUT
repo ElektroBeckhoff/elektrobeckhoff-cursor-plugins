@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="E_Syntax_MultilineAligned" Id="{5356bcb5-1088-4a9f-936a-14136185c222}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+TYPE E_Syntax_MultilineAligned : (
+        None                := 0,
+        AutomaticMode       := 1,  // Full automatic mode
+        ManualMode          := 2,  // Manual maintenance
+        CalibrationMode     := 3,  // Axis calibration
+        EmergencyStopActive := 10, // E-Stop asserted
+        SafetyInterlockOpen := 11, // Safety door open
+        ServiceOverride     := 99  // Special service mode
+    );
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

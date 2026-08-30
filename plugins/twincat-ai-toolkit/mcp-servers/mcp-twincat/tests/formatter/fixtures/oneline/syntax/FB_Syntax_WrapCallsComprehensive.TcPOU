@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_WrapCallsComprehensive" Id="{1869db3e-c725-44a8-8333-1e6b991de104}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_WrapCallsComprehensive VAR sOut1      : STRING(255); sOut2      : STRING(255); sOut3      : STRING(255); fbTon      : TON; arrPoints  : ARRAY[1..2] OF ST_Syntax_Mini; bCondition : BOOL; nRes       : INT; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[// 1. Short call with 2 parameters (stays single-line)
+fbTon(IN := TRUE, PT := T#1S);
+
+
+// 2. Multiline call with 5 parameters (auto-wrapped by STweep because >4 args)
+nRes := F_Syntax_Add(nA := 1, nB := 2);
+
+
+// 3. Array of struct element access
+arrPoints[1].nId     := 1;
+arrPoints[1].bActive := TRUE;
+
+
+// 4. Multiline IF condition with line breaks before THEN
+IF (sOut1 = 'First') AND (sOut2 = 'Second') AND NOT (sOut3 = 'Third') THEN
+bCondition := TRUE;
+END_IF ]]></ST> </Implementation> </POU> </TcPlcObject>

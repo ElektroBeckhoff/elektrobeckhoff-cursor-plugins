@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_Calls" Id="{e38be573-46d1-4991-b4b0-17645f4cf4ca}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_Calls var fbTon     : TON; stParam  : ST_Syntax_Mini := (nId := 1, bActive := true, sName := 'test'); arrValues    : array[1..3] of int := [1, 2, 3]; nResult   : int; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[fbTon(IN := true, PT := T#1S);
+
+
+stParam.nId := 1;
+stParam.bActive := true;
+stParam.sName := 'test';
+
+
+arrValues[1] := 1;
+
+
+nResult := F_Syntax_Add(stParam.nId, arrValues[1]); ]]></ST> </Implementation> </POU> </TcPlcObject>

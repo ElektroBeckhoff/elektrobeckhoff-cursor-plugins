@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="ST_Syntax_PointerRef" Id="{8801a84f-2908-4435-9139-4ab69390263b}"> <Declaration><![CDATA[type ST_Syntax_PointerRef : struct pData : pointer to int; rItem : reference to int; end_struct end_type
+]]></Declaration> </DUT> </TcPlcObject>

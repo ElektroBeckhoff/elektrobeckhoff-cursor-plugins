@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_AdvancedSystemExtensions" Id="{c51e0481-4f38-4e12-8821-2e6834d9a5b3}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_AdvancedSystemExtensions IMPLEMENTS I_Syntax_BaseDevice
+VAR_INPUT
+    bExecute : BOOL;
+    iDevice  : I_Syntax_BaseDevice;
+END_VAR
+VAR_OUTPUT
+    bBusy  : BOOL;
+    bDone  : BOOL;
+    bError : BOOL;
+END_VAR
+VAR
+    // --- 1. System Introspection & Info Types ---
+    _stVarInfo     : __SYSTEM.VAR_INFO;
+    _nCounter      : DINT := 100;
+    _nAtomicVal    : DINT := 0;
+    _nOldAtomic    : DINT;
+    _dwSpinLock    : DWORD;
+    _dwLockResult  : DWORD;
+    _bLockAcquired : BOOL;
+
+    // --- 2. Interface Query Pointer ---
+    _pDeviceInstance : POINTER TO FB_Syntax_AdvancedSystemExtensions;
+    _bPointerValid   : BOOL;
+
+    // --- 3. Compiler Position Macros ---
+    _sMacroPosition : STRING(255);
+    _sMacroPOU      : STRING(80);
+
+    // --- 4. Single FB Initializer at Declaration ---
+    _fbStartupTimer : TON := (PT := T#5S);
+    _fbFailsafeTon  : TON := (IN := TRUE, PT := T#2S500MS);
+
+    // --- 5. Partial Bit / Byte / Word Access ---
+    _nTestDWord : DWORD := 16#1234_5678;
+    _bBitX0     : BOOL;
+    _nByteB1    : BYTE;
+    _nWordW1    : WORD;
+
+    // --- 6. Pointer Indexed Access ---
+    _pByteMemory : POINTER TO BYTE;
+    _arrRawBytes : ARRAY[0..7] OF BYTE := [16#AA, 16#BB, 16#CC, 16#DD, 16#11, 16#22, 16#33, 16#44];
+    _nExtracted  : BYTE;
+
+    // --- 7. Fluent Builder State ---
+    _fGain   : LREAL := 1.0;
+    _fOffset : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// -----------------------------------------------------------------------------
+// 1. System Introspection (__VARINFO)
+// -----------------------------------------------------------------------------
+_stVarInfo := __VARINFO(_nCounter);
+
+// -----------------------------------------------------------------------------
+// 2. Interlocked Multitask Operations (__XADD & TEST_AND_SET)
+// -----------------------------------------------------------------------------
+_nOldAtomic    := __XADD(ADR(_nAtomicVal), 1);
+_dwLockResult  := TEST_AND_SET(_dwSpinLock);
+_bLockAcquired := (_dwLockResult = 1);
+
+// -----------------------------------------------------------------------------
+// 3. Compiler Position Macros
+// -----------------------------------------------------------------------------
+_sMacroPosition := __POSITION();
+_sMacroPOU      := __POUNAME();
+
+// -----------------------------------------------------------------------------
+// 4. Interface to Pointer Dynamic Resolution (__QUERYPOINTER)
+// -----------------------------------------------------------------------------
+IF iDevice <> 0 THEN
+    _bPointerValid := __QUERYPOINTER(iDevice, _pDeviceInstance);
+END_IF
+
+// -----------------------------------------------------------------------------
+// 5. Partial Variable Bit / Byte / Word Access (%X, %B, %W, %D)
+// -----------------------------------------------------------------------------
+_bBitX0  := _nTestDWord.%X0;
+_nByteB1 := _nTestDWord.%B1;
+_nWordW1 := _nTestDWord.%W1;
+
+_nTestDWord.%X31 := TRUE;
+_nTestDWord.%B0  := 16#FF;
+
+// -----------------------------------------------------------------------------
+// 6. Pointer Array Index Access
+// -----------------------------------------------------------------------------
+_pByteMemory := ADR(_arrRawBytes[0]);
+
+IF _pByteMemory <> 0 THEN
+    _nExtracted     := _pByteMemory[2];
+    _pByteMemory[3] := 16#EE;
+END_IF
+
+// -----------------------------------------------------------------------------
+// 7. Generic ANY Parameter Call
+// -----------------------------------------------------------------------------
+F_Syntax_GenericAny(anyParam := _nCounter);
+F_Syntax_GenericAny(anyParam := _arrRawBytes);
+
+// -----------------------------------------------------------------------------
+// 8. Method Chaining (Fluent Interface Pattern)
+// -----------------------------------------------------------------------------
+THIS^.M_SetGain(2.5).M_SetOffset(10.0);
+
+// -----------------------------------------------------------------------------
+// 9. Single FB Execution
+// -----------------------------------------------------------------------------
+_fbStartupTimer(IN := bExecute);
+bDone := _fbStartupTimer.Q;
+]]></ST>
+    </Implementation>
+    <Method Name="M_Reset" Id="{ea53388c-1cfa-46b3-9e75-631ef472a420}">
+      <Declaration><![CDATA[METHOD M_Reset : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nCounter := 0;
+M_Reset   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SetGain" Id="{f8b5d418-dbba-47e8-818e-6b869cd4f93b}">
+      <Declaration><![CDATA[METHOD M_SetGain : REFERENCE TO FB_Syntax_AdvancedSystemExtensions
+VAR_INPUT
+    fGain : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fGain := fGain;
+M_SetGain REF= THIS^;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SetOffset" Id="{fce92ae7-6064-4d0d-adcc-652bc0ad2a79}">
+      <Declaration><![CDATA[METHOD M_SetOffset : REFERENCE TO FB_Syntax_AdvancedSystemExtensions
+VAR_INPUT
+    fOffset : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fOffset := fOffset;
+M_SetOffset REF= THIS^;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Start" Id="{b510be73-4942-4a2d-b79c-b3b1a509d6ce}">
+      <Declaration><![CDATA[METHOD M_Start : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[bBusy   := TRUE;
+M_Start := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stop" Id="{445b8463-bc49-4e88-8626-ac9f4158dde6}">
+      <Declaration><![CDATA[METHOD M_Stop : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[bBusy  := FALSE;
+M_Stop := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_IsRunning" Id="{e704f95d-5201-422c-9f83-405de80aa822}">
+      <Declaration><![CDATA[PROPERTY P_IsRunning : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{5542e08c-bac9-4d71-9136-d2d8da5c5afd}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_IsRunning := bBusy;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

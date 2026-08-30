@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Syntax_Extended" Id="{13b41300-9ce0-4ce0-a29d-ee2f15951d9e}">
+    <Declaration><![CDATA[INTERFACE I_Syntax_Extended EXTENDS I_Syntax_Widget
+]]></Declaration>
+    <Method Name="M_Execute" Id="{e5f6a1b2-c3d4-4e5f-c06b-7c8d9e0f1a2b}">
+      <Declaration><![CDATA[method M_Execute : bool
+var_input
+    nCommand : dint;
+end_var
+]]></Declaration>
+    </Method>
+    <Method Name="M_Reset" Id="{7ad8b0bd-b8e8-447e-ae70-6aaa2d45d1cc}">
+      <Declaration><![CDATA[method M_Reset : bool
+]]></Declaration>
+    </Method>
+    <Property Name="P_ExtendedStatus" Id="{acb160f8-190f-4161-806f-16a237f4e6af}">
+      <Declaration><![CDATA[property P_ExtendedStatus : int
+]]></Declaration>
+      <Get Name="Get" Id="{5e573bf0-7431-42eb-99fa-2e7219b3fa95}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+  </Itf>
+</TcPlcObject>

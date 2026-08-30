@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_CaseRanges" Id="{8aa381f0-ff41-43c1-909a-f2a5254a42a5}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_CaseRanges var_input nSelector : int; nSub      : int; end_var var nResult : int; end_var
+]]></Declaration> <Implementation> <ST><![CDATA[case nSelector of 1, 2, 3:
+nResult := 10;
+4..7: case nSub of 0:
+nResult := 20;
+1..3:
+nResult := 30;
+else
+nResult := -1;
+end_case 8..10, 15:
+nResult := 40;
+else
+nResult := 0;
+end_case ]]></ST> </Implementation> </POU> </TcPlcObject>

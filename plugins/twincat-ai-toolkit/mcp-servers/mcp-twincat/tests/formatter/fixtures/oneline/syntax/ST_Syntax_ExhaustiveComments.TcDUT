@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="ST_Syntax_ExhaustiveComments" Id="{35c4851a-2666-43b3-8ea5-39755aca987d}">
+    <Declaration><![CDATA[(*******************************************************************************
+ * Struct: ST_Syntax_ExhaustiveComments
+ * Description: Data structure with comments in all possible positions.
+ *******************************************************************************)
+TYPE ST_Syntax_ExhaustiveComments : STRUCT
+// --- Identification ---
+nId          : DINT         := 1;      (* Unique device ID *)
+sTag         : STRING(31)   := 'MAIN'; // System tag name
+
+
+// --- Configuration ---
+bEnabled     : BOOL         := TRUE;   (* Master enable *)
+fMinLimit    : REAL         := 0.0;    // Lower threshold
+fMaxLimit    : REAL         := 100.0;  (* Upper threshold *)
+
+
+// --- Complex / Nested fields ---
+arrThreshold : ARRAY[1..3] OF REAL := [ 10.0, (* stage 1 *) 50.0, (* stage 2 *) 90.0  (* stage 3 *)
+]; // Multi-stage limits
+END_STRUCT END_TYPE
+]]></Declaration> </DUT> </TcPlcObject>

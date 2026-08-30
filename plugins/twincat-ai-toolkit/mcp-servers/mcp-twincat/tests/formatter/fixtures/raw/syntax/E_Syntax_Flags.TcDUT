@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="E_Syntax_Flags" Id="{7017fe2b-05f4-4d2b-af1b-1e9e94bc5c7a}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}  
+type E_Syntax_Flags : (
+    None := 0,
+    BitA := 2#0000_0001,
+    BitB := 16#0002,
+    BitC :=4,
+    BitD := 8,
+    BitE:=16,
+    BitF := 32
+) int;
+end_type
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

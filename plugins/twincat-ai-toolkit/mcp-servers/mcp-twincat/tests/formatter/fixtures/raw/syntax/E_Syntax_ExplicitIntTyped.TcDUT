@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="E_Syntax_ExplicitIntTyped" Id="{0be199ed-3e0f-40d0-8753-2399bd6afada}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_Syntax_ExplicitIntTyped :
+(
+    None       := 0, // Default zero value
+    Init       := 1, // Initialization stage
+    Running    := 10, // Active processing
+    Warning    := 16#00FF, // Hex literal
+    FatalError := -1 // Negative signed value
+) DINT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

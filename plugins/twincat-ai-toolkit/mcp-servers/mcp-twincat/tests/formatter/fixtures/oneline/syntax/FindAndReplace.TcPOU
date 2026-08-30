@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FindAndReplace" Id="{95c36bd4-8ac8-46d2-b50b-77ee538cccb7}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION FindAndReplace : BOOL VAR_INPUT pSrcString    : POINTER TO STRING; pDeleteString : POINTER TO STRING; pInsertString : POINTER TO STRING; pDstString    : POINTER TO STRING; nDstSize      : UDINT; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[FindAndReplace := TRUE;
+]]></ST> </Implementation> </POU> </TcPlcObject>

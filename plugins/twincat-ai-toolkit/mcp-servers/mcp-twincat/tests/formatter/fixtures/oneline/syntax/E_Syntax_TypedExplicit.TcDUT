@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <DUT Name="E_Syntax_TypedExplicit" Id="{77645550-bed2-4d53-bcaa-1a245c4ccd2a}"> <Declaration><![CDATA[{attribute 'qualified_only'} {attribute 'strict'} TYPE E_Syntax_TypedExplicit : (
+Idle       := 0,    // Initial state
+Starting   := 10,   // Starting sequence
+Running    := 100,  // Active processing
+Stopping   := 200,  // Ramp down
+ErrorState := -1    // Fault occurred
+) DINT := Idle; END_TYPE
+]]></Declaration> </DUT> </TcPlcObject>

@@ -1,0 +1,143 @@
+---
+description: >-
+  MCP Python ST formatter awareness. When to use twincat_format /
+  twincat_format_progress / twincat_format_validate /
+  twincat_format_config. File-based, no XAE/COM needed.
+alwaysApply: false
+---
+
+# TwinCAT MCP Format (Python Formatter)
+
+Use when the user asks to format Structured Text, "Format code",
+or `/twincat3-cmd-format`. This is the **default** format path.
+Detailed workflow: skill `twincat3-format`.
+
+For STweep via XAE COM (explicit request only): rule `twincat3-mcp-stweep` /
+skill `twincat3-stweep-format` / command `/twincat3-cmd-stweep-format`.
+
+## Tools (file-based, no COM/XAE session required)
+
+| Tool | Purpose |
+|------|---------|
+| `twincat_format` | Format files/folders/project — ST code + XML structure |
+| `twincat_format_progress` | Poll running format job (large projects) |
+| `twincat_format_validate` | Validate-only (XML structure, GUIDs, naming) — no format |
+| `twincat_format_config` | Show active config (defaults + project overrides) |
+
+No `twincat_open` needed. Operates directly on `.TcPOU` / `.TcDUT` / `.TcGVL` / `.TcIO` files.
+
+## Core parameters (`twincat_format`)
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `path` | required | File, folder, or project root |
+| `recursive` | `true` | Recurse into subfolders |
+| `dry_run` | `false` | Preview changes without writing |
+| `validate` | `true` | Run XML validation after format |
+| `format_xml` | `true` | Format XML structure (indent, attribute order) |
+| `sort_elements` | `false` | Alphabetically sort Methods/Actions/Properties (opt-in) |
+| `config_path` | `""` | Custom `.stformat.json` path |
+| `region` | `"all"` | `all`, `declaration`, `implementation` |
+| `member` | `""` | Specific method/action/property name |
+| `member_filter` | `""` | `all_methods`, `all_actions`, `all_properties` |
+| `project` | `""` | `.sln` path for whole-project format |
+
+## Typical usage
+
+**Single file:**
+```
+twincat_format(path="<file.TcPOU>")
+```
+
+**Folder (recursive):**
+```
+twincat_format(path="<folder>")
+```
+
+**Whole project:**
+```
+twincat_format(project="<path-to.sln>")
+```
+
+**Declaration only:**
+```
+twincat_format(path="<file.TcPOU>", region="declaration")
+```
+
+**Only methods in a file:**
+```
+twincat_format(path="<file.TcPOU>", member_filter="all_methods")
+```
+
+**Specific method:**
+```
+twincat_format(path="<file.TcPOU>", member="M_Init")
+```
+
+**Dry-run (preview):**
+```
+twincat_format(path="<folder>", dry_run=true)
+```
+
+## What it formats
+
+### ST Code (CDATA blocks)
+- Keyword uppercasing (`if` → `IF`, `end_if` → `END_IF`)
+- Tab-to-space conversion (4 spaces)
+- Trailing whitespace removal
+- Blank line clamping (max 1 consecutive)
+- Declaration alignment (`:`, `:=`, inline comments)
+- Assignment alignment (`:=` in related groups)
+- FB call parameter alignment
+- Boolean chain joining (short AND_THEN/OR_ELSE on one line)
+- Line wrapping at configured limit
+- Multiline FB call join (≤4 params back to single line)
+
+### XML Structure
+- Consistent indentation (2 spaces)
+- Attribute ordering (Version, Name, Id, SpecialFunc)
+- Element sorting (Declaration → Implementation → Methods/Actions/Properties alphabetically)
+- CDATA formatting (empty/single-line/multi-line consistency)
+
+### Safety
+- Syntax integrity check (token count before/after)
+- Atomic writes (temp file + rename)
+- Backup files (`.bak`, deleted on success)
+- SHA-256 change detection (skip unchanged files)
+- `{formatting.disable}` / `{formatting.enable}` regions respected
+- `{STweep.Disable}` / `{STweep.Enable}` markers also respected (compatibility)
+
+## CFC / FBD files
+
+The formatter handles CFC and FBD files safely:
+- Declaration blocks (ST) are formatted
+- ST Methods / Properties / Actions are formatted
+- CFC/FBD Implementation XML is **never touched**
+
+## Configuration
+
+Defaults: `formatter/defaults.json` (matches STweep 4.5 behavior).
+Project override: `.stformat.json` in project root (merged on top of defaults).
+
+Show active config:
+```
+twincat_format_config(project_path="<folder>")
+```
+
+## Result interpretation
+
+| Field | Meaning |
+|-------|---------|
+| `success` | No hard failures |
+| `total` | Files discovered |
+| `formatted` | Files actually changed on disk |
+| `unchanged` | Files already formatted (hash match) |
+| `errors` | Files that failed (parse error, syntax integrity) |
+| `dry_run` | Whether changes were only previewed |
+
+## Do not
+
+- Use this for STweep-specific formatting (use `twincat_stweep_format` with XAE)
+- Format without checking result (`errors` field may contain syntax warnings)
+- Disable `syntax_check` unless explicitly asked (prevents data corruption)
+- Format files inside `{formatting.disable}` regions (the formatter skips them automatically)

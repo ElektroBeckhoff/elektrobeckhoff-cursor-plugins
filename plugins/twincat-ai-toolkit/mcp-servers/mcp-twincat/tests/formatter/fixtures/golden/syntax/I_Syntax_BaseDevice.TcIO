@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Syntax_BaseDevice" Id="{2f268b66-04fb-4e1f-8ed2-37e106521d68}">
+    <Declaration><![CDATA[INTERFACE I_Syntax_BaseDevice EXTENDS __SYSTEM.IQueryInterface
+]]></Declaration>
+    <Method Name="M_Start" Id="{ff38a999-85f8-4aed-bd04-2308ab074300}">
+      <Declaration><![CDATA[METHOD M_Start : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="M_Stop" Id="{84f79bc0-31f7-49b2-b128-e4db0d2d12a1}">
+      <Declaration><![CDATA[METHOD M_Stop : BOOL
+]]></Declaration>
+    </Method>
+    <Property Name="P_IsRunning" Id="{fc4134dd-42fe-4916-9dba-cdd9547ce85f}">
+      <Declaration><![CDATA[PROPERTY P_IsRunning : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{42720f7b-cf68-4c66-83c4-95614aa23c7c}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+  </Itf>
+</TcPlcObject>

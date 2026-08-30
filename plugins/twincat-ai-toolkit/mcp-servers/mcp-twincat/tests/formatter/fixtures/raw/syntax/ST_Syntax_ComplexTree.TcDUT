@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_ComplexTree" Id="{c59e5cac-5ec5-4710-b21b-9e926af94f63}">
+    <Declaration><![CDATA[TYPE ST_Syntax_ComplexTree :
+STRUCT
+    nNodeId         : DINT;
+    sNodeName       : STRING(50);
+    eState          : E_Syntax_ExplicitIntTyped;
+    arrCoefficients : ARRAY[1..5] OF LREAL;
+    bActive         : BOOL;
+    tLastUpdated    : TIME;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

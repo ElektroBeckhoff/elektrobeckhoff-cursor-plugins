@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="E_Syntax_ExhaustiveComments" Id="{cef5ed4f-2653-4e17-8598-9a62a52a9176}">
+    <Declaration><![CDATA[(*******************************************************************************
+ * Enum: E_Syntax_ExhaustiveComments
+ * Description: Enumeration with comments on every member and section.
+ *******************************************************************************)
+TYPE E_Syntax_ExhaustiveComments : (
+    // --- Initial / Off states ---
+    Uninitialized := 0,  (* System not yet configured *)
+    Idle          := 10, // System ready and waiting
+
+
+    // --- Operational states ---
+    Starting      := 20, (* Ramping up *)
+    Running       := 30, // Normal continuous operation
+    Pausing       := 40, (* Transitioning to paused *)
+    Paused        := 50, // Temporarily suspended
+
+
+    // --- Error / Abort states ---
+    Stopping      := 80, (* Graceful shutdown *)
+    Error         := 90, // Fault detected
+    EmergencyStop := 99  (* Immediate safety halt *)
+) INT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

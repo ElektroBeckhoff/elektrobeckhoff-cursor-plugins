@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_BitAccess" Id="{77f21bea-62ae-4aaa-bac3-f54684713274}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_BitAccess var nRegister : word; nFlags : byte; bState : bool; stBits : ST_Syntax_Bitfields; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[nRegister.0 := true;
+nRegister.15 := false;
+bState := nRegister.7;
+
+
+nFlags.0 := bState;
+nFlags.1 := not stBits.bBit0;
+
+
+stBits.bBit0 := true;
+stBits.bBit1 := false;
+stBits.bBit2 := nFlags.2; ]]></ST> </Implementation> </POU> </TcPlcObject>

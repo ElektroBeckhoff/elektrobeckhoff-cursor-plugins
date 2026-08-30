@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_ValueBase" Id="{cd26ddd1-ec22-4cdd-a4a9-f0b27a483156}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sample_ValueBase
+VAR_INPUT
+    bEnable     : BOOL := TRUE;
+    fRawInput   : LREAL;
+    fGain       : LREAL := 1.0;
+    fOffset     : LREAL := 0.0;
+END_VAR
+VAR_OUTPUT
+    fScaled     : LREAL;
+    bValid      : BOOL;
+    bWarning    : BOOL;
+    hrStatus    : HRESULT;
+END_VAR
+VAR
+    _fFiltered  : LREAL;
+    _nSampCount : UDINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF NOT bEnable THEN
+    fScaled  := 0.0;
+    bValid   := FALSE;
+    bWarning := FALSE;
+    hrStatus := 1; // S_FALSE
+    RETURN;
+END_IF
+
+
+_nSampCount := _nSampCount + 1;
+_fFiltered  := _fFiltered * 0.9 + fRawInput * 0.1;
+fScaled     := _fFiltered * fGain + fOffset;
+
+
+bValid   := TRUE;
+bWarning := (fScaled > 1000.0) OR (fScaled < -1000.0);
+hrStatus := 0; // S_OK
+]]></ST>
+    </Implementation>
+    <Method Name="M_Reset" Id="{d4ed5b60-0aa3-4f31-8221-28dbd5a486db}">
+      <Declaration><![CDATA[METHOD M_Reset : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fFiltered  := 0.0;
+_nSampCount := 0;
+M_Reset     := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

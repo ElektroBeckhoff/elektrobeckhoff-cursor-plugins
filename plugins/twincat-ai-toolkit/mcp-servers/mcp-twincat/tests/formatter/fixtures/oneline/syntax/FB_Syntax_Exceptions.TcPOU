@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_Exceptions" Id="{b1a2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d}" SpecialFunc="None"> <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_Exceptions VAR pPointer  : POINTER TO INT; nResult   : INT; sPouName  : STRING := 'FB_Syntax_Exceptions'; sPosition : STRING := 'Line 1'; END_VAR
+]]></Declaration> <Implementation>
+<ST><![CDATA[sPouName  := 'FB_Syntax_Exceptions';
+sPosition := 'Main';
+
+
+{IF defined (SEH_ENABLED)}
+__TRY
+nResult   := nResult + 1;
+pPointer^ := 42; __CATCH(exc)
+nResult := -1;
+__FINALLY
+pPointer := 0;
+__ENDTRY
+{ELSE}
+IF pPointer <> 0 THEN
+nResult   := nResult + 1;
+pPointer^ := 42; ELSE
+nResult  := -1;
+pPointer := 0; END_IF
+{END_IF}
+]]></ST> </Implementation> </POU> </TcPlcObject>

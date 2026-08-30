@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_DeepNested" Id="{2c90af6b-1b2a-488e-88e6-83ad1c2112c5}">
+    <Declaration><![CDATA[TYPE ST_Syntax_DeepNested :
+    STRUCT
+        stBaseHeader : ST_Syntax_Mini;
+        arrPoints    : ARRAY[1..2] OF ST_Syntax_Mini := [(nId := 1, bActive := TRUE, sName := 'P1'), (nId := 2, bActive := FALSE, sName := 'P2')];
+        pCustomData  : POINTER TO DINT;
+        rStatusFlag  : REFERENCE TO BOOL;
+        fCoeff       : LREAL := 2.718281828;
+    END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

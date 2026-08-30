@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ExhaustiveEdgeCases" Id="{47e9e086-4b2e-421a-a2e7-6f7668c42824}" SpecialFunc="None">
+    <Declaration><![CDATA[(*******************************************************************************
+ * POU Name:    FB_Syntax_ExhaustiveEdgeCases
+ * Description: Comprehensive TwinCAT-3 ST edge cases test covering:
+ *              - Dynamic cast (?=)
+ *              - Partial bit access (%X, %B, %W, %D, .0)
+ *              - Exponentiation (**)
+ *              - All typed numeric literals (BYTE#, WORD#, DWORD#, LWORD#, etc.)
+ *              - All date/time literal families (T#, LTIME#, DATE#, TOD#, DT#, etc.)
+ *              - Array repetition initializers [8(0), 4(1.5)]
+ *              - String escape sequences ($', $$, $N, $R, $T, $L, $P, $0A, $41)
+ *              - Direct addressing (AT %I*, AT %Q*, AT %M*, AT %IX0.0, etc.)
+ *              - Nested regions and XML special characters
+ *******************************************************************************)
+FUNCTION_BLOCK FB_Syntax_ExhaustiveEdgeCases
+VAR_INPUT
+    bEnable          : BOOL := TRUE;
+    iSourceWidget    : I_Syntax_Widget;
+END_VAR
+VAR_OUTPUT
+    bSuccess         : BOOL;
+    nBitmaskResult   : DWORD;
+END_VAR
+VAR
+    // --- 1. Direct Addressing ---
+    bInputFlag AT %I* : BOOL;
+    nOutputWord AT %Q* : WORD;
+    nMemoryDWord AT %M* : DWORD;
+
+
+    // --- 2. Typed Literals & Types ---
+    _nByte           : BYTE := BYTE#16#FF;
+    _nWord           : WORD := WORD#2#1010_0101_1100_0011;
+    _nDWord          : DWORD := DWORD#8#777;
+    _nLWord          : LWORD := LWORD#16#FFFF_0000_FFFF_0000;
+    _nSInt           : SINT := SINT#-128;
+    _nInt            : INT := INT#-32768;
+    _nDInt           : DINT := DINT#-2147483648;
+    _nUSInt          : USINT := USINT#255;
+    _nUInt           : UINT := UINT#65535;
+    _nUDInt          : UDINT := UDINT#4294967295;
+    _fReal           : REAL := REAL#1.234E-5;
+    _fLReal          : LREAL := LREAL#-5.678e+12;
+
+
+    // --- 3. Date and Time Literal Families ---
+    _tDuration       : TIME := T#1D2H3M4S500MS;
+    _tLTime          : LTIME := LTIME#1000NS;
+    _dDate           : DATE := DATE#2026-08-21;
+    _dShortDate      : DATE := D#2026-08-21;
+    _todTime         : TOD := TOD#15:30:00.123;
+    _todLong         : TIME_OF_DAY := TIME_OF_DAY#15:30:00.123;
+    _dtDateTime      : DT := DT#2026-08-21-15:30:00;
+    _dtLong          : DATE_AND_TIME := DATE_AND_TIME#2026-08-21-15:30:00;
+
+
+    // --- 4. String Escapes ---
+    _sMsg1           : STRING(255) := 'Line1$NLine2$RLine3$TTabbed';
+    _sMsg2           : STRING(255) := 'Single quote: $' and Dollar: $$';
+    _sMsg3           : STRING(255) := 'Form feed $L and Page break $P';
+    _sMsg4           : STRING(255) := 'Hex char $0A and $41';
+    _wsMsg           : WSTRING(128) := "Double quote: $" and Dollar: $$";
+
+
+    // --- 5. Array Repetitions & Subrange ---
+    _arrRep1         : ARRAY[1..10] OF INT := [1, 2, 8(0)];
+    _arrRep2         : ARRAY[1..6] OF REAL := [3(1.5), 3(2.5)];
+    _nSubrangeVal    : T_Syntax_SubrangeEdgeCases := 75;
+
+
+    // --- 6. Interface and Dynamic Cast ---
+    _iWidget         : I_Syntax_Widget;
+    _fPowerRes       : LREAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// -----------------------------------------------------------------------------
+// 1. Bit Access (.0 .. .15, .31)
+// -----------------------------------------------------------------------------
+_nWord.0    := TRUE;
+_nWord.15   := FALSE;
+_nDWord.31  := TRUE;
+_nLWord.63  := FALSE;
+bSuccess    := _nWord.0 AND NOT _nWord.1;
+
+
+// -----------------------------------------------------------------------------
+// 2. Query Interface and Method Calls
+// -----------------------------------------------------------------------------
+__QUERYINTERFACE(iSourceWidget, _iWidget);
+IF _iWidget <> 0 THEN
+    _iWidget.M_Init();
+END_IF
+
+
+// -----------------------------------------------------------------------------
+// 3. Exponentiation (EXPT)
+// -----------------------------------------------------------------------------
+_fPowerRes := EXPT(2.5, 3.0);
+_fPowerRes := _fPowerRes + EXPT(2.0, 4.0);
+
+
+// -----------------------------------------------------------------------------
+// 4. Nested Regions
+// -----------------------------------------------------------------------------
+{region "Outer Region Level 1"}
+_nInt := _nInt + 1;
+{region "Inner Region Level 2"}
+_nDInt := _nDInt + 1;
+{endregion}
+_nSInt := _nSInt + 1;
+{endregion}
+
+
+// -----------------------------------------------------------------------------
+// 5. XML Special Characters within ST Expressions and Strings
+// -----------------------------------------------------------------------------
+IF (_nInt < 100) AND (_nDInt > -500) AND (_nSInt <> 0) THEN
+    _sMsg1 := 'https://example.com/api?user=admin&flag=1&test=true';
+    _sMsg2 := '<xml node="data" attr="true">Value & Info</xml>';
+END_IF
+
+
+// -----------------------------------------------------------------------------
+// 6. Inline Comments inside Arithmetic Expressions
+// -----------------------------------------------------------------------------
+_nDInt := _nDInt + (* offset A *) 10 + (* offset B *) (20 * 2);
+
+
+nBitmaskResult := _nDWord;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

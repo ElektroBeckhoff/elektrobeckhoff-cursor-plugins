@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_StateMachineController" Id="{22b30c72-f1a4-4839-8817-e296ec1b34ac}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sample_StateMachineController
+VAR_INPUT
+    bStart       : BOOL;
+    bStop        : BOOL;
+    bReset       : BOOL;
+    tStepTimeout : TIME := T#5S;
+END_VAR
+VAR_OUTPUT
+    eCurrentState : INT;
+    bRunning      : BOOL;
+    bAlarm        : BOOL;
+    sAlarmText    : STRING(255);
+END_VAR
+VAR
+    _nState       : INT;
+    _fbStepTimer  : TON;
+    _fbRTrigStart : R_TRIG;
+    _fbRTrigReset : R_TRIG;
+    _nCyclesDone  : UDINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_fbRTrigStart(CLK := bStart);
+_fbRTrigReset(CLK := bReset);
+
+IF _fbRTrigReset.Q THEN
+    _nState       := 0;
+    bAlarm        := FALSE;
+    sAlarmText    := '';
+    bRunning      := FALSE;
+END_IF
+
+_fbStepTimer(IN := (_nState > 0 AND _nState < 100), PT := tStepTimeout);
+IF _fbStepTimer.Q AND NOT bAlarm THEN
+    bAlarm     := TRUE;
+    sAlarmText := 'Step timeout occurred';
+    _nState    := 100;
+END_IF
+
+CASE _nState OF
+    0: // Idle
+        bRunning := FALSE;
+        IF _fbRTrigStart.Q AND NOT bAlarm THEN
+            _nState  := 10;
+            bRunning := TRUE;
+        END_IF
+
+    10: // Pre-check
+        IF bStop THEN
+            _nState := 90;
+        ELSE
+            _nState := 20;
+        END_IF
+
+    20: // Execution
+        _nCyclesDone := _nCyclesDone + 1;
+        _nState      := 30;
+
+    30: // Verification
+        IF bStop THEN
+            _nState := 90;
+        ELSE
+            _nState := 10;
+        END_IF
+
+    90: // Normal Shutdown
+        bRunning := FALSE;
+        _nState  := 0;
+
+    100: // Alarm State
+        bRunning := FALSE;
+END_CASE
+
+eCurrentState := _nState;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

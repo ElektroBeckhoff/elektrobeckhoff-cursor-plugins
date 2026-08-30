@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?> <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16"> <POU Name="FB_Syntax_Derived" Id="{ee893be3-3f4d-43fd-ad98-be9638564c28}" SpecialFunc="None"> <Declaration><![CDATA[function_block FB_Syntax_Derived extends FB_Syntax_AbstractBase implements I_Syntax_Extended var _sStatus : string := 'IDLE'; _nCounter : dint; end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[_nCounter := _nCounter + 1;
+]]></ST> </Implementation> <Method Name="M_Execute" Id="{e5f6a1b2-c3d4-4e5f-c06b-7c8d9e0f1a2b}"> <Declaration><![CDATA[method M_Execute : bool var_input nCommand : dint; end_var
+]]></Declaration> <Implementation> <ST><![CDATA[case nCommand of 1:
+_sStatus := 'RUNNING';
+2:
+_sStatus := 'PAUSED';
+else
+_sStatus := 'UNKNOWN';
+end_case
+M_Execute := true;
+]]></ST> </Implementation> </Method> <Method Name="M_GetValue" Id="{ab1b6ad1-a4ee-40bd-81ae-4c3f57901aec}"> <Declaration><![CDATA[method M_GetValue : int
+]]></Declaration> <Implementation>
+<ST><![CDATA[M_GetValue := TO_INT(_nCounter);
+]]></ST> </Implementation> </Method> <Method Name="M_Reset" Id="{d4e5f6a1-b2c3-4d4e-bf5a-6b7c8d9e0f1a}"> <Declaration><![CDATA[method M_Reset : bool
+]]></Declaration> <Implementation>
+<ST><![CDATA[_nCounter := 0;
+_bReady := TRUE;
+_sStatus := 'RESET';
+M_Reset := TRUE; ]]></ST> </Implementation> </Method> <Property Name="P_ExtendedStatus" Id="{acb160f8-190f-4161-806f-16a237f4e6af}"> <Declaration><![CDATA[property P_ExtendedStatus : int
+]]></Declaration> <Get Name="Get" Id="{5e573bf0-7431-42eb-99fa-2e7219b3fa95}"> <Declaration><![CDATA[var end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[P_ExtendedStatus := 1;
+]]></ST> </Implementation> </Get> </Property> <Property Name="P_Status" Id="{f6a1b2c3-d4e5-4f6a-d17c-8d9e0f1a2b3c}"> <Declaration><![CDATA[property P_Status : string
+]]></Declaration> <Get Name="Get" Id="{a1b2c3d4-e5f6-4a7b-e28d-9e0f1a2b3c4d}"> <Declaration><![CDATA[var end_var
+]]></Declaration> <Implementation>
+<ST><![CDATA[P_Status := _sStatus;
+]]></ST> </Implementation> </Get> </Property> </POU> </TcPlcObject>
