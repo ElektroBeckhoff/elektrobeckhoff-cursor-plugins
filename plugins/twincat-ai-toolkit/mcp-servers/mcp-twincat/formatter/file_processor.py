@@ -26,7 +26,7 @@ from formatter.st_lexer import tokenize
 from formatter.diff_reporter import generate_diff
 from formatter.safe_writer import SafeFileWriter
 from formatter.st_parse_utils import RE_IF_MULTILINE_CALL
-from twincat_core.syntax import TokenType as CoreTokenType, tokenize_st
+from twincat_core.syntax import TokenType as CoreTokenType, tokenize_st, validate_st_syntax_in_xml
 from twincat_core.xml import CdataKind, CdataSpan, patch_by_filter, read_tc_xml
 from formatter.st_alignment import (
     align_assignments, align_chained_init_assignments, align_init_injection_if_bodies,
@@ -108,6 +108,16 @@ def process_file(
     warnings: list[str] = []
     errors: list[str] = []
 
+    # 1. Pre-format syntax safety check (reject broken source files, leave untouched)
+    if format_st and config.safety.syntax_check:
+        pre_syntax_errors = validate_st_syntax_in_xml(text)
+        if pre_syntax_errors:
+            return FormatResult(
+                path=path, success=False, changed=False,
+                errors=tuple(f"Pre-format syntax error: {e}" for e in pre_syntax_errors),
+                warnings=tuple(warnings),
+            )
+
     if validate:
         issues = validate_twincat_xml(
             text, path,
@@ -160,6 +170,14 @@ def process_file(
 
     # Syntax integrity check (fast token comparison, <1ms overhead)
     if format_st and config.safety.syntax_check:
+        post_syntax_errors = validate_st_syntax_in_xml(result_text)
+        if post_syntax_errors:
+            return FormatResult(
+                path=path, success=False, changed=False,
+                errors=tuple(f"Post-format syntax error: {e}" for e in post_syntax_errors),
+                warnings=tuple(warnings),
+            )
+
         integrity_errors = check_syntax_integrity(
             normalize_line_endings(original_text, "\n"),
             normalize_line_endings(result_text, "\n"),

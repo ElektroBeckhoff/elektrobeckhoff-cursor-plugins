@@ -12,6 +12,7 @@ from autodocs.parsers.pou import parse_tcPou
 from autodocs.reporting import AutodocsLogger
 from autodocs.type_index import build_type_index
 from autodocs.types import AutodocsReport
+from twincat_core.syntax import validate_st_syntax_in_xml
 
 
 def process_folder(
@@ -63,6 +64,13 @@ def process_folder(
     # Process all POU files
     for file_path in base_folder.rglob("*.TcPOU"):
         try:
+            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+            st_syntax_errors = validate_st_syntax_in_xml(raw_text)
+            if st_syntax_errors:
+                errors += 1
+                logger.log(f"ERROR: Syntax errors in {file_path.name}: {'; '.join(st_syntax_errors)}")
+                continue
+
             rel_path = file_path.relative_to(base_folder)
             pou_out_file = (root_out / rel_path).with_suffix(".md")
 
@@ -105,6 +113,13 @@ def process_folder(
     # Process all DUT files
     for file_path in base_folder.rglob("*.TcDUT"):
         try:
+            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+            st_syntax_errors = validate_st_syntax_in_xml(raw_text)
+            if st_syntax_errors:
+                errors += 1
+                logger.log(f"ERROR: Syntax errors in {file_path.name}: {'; '.join(st_syntax_errors)}")
+                continue
+
             rel_path = file_path.relative_to(base_folder)
             dut_out_file = (root_out / rel_path).with_suffix(".md")
 
@@ -147,6 +162,13 @@ def process_folder(
     # Process all GVL files
     for file_path in base_folder.rglob("*.TcGVL"):
         try:
+            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+            st_syntax_errors = validate_st_syntax_in_xml(raw_text)
+            if st_syntax_errors:
+                errors += 1
+                logger.log(f"ERROR: Syntax errors in {file_path.name}: {'; '.join(st_syntax_errors)}")
+                continue
+
             rel_path = file_path.relative_to(base_folder)
             gvl_out_file = (root_out / rel_path).with_suffix(".md")
 
@@ -189,6 +211,13 @@ def process_folder(
     # Process all Interface files
     for file_path in base_folder.rglob("*.TcIO"):
         try:
+            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+            st_syntax_errors = validate_st_syntax_in_xml(raw_text)
+            if st_syntax_errors:
+                errors += 1
+                logger.log(f"ERROR: Syntax errors in {file_path.name}: {'; '.join(st_syntax_errors)}")
+                continue
+
             rel_path = file_path.relative_to(base_folder)
             itf_out_file = (root_out / rel_path).with_suffix(".md")
 

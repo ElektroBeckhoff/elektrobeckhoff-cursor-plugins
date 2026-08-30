@@ -51,7 +51,7 @@ from .ast import (
 from .cst import CstElement, CstNode, CstNodeKind
 from .diagnostics import DiagnosticSeverity, SyntaxDiagnostic
 from .lexer import Lexer, tokenize_st
-from .parser import parse_declaration, parse_implementation
+from .parser import parse_declaration, parse_implementation, validate_st_syntax_in_xml
 from .parser_declarations import DeclarationParser
 from .parser_statements import StatementParser
 from .span import Position, SourceSpan
@@ -127,4 +127,5 @@ __all__ = [
     "StatementParser",
     "parse_declaration",
     "parse_implementation",
+    "validate_st_syntax_in_xml",
 ]

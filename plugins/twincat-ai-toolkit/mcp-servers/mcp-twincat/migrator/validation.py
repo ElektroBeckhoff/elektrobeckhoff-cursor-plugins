@@ -23,7 +23,8 @@ def calculate_accuracy(tc: TcFile) -> float:
     """
     item_count = sum(len(nw.items) for nw in tc.networks)
     total = max(len(tc.networks), len(tc.st_networks), item_count, 1)
-    penalty = len(tc.todos) + len(tc.warnings) * 0.5
+    calc_warnings = [w for w in tc.warnings if not w.startswith("Generated ST syntax")]
+    penalty = len(tc.todos) + len(calc_warnings) * 0.5
     if penalty <= 0:
         return 100.0
     return max(0.0, round((total - penalty) / total * 100, 2))
@@ -124,6 +125,27 @@ def validate_generated_st(tc: TcFile, cfg: MigrationConfig) -> bool:
         if cfg.strict:
             tc.errors.append("Strict mode: TODOs present, aborting")
             ok = False
+
+    # ST syntax validation gate using twincat_core
+    if tc.generated_st.strip():
+        try:
+            from twincat_core.syntax import parse_implementation, DiagnosticSeverity
+
+            _, _, diags = parse_implementation(tc.generated_st)
+            syntax_errors = [d for d in diags if d.severity == DiagnosticSeverity.ERROR]
+            if syntax_errors:
+                for err in syntax_errors:
+                    msg = f"Generated ST syntax issue (line {err.span.start.line}): {err.message}"
+                    tc.warnings.append(msg)
+                    if cfg.strict:
+                        tc.errors.append(msg)
+                if cfg.strict:
+                    ok = False
+        except Exception as exc:
+            tc.warnings.append(f"ST syntax validation issue: {exc}")
+            if cfg.strict:
+                tc.errors.append(f"ST syntax validation failed: {exc}")
+                ok = False
 
     type_mismatches = tc.generated_st.count("TYPE MISMATCH:")
     tc.stats = {
