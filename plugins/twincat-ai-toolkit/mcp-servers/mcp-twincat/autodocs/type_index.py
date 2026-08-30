@@ -37,27 +37,18 @@ def build_type_index(base_folder: Path) -> dict:
     The lowercase key enables case-insensitive matching at lookup time, which
     is required because TwinCAT identifiers are case-insensitive.
     """
+    from twincat_core.xml.reader import read_tc_xml_file
+
     index: dict[str, Path] = {}
 
-    _DECL_GETTER = {
-        "POU": gather_main_declaration_text,
-        "DUT": gather_dut_declaration_text,
-        "GVL": gather_gvl_declaration_text,
-        "Itf": gather_itf_declaration_text,
-    }
-
-    for ext, tag in [("*.TcPOU", "POU"), ("*.TcDUT", "DUT"), ("*.TcGVL", "GVL"), ("*.TcIO", "Itf")]:
+    for ext in ("*.TcPOU", "*.TcDUT", "*.TcGVL", "*.TcIO"):
         for fpath in base_folder.rglob(ext):
             try:
-                tree = ET.parse(fpath)
-                root = tree.getroot()
-                name = fpath.stem
-                for el in root.iter():
-                    if localname(el.tag) == tag:
-                        name = el.get("Name") or name
-                        break
+                doc = read_tc_xml_file(fpath)
+                name = doc.root_object_name or fpath.stem
+                decl_span = doc.get_declaration_span()
+                decl = decl_span.content if decl_span else ""
 
-                decl = _DECL_GETTER[tag](root)
                 if decl and has_hide_attribute(decl):
                     continue
 

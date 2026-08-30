@@ -70,24 +70,12 @@ def create_backup(path: Path, backup_dir: Optional[Path] = None,
 
 
 def write_output_file(content: str, path: Path, encoding: str = "utf-8") -> bool:
-    try:
-        fd, tmp_path = tempfile.mkstemp(
-            suffix=path.suffix, prefix=f".{path.stem}_tmp_", dir=str(path.parent))
-        try:
-            os.write(fd, content.encode(encoding))
-            os.close(fd)
-            fd = -1
-            os.replace(tmp_path, str(path))
-        except BaseException:
-            if fd >= 0:
-                os.close(fd)
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
-        return True
-    except Exception as exc:
-        logging.error("Write failed for %s: %s", path, exc)
+    from twincat_core.xml.safe_io import write_file_safe
+    summary = write_file_safe(path, content.encode(encoding), backup=False)
+    if summary.error:
+        logging.error("Write failed for %s: %s", path, summary.error)
         return False
+    return True
 
 
 def can_replace(tc: TcFile, cfg: MigrationConfig, backup_path: Optional[Path]) -> Tuple[bool, str]:

@@ -117,6 +117,5 @@ def _strip_quotes(s: str) -> str:
 
 
 def _regenerate_guids(xml_text: str) -> str:
-    def _new_guid(match):
-        return f'Id="{{{str(uuid.uuid4())}}}"'
-    return re.sub(r'Id="\{[0-9a-fA-F\-]+\}"', _new_guid, xml_text)
+    from twincat_core.xml.guid_manager import regenerate_all_guids
+    return regenerate_all_guids(xml_text)

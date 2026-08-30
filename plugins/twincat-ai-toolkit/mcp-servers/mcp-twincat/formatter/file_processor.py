@@ -26,6 +26,8 @@ from formatter.st_lexer import tokenize
 from formatter.diff_reporter import generate_diff
 from formatter.safe_writer import SafeFileWriter
 from formatter.st_parse_utils import RE_IF_MULTILINE_CALL
+from twincat_core.syntax import TokenType as CoreTokenType, tokenize_st
+from twincat_core.xml import CdataKind, CdataSpan, patch_by_filter, read_tc_xml
 from formatter.st_alignment import (
     align_assignments, align_chained_init_assignments, align_init_injection_if_bodies,
     align_pre_chained_true_orphans, align_ref_to_preceding_assign, align_declarations, align_fb_call_params, align_array_struct_inits, align_inline_comments,
@@ -1445,38 +1447,61 @@ def _neighbor_has_same_assign_col(lines: list[str], idx: int, pos: int) -> bool:
     return False
 
 
-_RE_CDATA_BLOCK = re.compile(r"(<!\[CDATA\[)(.*?)(\]\]>)", re.DOTALL)
+def _span_matches_scope(span: CdataSpan, scope: FormatScope | None) -> bool:
+    """Check if a CDATA span matches the given format scope filter."""
+    if not scope or (
+        scope.region == FormatRegion.ALL
+        and not scope.member_name
+        and scope.member_filter is None
+    ):
+        return True
+
+    if scope.region == FormatRegion.DECLARATION:
+        if not span.is_declaration:
+            return False
+    elif scope.region == FormatRegion.IMPLEMENTATION:
+        if not span.is_implementation:
+            return False
+
+    if scope.member_name:
+        if span.parent_name.casefold() != scope.member_name.casefold():
+            return False
+
+    if scope.member_filter == MemberFilter.ALL_METHODS:
+        if span.kind not in (CdataKind.METHOD_DECLARATION, CdataKind.METHOD_IMPLEMENTATION):
+            return False
+    elif scope.member_filter == MemberFilter.ALL_ACTIONS:
+        if span.kind not in (CdataKind.ACTION_DECLARATION, CdataKind.ACTION_IMPLEMENTATION):
+            return False
+    elif scope.member_filter == MemberFilter.ALL_PROPERTIES:
+        if span.kind not in (
+            CdataKind.PROPERTY_DECLARATION,
+            CdataKind.PROPERTY_GET_DECLARATION,
+            CdataKind.PROPERTY_GET_IMPLEMENTATION,
+            CdataKind.PROPERTY_SET_DECLARATION,
+            CdataKind.PROPERTY_SET_IMPLEMENTATION,
+        ):
+            return False
+
+    return True
 
 
 def _format_st_in_cdata_blocks(
     text: str, config: FormatterConfig, scope: FormatScope | None = None
 ) -> str:
-    """Format ST code inside CDATA blocks without full XML reformat."""
-    if scope and (scope.region != FormatRegion.ALL or scope.member_name or scope.member_filter):
-        allowed = _resolve_scope_keys_from_text(text, scope)
-        counter = [0]
+    """Format ST code inside CDATA blocks without full XML reformat using twincat_core.xml surgical patching."""
+    doc = read_tc_xml(text)
 
-        def _replace_scoped(m: re.Match[str]) -> str:
-            key = f"__CDATA_{counter[0]}__"
-            counter[0] += 1
-            content = m.group(2)
-            if content.strip() and key in allowed:
-                formatted = _format_st_pipeline(content, config)
-                formatted = formatted.rstrip("\n") + "\n"
-                return f"{m.group(1)}{formatted}{m.group(3)}"
-            return m.group(0)
+    def _replacer(span: CdataSpan) -> str | None:
+        if not span.content.strip():
+            return None
+        if not _span_matches_scope(span, scope):
+            return None
+        formatted = _format_st_pipeline(span.content, config)
+        return formatted.rstrip("\n") + "\n"
 
-        return _RE_CDATA_BLOCK.sub(_replace_scoped, text)
-
-    def _replace(m: re.Match[str]) -> str:
-        content = m.group(2)
-        if content.strip():
-            formatted = _format_st_pipeline(content, config)
-            formatted = formatted.rstrip("\n") + "\n"
-            return f"{m.group(1)}{formatted}{m.group(3)}"
-        return m.group(0)
-
-    return _RE_CDATA_BLOCK.sub(_replace, text)
+    patched, _ = patch_by_filter(doc, _replacer)
+    return patched
 
 
 def _accumulate_result(batch: BatchResult, result: FormatResult) -> None:
@@ -1671,7 +1696,7 @@ _RE_SEMI_TOK = re.compile(r";")
 
 
 def _extract_tokens(cdata: str) -> dict[str, list[str]]:
-    """Extract syntax-relevant tokens from ST code using the single-pass lexer."""
+    """Extract syntax-relevant tokens from ST code using twincat_core.syntax."""
     idents: list[str] = []
     numbers: list[str] = []
     assigns: list[str] = []
@@ -1679,18 +1704,28 @@ def _extract_tokens(cdata: str) -> dict[str, list[str]]:
     strings: list[str] = []
     pragmas: list[str] = []
 
-    for tok in tokenize(cdata):
-        if tok.type in (TokenType.IDENTIFIER, TokenType.KEYWORD):
+    tokens, _ = tokenize_st(cdata, include_trivia=True)
+    for tok in tokens:
+        if (
+            tok.type in (CoreTokenType.IDENTIFIER, CoreTokenType.BOOL_LITERAL)
+            or tok.type.name.startswith("KEYWORD_")
+        ):
             idents.append(tok.value.upper())
-        elif tok.type == TokenType.NUMBER:
+        elif tok.type in (
+            CoreTokenType.INT_LITERAL,
+            CoreTokenType.REAL_LITERAL,
+            CoreTokenType.HEX_LITERAL,
+            CoreTokenType.BIN_LITERAL,
+            CoreTokenType.TYPED_LITERAL,
+        ):
             numbers.append(tok.value)
-        elif tok.type in (TokenType.ASSIGN, TokenType.OUTPUT_ASSIGN):
+        elif tok.type in (CoreTokenType.ASSIGN, CoreTokenType.OUTPUT_ASSIGN, CoreTokenType.REF_ASSIGN):
             assigns.append(tok.value)
-        elif tok.type == TokenType.SEMICOLON:
+        elif tok.type == CoreTokenType.SEMICOLON:
             semis.append(tok.value)
-        elif tok.type == TokenType.STRING:
+        elif tok.type in (CoreTokenType.STRING_LITERAL, CoreTokenType.WSTRING_LITERAL):
             strings.append(tok.value)
-        elif tok.type == TokenType.PRAGMA:
+        elif tok.type == CoreTokenType.PRAGMA:
             pragmas.append(tok.value)
 
     return {
@@ -1712,8 +1747,8 @@ def check_syntax_integrity(original_text: str, formatted_text: str) -> list[str]
     When XML sorting reorders CDATA blocks (methods/actions), we compare
     tokens as a combined set across ALL blocks rather than per-index.
     """
-    orig_cdatas = _RE_CDATA_EXTRACT.findall(original_text)
-    fmt_cdatas = _RE_CDATA_EXTRACT.findall(formatted_text)
+    orig_cdatas = [s.content for s in read_tc_xml(original_text).cdata_spans]
+    fmt_cdatas = [s.content for s in read_tc_xml(formatted_text).cdata_spans]
 
     errors: list[str] = []
 

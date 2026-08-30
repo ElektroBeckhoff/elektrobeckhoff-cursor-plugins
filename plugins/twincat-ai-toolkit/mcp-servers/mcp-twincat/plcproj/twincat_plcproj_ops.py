@@ -118,13 +118,9 @@ class SyncReport:
 
 def _read_text_raw(path: Path) -> str:
     """Read a file preserving exact newlines (no universal-newline translation)."""
-    raw = path.read_bytes()
-    for enc in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            return raw.decode(enc)
-        except (UnicodeDecodeError, ValueError):
-            continue
-    return raw.decode("utf-8", errors="replace")
+    from twincat_core.xml.safe_io import read_file_lossless
+    text, _ = read_file_lossless(path)
+    return text
 
 
 def _is_excluded_dir(rel_path: str) -> bool:
@@ -450,106 +446,16 @@ _KNOWN_FAKE_PREFIXES: Set[str] = {
 _HEX_SEQ = "0123456789abcdef"
 
 
-def _is_valid_guid(value: str) -> bool:
-    """Check whether *value* is a valid GUID (with or without braces)."""
-    t = value.strip().strip("{}")
-    try:
-        uuid.UUID(t)
-        return True
-    except ValueError:
-        return False
-
-
-def _is_fake_guid(value: str) -> bool:
-    """Detect AI-generated fake GUIDs that parse as valid UUIDs but have
-    obvious non-random patterns.
-
-    Checks both the full hyphenated string and the pure 32 hex-digit form.
-    Returns True if any heuristic triggers.
-    """
-    t = value.strip().strip("{}").lower()
-    try:
-        uuid.UUID(t)
-    except ValueError:
-        return False
-
-    hex_only = t.replace("-", "")
-    if len(hex_only) != 32:
-        return False
-
-    # --- Hex-based checks (32 hex digits, no hyphens) ---
-
-    # Repeated digits: 5+ consecutive identical hex digits
-    if re.search(r"(.)\1{4,}", hex_only):
-        return True
-
-    # Sequential ascending: 6+ consecutive ascending hex digits
-    asc_run = 1
-    for i in range(1, len(hex_only)):
-        prev_idx = _HEX_SEQ.index(hex_only[i - 1])
-        curr_idx = _HEX_SEQ.index(hex_only[i])
-        if curr_idx == prev_idx + 1:
-            asc_run += 1
-            if asc_run >= 6:
-                return True
-        else:
-            asc_run = 1
-
-    # Sequential descending: 6+ consecutive descending hex digits
-    desc_run = 1
-    for i in range(1, len(hex_only)):
-        prev_idx = _HEX_SEQ.index(hex_only[i - 1])
-        curr_idx = _HEX_SEQ.index(hex_only[i])
-        if curr_idx == prev_idx - 1:
-            desc_run += 1
-            if desc_run >= 6:
-                return True
-        else:
-            desc_run = 1
-
-    # Low entropy: fewer than 6 distinct hex digits in the entire GUID
-    if len(set(hex_only)) < 6:
-        return True
-
-    # --- Full-string checks (with hyphens) ---
-
-    segments = t.split("-")
-    if len(segments) != 5:
-        return False
-
-    # Known fake prefixes (first segment, 8 hex digits)
-    if segments[0] in _KNOWN_FAKE_PREFIXES:
-        return True
-
-    # Counter suffix: last segment (12 hex) is 75%+ one digit with small counter
-    last = segments[4]
-    if len(last) == 12:
-        from collections import Counter
-        counts = Counter(last)
-        most_common_char, most_common_count = counts.most_common(1)[0]
-        if most_common_count >= 9:
-            return True
-
-    # Segment-sequence: 2+ segments are ascending hex sequences
-    seq_count = 0
-    for seg in segments:
-        if len(seg) >= 4 and seg in _HEX_SEQ:
-            seq_count += 1
-    if seq_count >= 2:
-        return True
-
-    # Mirrored adjacent segments
-    for i in range(len(segments) - 1):
-        if len(segments[i]) >= 4 and segments[i] == segments[i + 1][::-1]:
-            return True
-
-    return False
+from twincat_core.xml.guid_manager import (
+    is_valid_guid as _is_valid_guid,
+    is_fake_ai_guid as _is_fake_guid,
+    normalize_guid as _core_normalize_guid,
+)
 
 
 def _normalize_guid(value: str) -> str:
     """Normalize a GUID string to lowercase without braces."""
-    t = value.strip().strip("{}")
-    return str(uuid.UUID(t)).lower()
+    return _core_normalize_guid(value, braces=False)
 
 
 def _repair_fake_guids_in_file(content: str) -> tuple:
