@@ -7,6 +7,8 @@ description: >-
 
 # Autodocs (Markdown API docs)
 
+AutoDocs uses `twincat_core.xml` and `twincat_core.syntax` / AST semantic representations to parse POUs, DUTs, GVLs, and Interfaces without XML loss or parallel regex parsers.
+
 ## Scope (ONLY this)
 
 1. Set `input` = solution folder (`<repo-root>/<LibName>/`) per rule `twincat3-mcp-autodocs`.

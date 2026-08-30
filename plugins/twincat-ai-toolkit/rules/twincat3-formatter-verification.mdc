@@ -16,9 +16,22 @@ tests/formatter/fixtures/
 └── oneline/   <-- Single-line stress test files
 ```
 
+## Solution Integration Tests (`tests/solution/`)
+
+All integration tests that interact with the real TwinCAT 3 test solution (`solution/twincat3-solution/`) are centralized under:
+```
+tests/solution/
+├── core/       <-- Lossless XML roundtrip, Syntax, Virtual ST, Workspace Index
+├── formatter/  <-- Formatter idempotency and XAE STweep parity
+├── autodocs/   <-- AutoDocs generation against real solution POUs
+├── migrator/   <-- Migrator file loader & integrity
+├── plcproj/    <-- .plcproj parsing, verify & sync
+└── mcp/        <-- MCP server tools and LSP handler integration
+```
+
 ## The 4-Gate Fixpoint Requirement (`verify_4gate_fixpoint.py`)
 
-All 98+ fixture files must pass all 4 gates without any failures:
+All fixture files must pass all 4 gates without any failures:
 1. **Gate 1 (Raw -> Golden)**: `format(raw) == golden` (100% byte match).
 2. **Gate 2 (Golden -> Golden)**: `format(golden) == golden` (Idempotence, 0 changes).
 3. **Gate 3 (Fixpoint Golden)**: `format(collapse(golden)) == golden`.
@@ -43,4 +56,4 @@ Run `twincat_check_all_objects` in `twincat3-solution.sln` to confirm:
 3. Format and write to `fixtures/golden/`.
 4. Run `python tests/formatter/scripts/generate_oneline_stress_fixtures.py`.
 5. Run `python tests/formatter/scripts/verify_4gate_fixpoint.py --all`.
-6. Run `pytest tests/formatter/tests`.
+6. Run `pytest tests/formatter/tests` and `pytest tests/solution/formatter`.

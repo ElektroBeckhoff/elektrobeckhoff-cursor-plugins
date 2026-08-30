@@ -5,6 +5,8 @@ alwaysApply: false
 
 # TwinCAT PlcProject Sync Safety
 
+PlcProject operations utilize `twincat_core.project` and `twincat_core.xml` for lossless MSBuild/XML parsing and safe atomic I/O.
+
 ## Rule 1: Always verify before sync
 
 Before syncing, always run `twincat_plcproj_verify` first to understand the current drift. If verify shows no drift, no sync is needed.

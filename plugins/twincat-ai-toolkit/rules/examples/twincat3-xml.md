@@ -2,22 +2,22 @@
 
 Principles / GUID tables: `rules/twincat3-xml.mdc`. Read this file when creating or scaffolding new TcPlcObject files.
 
-## Safe write pattern (scripts)
+## CDATA Editing Rules for AI
 
-```python
-# Read bytes → decode with detected encoding → edit CDATA only → encode same way → write bytes
-# Use newline="" / write bytes so Python does not translate \n ↔ \r\n
-path.write_bytes(edited_text.encode(detected_encoding))  # or open(..., "wb")
-```
+- **Direct ST editing**: When modifying existing POUs, DUTs, GVLs, or Interfaces, edit **only** the Structured Text code located inside `<![CDATA[ ... ]]>` blocks.
+- **Preserve XML wrapper**: Never alter the outer XML structure, element tags, attributes, or existing GUIDs when updating ST logic.
+- **Preserve encoding & line endings**: Maintain the original file encoding (UTF-8, UTF-8-BOM, Latin-1) and line endings (CRLF / LF).
+- **New objects**: When creating new TwinCAT files, use the XML skeletons below and generate fresh, unique GUIDs.
 
 ## GUID format
 
 ```
-Id="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
+Id="{12345678-1234-4234-8234-123456789abc}"
 ```
 
-- PowerShell: `[guid]::NewGuid().ToString('D')` then wrap in `{}`
-- Python: `import uuid; f'{{{uuid.uuid4()}}}'`
+- Format: Standard UUID v4 with lowercase hex characters enclosed in curly braces `{...}`.
+- Generation: PowerShell `[guid]::NewGuid().ToString('D')` or Python `uuid.uuid4()`.
+- Uniqueness: Every POU, Method, Action, Property, DUT, and GVL must have its own globally unique GUID across the solution.
 
 ## .TcPOU — Function block skeleton
 

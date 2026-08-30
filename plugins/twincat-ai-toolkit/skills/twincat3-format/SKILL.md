@@ -9,6 +9,8 @@ description: >-
 
 # Format code (Python Formatter via MCP)
 
+The Python formatter operates natively on `twincat_core.xml` (surgical CDATA patching) and `twincat_core.syntax` (lossless tokens and CST). It guarantees idempotency and zero XML restructuring when formatting targeted ST code.
+
 ## Quick Start
 
 ```

@@ -9,6 +9,8 @@ description: >-
 
 # Migrate TwinCAT 3 FBD/CFC to Structured Text
 
+Migration tools leverage `twincat_core.xml` for surgical XML writing and AST-compliant Structured Text generation.
+
 ## When to Use
 
 - User asks to convert/migrate a TwinCAT project to Structured Text (without specifying FBD or CFC)

@@ -5,7 +5,7 @@ alwaysApply: false
 
 # TwinCAT Migration Safety Rules
 
-These rules apply to ALL migration tools: `twincat_fup_migrate`, `twincat_cfc_migrate`, and `twincat_migrate`.
+These rules apply to ALL migration tools: `twincat_fup_migrate`, `twincat_cfc_migrate`, and `twincat_migrate`. Migration operations leverage `twincat_core.xml` for surgical patching and lossless file I/O.
 
 ## Rule 1: Never skip the preview step
 

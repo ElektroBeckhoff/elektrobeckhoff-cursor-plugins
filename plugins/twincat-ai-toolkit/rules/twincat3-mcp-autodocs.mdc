@@ -16,6 +16,8 @@ unless the user explicitly asks for those steps separately.
 
 ## Tool (no XAE)
 
+AutoDocs parses objects using `twincat_core.xml` and `twincat_core.syntax` / AST semantic representations to generate accurate Markdown API docs.
+
 | Tool | Purpose |
 |------|---------|
 | `twincat_autodocs` | Generate Markdown API docs from `.TcPOU`/`.TcDUT`/`.TcGVL`/`.TcIO` |

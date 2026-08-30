@@ -13,10 +13,10 @@ XML skeletons / Method / Property / Action / Itf / DUT / GVL templates:
 
 ## Universal edit rules
 
-1. **Only change CDATA / ST** unless intentionally creating a new object or adding Method/Property/Action elements.
+1. **Only change CDATA / ST** unless intentionally creating a new object or adding Method/Property/Action elements. Prefer surgical edits within `<![CDATA[...]]>` blocks.
 2. **Never copy/reuse GUIDs** — fresh UUIDs for new elements; leave existing Ids untouched when editing code.
 3. **Do not rewrite line endings** — preserve LF/CRLF as in the file.
-4. **Do not touch encoding / BOM** — keep existing encoding.
+4. **Do not touch encoding / BOM** — preserve existing file encoding.
 5. **`Name` must match** the type/member name in the corresponding Declaration CDATA.
 
 Prefer targeted CDATA edits over full XML re-serialize.

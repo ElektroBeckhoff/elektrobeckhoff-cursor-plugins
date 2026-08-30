@@ -22,6 +22,12 @@ When goals conflict, follow this order. Do **not** trade a higher priority for a
 - Prefer a correct state machine over a “clever” micro-optimization that breaks edge cases (2 > 3).
 - Prefer a clear, slightly longer name over a cryptic short one **only if** safety and function stay equal (4 last).
 
+### Core Architecture & Single Source of Truth (`twincat_core`)
+
+- `twincat_core` is the central engine and single source of truth for all TwinCAT 3 file handling, lossless XML parsing, surgical patching, ST Lexer/CST/AST parsing, semantic symbol resolution, project graph indexing, and virtual ST projection.
+- **Consumer Tools**: Formatter, AutoDocs, Migrator, PLCProj, LSP, MCP Tools, and VS Code extensions must consume `twincat_core` and **must never** implement duplicate or parallel parsing, XML serialization, or symbol resolution logic.
+- **Surgical Patching**: Modify code by surgically updating targeted CDATA spans while preserving original XML formatting, encodings (BOM, UTF-8, Latin-1), line endings (CRLF/LF), and GUIDs.
+
 ### Ownership (no rule duplication)
 
 Detailed rules and **all code examples** live elsewhere — apply those docs; **do not restate or invent parallel samples here**:

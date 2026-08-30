@@ -6,12 +6,14 @@ AI rules, skills, commands, agents, and MCP build/runtime tools for **Beckhoff T
 
 | Layer | Role |
 |-------|------|
+| **Core Engine** (`twincat_core/`) | Single source of truth: lossless XML & surgical patching, ST Lexer/CST/AST parser, multi-level semantic resolver, project graph & workspace index, virtual ST projection, LSP server |
 | **Rules** (`rules/`) | Lean principles; `alwaysApply` only for core + naming |
 | **Examples** (`rules/examples/`) | Heavy ST/XML samples — Read when implementing |
 | **Skills** (`skills/`) | Executable workflows; domain detail in `*-patterns.md` / `references/` |
 | **Commands** (`commands/`) | Slash entry points (`/twincat3-cmd-*`) with ordered Read-first lists |
 | **Agents** (`agents/`) | Specialized readonly subagents (review, audit, debug, …) |
-| **MCP** (`mcp-servers/mcp-twincat/`) | TcXaeShell COM automation + offline InfoSys `.mshc` (51 tools) |
+| **MCP** (`mcp-servers/mcp-twincat/`) | TcXaeShell COM automation, offline InfoSys `.mshc`, and tools consuming `twincat_core` |
+| **VS Code Extension** (`vscode-extension/`) | Thin client adapter for syntax highlighting, LSP client, and Virtual ST projection |
 
 ### Token / load design
 

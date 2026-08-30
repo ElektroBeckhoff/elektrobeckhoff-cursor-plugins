@@ -24,7 +24,7 @@ skill `twincat3-stweep-format` / command `/twincat3-cmd-stweep-format`.
 | `twincat_format_validate` | Validate-only (XML structure, GUIDs, naming) — no format |
 | `twincat_format_config` | Show active config (defaults + project overrides) |
 
-No `twincat_open` needed. Operates directly on `.TcPOU` / `.TcDUT` / `.TcGVL` / `.TcIO` files.
+No `twincat_open` needed. Operates directly on `.TcPOU` / `.TcDUT` / `.TcGVL` / `.TcIO` files via `twincat_core.xml` surgical patching and `twincat_core.syntax` token/CST engine.
 
 ## Core parameters (`twincat_format`)
 

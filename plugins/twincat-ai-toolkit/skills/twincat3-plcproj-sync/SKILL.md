@@ -10,6 +10,8 @@ description: >-
 
 # Sync TwinCAT 3 PlcProject File
 
+PlcProject sync operations are backed by `twincat_core.project` (MSBuild project graph) and `twincat_core.xml` (`guid_manager` & `safe_io`).
+
 ## When to Use
 
 - User added or removed .TcPOU / .TcDUT / .TcGVL / .TcIO files on disk
