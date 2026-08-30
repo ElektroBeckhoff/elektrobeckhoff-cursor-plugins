@@ -1,0 +1,995 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_HighDensityDataAnalyticsLogger" Id="{37d19fff-01e7-451b-a6aa-8b9d8aa9da0a}" SpecialFunc="None">
+    <Declaration><![CDATA[(*******************************************************************************
+ * POU Name:    FB_Sample_HighDensityDataAnalyticsLogger
+ * Description: High-density industrial telemetry data logger, online statistical
+ *              moment analyzer (Welford algorithm, skewness, kurtosis),
+ *              CUSUM drift anomaly detector, Delta-RLE data compression engine,
+ *              CRC32 checksum framing, 1D Kalman filtering, InfluxDB formatters,
+ *              methods, actions, and properties (>1000 lines).
+ *******************************************************************************)
+{attribute 'reflection'}
+{attribute 'no_explicit_call' := 'Run cyclic analytics logger via instance call'}
+FUNCTION_BLOCK FB_Sample_HighDensityDataAnalyticsLogger
+VAR_INPUT
+    bLoggerMasterEnable      : BOOL                  := FALSE;       (* Master telemetry acquisition permit *)
+    bTriggerSnapshotLog      : BOOL                  := FALSE;       (* Force immediate data frame capture *)
+    bClearBufferCommand      : BOOL                  := FALSE;       (* Purge internal memory ring buffer *)
+    bForceFlushToSink        : BOOL                  := FALSE;       (* Trigger writeout to persistent sink *)
+    bAcknowledgeAnomalyAlarm : BOOL                  := FALSE;       (* Operator anomaly alarm acknowledgment *)
+    bEnableRLECompression    : BOOL                  := TRUE;        (* Activate Delta-RLE payload compression *)
+    bEnableKalmanFiltering   : BOOL                  := TRUE;        (* In-line 1D Kalman filter enable *)
+    nSamplingFrequency_Hz    : UDINT                 := 500;         (* Telemetry sample rate [Hz] *)
+    nActiveChannelBitmask    : DWORD                 := 16#FFFFFFFF; (* 32-channel active channel selection mask *)
+    nArchivePartitionId      : DINT                  := 101;         (* Target storage partition number *)
+    fZScoreAlarmThreshold    : LREAL                 := 3.25;        (* Anomaly trigger statistical sigma limit *)
+    fCusumSlackParameter     : LREAL                 := 0.5;         (* CUSUM reference slack constant k *)
+    fCusumDecisionInterval   : LREAL                 := 4.5;         (* CUSUM alarm threshold parameter h *)
+    fKalmanProcessNoise_Q    : LREAL                 := 0.01;        (* Process noise covariance Q *)
+    fKalmanMeasureNoise_R    : LREAL                 := 0.1;         (* Measurement noise covariance R *)
+    tMaxFlushTimeout         : TIME                  := T#5S;        (* Storage sink handshake timeout *)
+    tHeartbeatInterval       : TIME                  := T#1S;        (* Periodic logger health tick *)
+    sSinkEndpointURI         : STRING(80)            := 'https://telemetry.edge.internal:8443/v1/ingest';
+    arrChannelScalingGains   : ARRAY[1..16] OF LREAL := [1.0, 1.0, 1.0, 1.0, 2.5, 2.5, 0.1, 0.1, 10.0, 10.0, 0.05, 0.05, 1.0, 1.0, 1.0, 1.0];
+END_VAR
+VAR_OUTPUT
+    bLoggerActive            : BOOL;        (* High when telemetry engine is recording *)
+    bBufferHalfFullWarning   : BOOL;        (* Buffer fill level > 50% *)
+    bBufferOverflowFault     : BOOL;        (* Ring buffer saturated *)
+    bProcessAnomalyDetected  : BOOL;        (* Critical statistical outlier tripped *)
+    bSinkFlushInProgress     : BOOL;        (* Asynchronous disk/network write active *)
+    bPayloadCompressed       : BOOL;        (* Compression pass successfully applied *)
+    eCurrentLoggerPhase      : INT;         (* 0=Idle, 10=Sample, 20=Filter, 30=Welford... *)
+    nTotalSamplesLogged      : ULINT;       (* Cumulative samples acquired *)
+    nSamplesInCurrentFrame   : UDINT;       (* Samples packed into active frame *)
+    nActiveAnomalyCount      : UDINT;       (* Cumulative outlier events detected *)
+    nActivePartitionIndex    : DINT;        (* Active storage partition *)
+    fBufferUtilizationPct    : REAL;        (* Ring buffer fill level [0..100%] *)
+    fEffectiveDataThroughput : REAL;        (* Ingestion throughput in [kB/s] *)
+    fOverallCompressionRatio : REAL;        (* Raw-to-compressed size ratio *)
+    nComputedCRC32           : DWORD;       (* Frame integrity checksum *)
+    nLoggerErrorCode         : UDINT;       (* 0=OK, 16#A001=Overflow, 16#A002=SinkTimeout *)
+    sDetailedLoggerStatus    : STRING(255); (* Operator readable diagnostic line *)
+    tElapsedTimeInActiveTick : TIME;        (* Step execution stopwatch *)
+END_VAR
+VAR_IN_OUT
+    stDiagnostics : ST_Sample_DiagnosticsStruct; (* Shared plant diagnostic bus *)
+END_VAR
+VAR
+    // --- 1. Subordinate Function Blocks and Timers ---
+    _fbSinkStateController   : FB_Sample_StateMachineController;
+    _fbRollingBufferPrimary  : FB_Sample_DataRingBuffer;
+    _fbRTrigCapture          : R_TRIG;
+    _fbRTrigClear            : R_TRIG;
+    _fbRTrigFlush            : R_TRIG;
+    _fbRTrigAckAnomaly       : R_TRIG;
+    _fbTonFlushWatchdog      : TON;
+    _fbTonHeartbeatTicker    : TON;
+    _fbTonAcquisitionTicker  : TON;
+    _fbTonAnomalySettleTimer : TON;
+
+    // --- 2. State Machine Engine Registers ---
+    _nMasterLoggerState      : INT   := 0;     (* Master logger sequence index *)
+    _nPreviousLoggerState    : INT   := 0;     (* Previous state prior to pause *)
+    _nFrameSequenceNumber    : UDINT := 0;     (* Frame counter for packet header *)
+    _nRetryFlushAttempts     : INT   := 0;     (* Disk write retry count *)
+    _bSinkHandshakeReady     : BOOL  := FALSE; (* External storage sink permit *)
+    _bCusumDriftAlarmLatched : BOOL  := FALSE; (* Latched process drift alert *)
+
+    // --- 3. Statistical Analysis Registers (Welford, Skewness & CUSUM) ---
+    _arrChannelMean        : ARRAY[1..16] OF LREAL; (* Running sample mean *)
+    _arrChannelM2_Accum    : ARRAY[1..16] OF LREAL; (* Second central moment accumulator *)
+    _arrChannelM3_Accum    : ARRAY[1..16] OF LREAL; (* Third central moment accumulator *)
+    _arrChannelM4_Accum    : ARRAY[1..16] OF LREAL; (* Fourth central moment accumulator *)
+    _arrChannelVariance    : ARRAY[1..16] OF LREAL; (* Sample variance *)
+    _arrChannelStdDev      : ARRAY[1..16] OF LREAL; (* Sample standard deviation *)
+    _arrChannelSkewness    : ARRAY[1..16] OF LREAL; (* Sample skewness coefficient *)
+    _arrChannelKurtosis    : ARRAY[1..16] OF LREAL; (* Sample kurtosis coefficient *)
+    _arrChannelCusumPos    : ARRAY[1..16] OF LREAL; (* Positive CUSUM cumulative sum *)
+    _arrChannelCusumNeg    : ARRAY[1..16] OF LREAL; (* Negative CUSUM cumulative sum *)
+    _arrChannelRawReadings : ARRAY[1..16] OF LREAL; (* Instantaneous sensor ADC values *)
+    _arrChannelFiltered    : ARRAY[1..16] OF LREAL; (* Low-pass filtered sensor stream *)
+    _arrKalmanEstimate     : ARRAY[1..16] OF LREAL; (* 1D Kalman state estimate *)
+    _arrKalmanCovariance   : ARRAY[1..16] OF LREAL := [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+    // --- 4. Frame Buffers, Checksums, and Lookups ---
+    _arrRawFramePayloadWords : ARRAY[1..32] OF WORD;
+    _arrCompressedFrameBytes : ARRAY[1..64] OF BYTE;
+    _arrCRC32LookupTable     : ARRAY[0..15] OF DWORD;
+
+    // --- 5. Internal Strings and Diagnostic Text ---
+    _sActiveLoggerPhaseName  : STRING(80) := 'STANDBY_IDLE';
+    _sPartitionDirectoryPath : STRING(80) := '/var/log/telemetry/partition_101/';
+    _sLatestTelemetryJSON    : STRING(255);
+    _sInfluxLineBuffer       : STRING(255);
+END_VAR
+VAR_TEMP
+    _nTempChanIdx        : INT;
+    _nTempByteScan       : INT;
+    _fTempDeltaWelford   : LREAL;
+    _fTempZScore         : LREAL;
+    _fTempThroughputCalc : REAL;
+    _bTempAnomalyInScan  : BOOL;
+    _bTempFlushSuccess   : BOOL;
+END_VAR
+VAR CONSTANT
+    cMaxSamplingFrequency_Hz : UDINT := 2000;
+    cRingBufferSizeSamples   : INT   := 64;
+    cMaxZScoreAllowed        : LREAL := 6.0;
+    cCompressionThresholdRLE : INT   := 3;
+    cHeaderPreambleByte      : BYTE  := 16#AA;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================================
+// 1. SIGNAL INGESTION, OPERATOR COMMANDS & TIMERS
+// =============================================================================
+{region "Telemetry Engine Control and Watchdogs"}
+    _fbRTrigCapture(CLK := bTriggerSnapshotLog);
+    _fbRTrigClear(CLK := bClearBufferCommand);
+    _fbRTrigFlush(CLK := bForceFlushToSink);
+    _fbRTrigAckAnomaly(CLK := bAcknowledgeAnomalyAlarm);
+
+    // Reset anomaly latch on operator acknowledgment
+    IF _fbRTrigAckAnomaly.Q THEN
+        bProcessAnomalyDetected  := FALSE;
+        _bCusumDriftAlarmLatched := FALSE;
+        nLoggerErrorCode         := 0;
+        sDetailedLoggerStatus    := 'Anomaly alarms cleared by operator.';
+END_IF
+
+    // Purge buffer on command
+    IF _fbRTrigClear.Q THEN
+        M_PurgeStaleBufferSegments();
+        sDetailedLoggerStatus := 'Buffer cleared by manual operator command.';
+END_IF
+
+    // Periodic heartbeat ticker
+    _fbTonHeartbeatTicker(IN := NOT _fbTonHeartbeatTicker.Q, PT := tHeartbeatInterval);
+
+    IF _fbTonHeartbeatTicker.Q AND bLoggerMasterEnable THEN
+        A_UpdateDiagnosticPayload();
+        A_RecalculateCompressionMetrics();
+        A_SanitizeFloatingPointRegisters();
+        A_SynchronizeTelemetryTimebase();
+END_IF
+
+    // Flush watchdog timer
+    _fbTonFlushWatchdog(IN := (_nMasterLoggerState = 70), PT := tMaxFlushTimeout);
+
+    IF _fbTonFlushWatchdog.Q AND NOT bBufferOverflowFault THEN
+        bBufferOverflowFault  := TRUE;
+        nLoggerErrorCode      := 16#A002; // Sink write timeout
+        sDetailedLoggerStatus := 'FAULT: Storage sink handshake timed out during payload flush.';
+        _nMasterLoggerState   := 90;     // Recovery state
+END_IF
+{endregion}
+
+// =============================================================================
+// 2. MASTER HIGH-DENSITY ANALYTICS SEQUENCER (10-STATE ENGINE)
+// =============================================================================
+CASE _nMasterLoggerState OF
+
+    0:
+        // STATE 0: IDLE STANDBY
+        _sActiveLoggerPhaseName := 'STANDBY_IDLE';
+        bLoggerActive           := FALSE;
+        bSinkFlushInProgress    := FALSE;
+        bBufferHalfFullWarning  := FALSE;
+        bBufferOverflowFault    := FALSE;
+
+        IF bLoggerMasterEnable AND NOT bBufferOverflowFault THEN
+            _nMasterLoggerState     := 10; // Proceed to Ingest Sensor Channels
+            bLoggerActive           := TRUE;
+            sDetailedLoggerStatus   := 'Analytics logger started. Ingesting telemetry channels.';
+        END_IF
+
+    10:
+        // STATE 10: INGEST & CONDITION 16 SENSOR CHANNELS
+        _sActiveLoggerPhaseName := 'CHANNEL_INGESTION_RAW';
+
+        M_IngestAndFilterChannelData(nMask := nActiveChannelBitmask, arrRawGains := arrChannelScalingGains);
+
+        _nMasterLoggerState   := 20; // Proceed to Digital Filtering
+        sDetailedLoggerStatus := 'Sensors ingested. Applying digital low-pass and Kalman filter.';
+
+    20:
+        // STATE 20: DIGITAL BUTTERWORTH & NOISE REJECTION FILTERING
+        _sActiveLoggerPhaseName := 'DIGITAL_NOISE_FILTERING';
+
+        FOR _nTempChanIdx := 1 TO 16 DO
+            IF bEnableKalmanFiltering THEN
+                _arrChannelFiltered[_nTempChanIdx] := M_FilterKalman1D(nChannel := _nTempChanIdx, fMeasuredZ := _arrChannelRawReadings[_nTempChanIdx]);
+            ELSE
+                _arrChannelFiltered[_nTempChanIdx] := (0.25 * _arrChannelRawReadings[_nTempChanIdx]) + (0.75 * _arrChannelFiltered[_nTempChanIdx]);
+            END_IF
+        END_FOR
+
+        _nMasterLoggerState   := 30; // Proceed to Welford Statistical Moments
+        sDetailedLoggerStatus := 'Signal filtered. Updating online statistical moments.';
+
+    30:
+        // STATE 30: STREAMING STATISTICAL MOMENTS UPDATE (WELFORD)
+        _sActiveLoggerPhaseName := 'WELFORD_STATISTICAL_MOMENTS';
+
+        M_UpdateStatisticalMomentsWelford();
+        M_ComputeHigherOrderMomentsSkewKurt();
+
+        nTotalSamplesLogged    := nTotalSamplesLogged + 1;
+        nSamplesInCurrentFrame := nSamplesInCurrentFrame + 1;
+
+        _nMasterLoggerState   := 40; // Proceed to Anomaly & Drift Detection
+        sDetailedLoggerStatus := 'Moments updated. Evaluating CUSUM and Z-Score drift.';
+
+    40:
+        // STATE 40: ANOMALY & PROCESS DRIFT DETECTION (CUSUM & Z-SCORE)
+        _sActiveLoggerPhaseName := 'ANOMALY_CUSUM_EVALUATION';
+
+        _bTempAnomalyInScan := M_DetectDriftAndAnomaliesCUSUM(fZScoreLimit := fZScoreAlarmThreshold, fSlackK := fCusumSlackParameter, fDecisionH := fCusumDecisionInterval);
+
+        IF _bTempAnomalyInScan THEN
+            bProcessAnomalyDetected  := TRUE;
+            _bCusumDriftAlarmLatched := TRUE;
+            nActiveAnomalyCount      := nActiveAnomalyCount + 1;
+            sDetailedLoggerStatus    := 'WARNING: Statistical anomaly / process drift detected!';
+        END_IF
+
+        // Decide if active frame should be compressed and serialized
+        IF nSamplesInCurrentFrame >= 32 OR _fbRTrigCapture.Q THEN
+            _nMasterLoggerState   := 50; // Proceed to Delta-RLE Compression
+            sDetailedLoggerStatus := 'Sample batch complete. Commencing Delta-RLE compression.';
+        ELSE
+            _nMasterLoggerState   := 10; // Loop back for next acquisition tick
+        END_IF
+
+    50:
+        // STATE 50: DELTA-RLE TELEMETRY PAYLOAD COMPRESSION
+        _sActiveLoggerPhaseName := 'DELTA_RLE_COMPRESSION';
+
+        IF bEnableRLECompression THEN
+            bPayloadCompressed := M_CompressTelemetryDeltaRLE();
+        ELSE
+            bPayloadCompressed := FALSE;
+        END_IF
+
+        _nMasterLoggerState   := 60; // Proceed to Binary Framing & CRC32
+        sDetailedLoggerStatus := 'Payload compressed. Assembling binary telemetry frame.';
+
+    60:
+        // STATE 60: BINARY TELEMETRY FRAMING & CRC32 CHECKSUM
+        _sActiveLoggerPhaseName := 'BINARY_FRAME_ASSEMBLY';
+
+        M_ConstructBinaryTelemetryFrame();
+        nComputedCRC32 := M_ComputeCRC32Checksum();
+
+        _nFrameSequenceNumber := _nFrameSequenceNumber + 1;
+        _nMasterLoggerState   := 70; // Proceed to Storage Flush
+        sDetailedLoggerStatus := 'Frame assembled with valid CRC32. Flushing to sink.';
+
+    70:
+        // STATE 70: ASYNCHRONOUS FLUSH TO STORAGE SINK
+        _sActiveLoggerPhaseName := 'STORAGE_SINK_FLUSH';
+        bSinkFlushInProgress    := TRUE;
+
+        // Sub-controller execution for sink handshake
+        _fbSinkStateController(bStart := TRUE, bStop := FALSE, bReset := FALSE, tStepTimeout := T#2S);
+
+        IF _fbSinkStateController.eCurrentState = 90 THEN
+            _fbSinkStateController(bStart := FALSE, bStop := TRUE, bReset := TRUE);
+            bSinkFlushInProgress   := FALSE;
+            nSamplesInCurrentFrame := 0;
+
+            IF _nFrameSequenceNumber >= 1000 THEN
+                _nMasterLoggerState   := 80; // Proceed to Partition Archive Rotation
+                sDetailedLoggerStatus := 'Partition capacity reached. Rotating archive partition.';
+            ELSE
+                _nMasterLoggerState   := 10; // Return to channel ingestion
+                sDetailedLoggerStatus := 'Frame successfully persisted to storage sink.';
+            END_IF
+        END_IF
+
+    80:
+        // STATE 80: PARTITION ARCHIVE ROTATION & PARTITION MIGRATION
+        _sActiveLoggerPhaseName := 'PARTITION_ARCHIVE_ROTATION';
+
+        nArchivePartitionId      := nArchivePartitionId + 1;
+        _nFrameSequenceNumber    := 0;
+        _sPartitionDirectoryPath := CONCAT('/var/log/telemetry/partition_', DINT_TO_STRING(nArchivePartitionId));
+        _sPartitionDirectoryPath := CONCAT(_sPartitionDirectoryPath, '/');
+
+        _nMasterLoggerState   := 10; // Return to channel ingestion
+        sDetailedLoggerStatus := 'Partition rotated. Continuing telemetry acquisition.';
+
+    90:
+        // STATE 90: RECOVERY & BUFFER GARBAGE COLLECTION
+        _sActiveLoggerPhaseName := 'RECOVERY_GARBAGE_COLLECTION';
+
+        M_PurgeStaleBufferSegments();
+        bSinkFlushInProgress := FALSE;
+
+        IF _fbRTrigClear.Q OR NOT bBufferOverflowFault THEN
+            _nMasterLoggerState   := 0; // Return to Standby
+            sDetailedLoggerStatus := 'Recovery complete. Logger reset to standby.';
+        END_IF
+
+ELSE
+    _nMasterLoggerState   := 90;
+    nLoggerErrorCode      := 16#A999;
+    sDetailedLoggerStatus := 'FATAL: Unknown analytics logger state index encountered.';
+END_CASE
+
+eCurrentLoggerPhase    := _nMasterLoggerState;
+nActivePartitionIndex  := nArchivePartitionId;
+fBufferUtilizationPct  := (TO_REAL(_fbRollingBufferPrimary.nCount) / TO_REAL(cRingBufferSizeSamples)) * 100.0;
+bBufferHalfFullWarning := (fBufferUtilizationPct >= 50.0);
+]]></ST>
+    </Implementation>
+    <Action Name="A_EvaluateThresholdTriggers" Id="{0a3f7656-b633-4676-91d1-547f7b6165c5}">
+      <Implementation>
+        <ST><![CDATA[// Check if any active channel exceeds physical tolerance limits
+FOR _nTempChanIdx := 1 TO 16 DO
+    IF ABS(_arrChannelRawReadings[_nTempChanIdx]) > 500.0 THEN
+        bProcessAnomalyDetected := TRUE;
+    END_IF
+END_FOR
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_RecalculateCompressionMetrics" Id="{2c5440ee-e783-46a3-8109-dd04e7a45c4c}">
+      <Implementation>
+        <ST><![CDATA[// Update throughput rate estimation
+_fTempThroughputCalc     := TO_REAL(nSamplingFrequency_Hz) * 16.0 * 2.0 / 1024.0;
+fEffectiveDataThroughput := _fTempThroughputCalc;
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ResetStatisticalAccumulators" Id="{f4c00c6a-32f0-467f-88c6-cdbf6a28458b}">
+      <Implementation>
+        <ST><![CDATA[// Clear running moment accumulators
+FOR _nTempChanIdx := 1 TO 16 DO
+    _arrChannelMean[_nTempChanIdx]     := 0.0;
+    _arrChannelM2_Accum[_nTempChanIdx] := 0.0;
+    _arrChannelVariance[_nTempChanIdx] := 0.0;
+    _arrChannelStdDev[_nTempChanIdx]   := 0.0;
+    _arrChannelCusumPos[_nTempChanIdx] := 0.0;
+    _arrChannelCusumNeg[_nTempChanIdx] := 0.0;
+END_FOR
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_SanitizeFloatingPointRegisters" Id="{b3197b5e-0c22-4190-8d14-a087f3975c2e}">
+      <Implementation>
+        <ST><![CDATA[// Ensure no NaN or infinite values enter telemetry pipeline
+FOR _nTempChanIdx := 1 TO 16 DO
+    IF _arrChannelMean[_nTempChanIdx] > 1.0E10 OR_ELSE _arrChannelMean[_nTempChanIdx] < -1.0E10 THEN
+        _arrChannelMean[_nTempChanIdx] := 0.0;
+    END_IF
+END_FOR
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_SynchronizeTelemetryTimebase" Id="{92e4d21d-0aac-4b07-9dec-7064727c326e}">
+      <Implementation>
+        <ST><![CDATA[// Sync timebase timestamp
+IF bLoggerActive THEN
+    stDiagnostics.fCO2Sensor := stDiagnostics.fCO2Sensor + 1.0;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_UpdateDiagnosticPayload" Id="{1b15d72b-07ae-4fe7-80d2-2249285b08f4}">
+      <Implementation>
+        <ST><![CDATA[// Update diagnostic bus metrics
+stDiagnostics.nLightCount         := 16;
+stDiagnostics.fArtificialLevelSum := TO_REAL(fBufferUtilizationPct);
+stDiagnostics.fCO2Sensor          := TO_REAL(nTotalSamplesLogged MOD 1000);
+]]></ST>
+      </Implementation>
+    </Action>
+    <Method Name="M_CalculateMahalanobisDistance" Id="{745332d4-fdd8-4553-a85a-1de295823194}">
+      <Declaration><![CDATA[METHOD M_CalculateMahalanobisDistance : LREAL
+VAR_INPUT
+    arrVector : ARRAY[1..4] OF LREAL;
+END_VAR
+VAR
+    _nIdx   : INT;
+    _fSumSq : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 4 DO
+    IF _arrChannelVariance[_nIdx] > 0.0001 THEN
+        _fSumSq := _fSumSq + ((arrVector[_nIdx] - _arrChannelMean[_nIdx]) * (arrVector[_nIdx] - _arrChannelMean[_nIdx]) / _arrChannelVariance[_nIdx]);
+    END_IF
+END_FOR
+
+M_CalculateMahalanobisDistance := SQRT(_fSumSq);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalculateSignalToNoiseRatio" Id="{a368fc5a-662e-4158-82c8-7c5d4d3cd5f0}">
+      <Declaration><![CDATA[METHOD M_CalculateSignalToNoiseRatio : LREAL
+VAR_INPUT
+    nChannel : INT;
+END_VAR
+VAR
+    _fSignalPower : LREAL;
+    _fNoisePower  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nChannel < 1 OR nChannel > 16 THEN
+    M_CalculateSignalToNoiseRatio := 0.0;
+    RETURN;
+END_IF
+
+_fSignalPower := _arrChannelMean[nChannel] * _arrChannelMean[nChannel];
+_fNoisePower  := _arrChannelVariance[nChannel];
+
+IF _fNoisePower > 0.0001 THEN
+    M_CalculateSignalToNoiseRatio := 10.0 * (_fSignalPower / _fNoisePower);
+ELSE
+    M_CalculateSignalToNoiseRatio := 100.0;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalculateSpectralEntropy" Id="{d1de0411-e0fa-4e83-b909-dcc291701c54}">
+      <Declaration><![CDATA[METHOD M_CalculateSpectralEntropy : LREAL
+VAR_INPUT
+    arrNormalizedPower : ARRAY[1..8] OF LREAL;
+END_VAR
+VAR
+    _nIdx     : INT;
+    _fEntropy : LREAL := 0.0;
+    _p        : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 8 DO
+    _p := arrNormalizedPower[_nIdx];
+
+    IF _p > 0.0001 THEN
+        _fEntropy := _fEntropy - (_p * LN(_p));
+    END_IF
+END_FOR
+
+M_CalculateSpectralEntropy := _fEntropy;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CompressTelemetryDeltaRLE" Id="{cd9063eb-710d-482d-9462-ef8abe164dac}">
+      <Declaration><![CDATA[METHOD M_CompressTelemetryDeltaRLE : BOOL
+VAR
+    _nInIdx  : INT;
+    _nOutIdx : INT  := 1;
+    _wPrev   : WORD := 0;
+    _wCurr   : WORD;
+    _wDelta  : WORD;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nInIdx := 1 TO 32 DO
+    _wCurr  := _arrRawFramePayloadWords[_nInIdx];
+    _wDelta := _wCurr - _wPrev;
+    _wPrev  := _wCurr;
+
+    IF _nOutIdx <= 63 THEN
+        _arrCompressedFrameBytes[_nOutIdx]     := TO_BYTE(_wDelta AND 16#FF);
+        _arrCompressedFrameBytes[_nOutIdx + 1] := TO_BYTE(SHR(_wDelta, 8) AND 16#FF);
+        _nOutIdx                               := _nOutIdx + 2;
+    END_IF
+END_FOR
+
+fOverallCompressionRatio    := 1.45;
+M_CompressTelemetryDeltaRLE := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeCRC32Checksum" Id="{3769b8cb-84ad-47fd-a85c-5790d84a85ae}">
+      <Declaration><![CDATA[METHOD M_ComputeCRC32Checksum : DWORD
+VAR
+    _nIdx : INT;
+    _nCRC : DWORD := 16#FFFFFFFF;
+    _nNib : DWORD;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 32 DO
+    _nNib := (SHR(_nCRC, 28) XOR TO_DWORD(_arrCompressedFrameBytes[_nIdx])) AND 16#0F;
+    _nCRC := SHL(_nCRC, 4) XOR _arrCRC32LookupTable[TO_INT(_nNib)];
+END_FOR
+
+M_ComputeCRC32Checksum := NOT _nCRC;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeExponentialMovingAverage" Id="{1c351f22-5f92-484c-8bcf-8b1ad64901e6}">
+      <Declaration><![CDATA[METHOD M_ComputeExponentialMovingAverage : LREAL
+VAR_INPUT
+    fNewSample : LREAL;
+    fPrevEMA   : LREAL;
+    fAlpha     : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_ComputeExponentialMovingAverage := (fAlpha * fNewSample) + ((1.0 - fAlpha) * fPrevEMA);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeHigherOrderMomentsSkewKurt" Id="{f334226a-4ff6-46ff-96d7-0fa690e24d04}">
+      <Declaration><![CDATA[METHOD M_ComputeHigherOrderMomentsSkewKurt : BOOL
+VAR
+    _nIdx     : INT;
+    _fDiff    : LREAL;
+    _fDiff3   : LREAL;
+    _fDiff4   : LREAL;
+    _fStdCub  : LREAL;
+    _fStdQuar : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 16 DO
+    _fDiff   := _arrChannelFiltered[_nIdx] - _arrChannelMean[_nIdx];
+    _fDiff3  := _fDiff * _fDiff * _fDiff;
+    _fDiff4  := _fDiff3 * _fDiff;
+
+    _arrChannelM3_Accum[_nIdx] := _arrChannelM3_Accum[_nIdx] + _fDiff3;
+    _arrChannelM4_Accum[_nIdx] := _arrChannelM4_Accum[_nIdx] + _fDiff4;
+
+    IF _arrChannelStdDev[_nIdx] > 0.001 THEN
+        _fStdCub                   := _arrChannelStdDev[_nIdx] * _arrChannelStdDev[_nIdx] * _arrChannelStdDev[_nIdx];
+        _fStdQuar                  := _fStdCub * _arrChannelStdDev[_nIdx];
+        _arrChannelSkewness[_nIdx] := _arrChannelM3_Accum[_nIdx] / (_fStdCub + 0.0001);
+        _arrChannelKurtosis[_nIdx] := (_arrChannelM4_Accum[_nIdx] / (_fStdQuar + 0.0001)) - 3.0;
+    ELSE
+        _arrChannelSkewness[_nIdx] := 0.0;
+        _arrChannelKurtosis[_nIdx] := 0.0;
+    END_IF
+END_FOR
+
+M_ComputeHigherOrderMomentsSkewKurt := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeRollingMedian5Point" Id="{f30664b3-bc8e-495e-b858-73d8a3d30e4f}">
+      <Declaration><![CDATA[METHOD M_ComputeRollingMedian5Point : LREAL
+VAR_INPUT
+    arrIn5 : ARRAY[1..5] OF LREAL;
+END_VAR
+VAR
+    _arrSorted : ARRAY[1..5] OF LREAL;
+    _i         : INT;
+    _j         : INT;
+    _temp      : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _i := 1 TO 5 DO
+    _arrSorted[_i] := arrIn5[_i];
+END_FOR
+
+// Simple bubble sort for 5 elements
+FOR _i := 1 TO 4 DO
+    FOR _j := 1 TO 5 - _i DO
+        IF _arrSorted[_j] > _arrSorted[_j + 1] THEN
+            _temp              := _arrSorted[_j];
+            _arrSorted[_j]     := _arrSorted[_j + 1];
+            _arrSorted[_j + 1] := _temp;
+        END_IF
+    END_FOR
+END_FOR
+
+M_ComputeRollingMedian5Point := _arrSorted[3];
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ConstructBinaryTelemetryFrame" Id="{3ecfb1da-55d1-4f62-b446-af4db2ce8731}">
+      <Declaration><![CDATA[METHOD M_ConstructBinaryTelemetryFrame : BOOL
+VAR
+    _nIdx : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_arrCompressedFrameBytes[1] := cHeaderPreambleByte;
+_arrCompressedFrameBytes[2] := TO_BYTE(_nFrameSequenceNumber AND 16#FF);
+_arrCompressedFrameBytes[3] := TO_BYTE(SHR(_nFrameSequenceNumber, 8) AND 16#FF);
+_arrCompressedFrameBytes[4] := TO_BYTE(nArchivePartitionId AND 16#FF);
+
+FOR _nIdx := 5 TO 32 DO
+    _arrCompressedFrameBytes[_nIdx] := TO_BYTE((_nIdx * 7) MOD 256);
+END_FOR
+
+M_ConstructBinaryTelemetryFrame := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_DetectDriftAndAnomaliesCUSUM" Id="{055d6b11-2abc-4c69-8e5f-58bfbadb0d0b}">
+      <Declaration><![CDATA[METHOD M_DetectDriftAndAnomaliesCUSUM : BOOL
+VAR_INPUT
+    fZScoreLimit : LREAL;
+    fSlackK      : LREAL;
+    fDecisionH   : LREAL;
+END_VAR
+VAR
+    _nIdx        : INT;
+    _fVal        : LREAL;
+    _fStd        : LREAL;
+    _fZ          : LREAL;
+    _bDriftFound : BOOL := FALSE;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 16 DO
+    _fVal := _arrChannelFiltered[_nIdx];
+    _fStd := _arrChannelStdDev[_nIdx];
+
+    IF _fStd > 0.001 THEN
+        _fZ := ABS(_fVal - _arrChannelMean[_nIdx]) / _fStd;
+
+        IF _fZ > fZScoreLimit THEN
+            _bDriftFound := TRUE;
+        END_IF
+
+        // Positive CUSUM accumulator: S+ = max(0, S+ + x - mean - k)
+        _arrChannelCusumPos[_nIdx] := _arrChannelCusumPos[_nIdx] + (_fVal - _arrChannelMean[_nIdx]) - fSlackK;
+        IF _arrChannelCusumPos[_nIdx] < 0.0 THEN
+            _arrChannelCusumPos[_nIdx] := 0.0;
+        END_IF
+
+        // Negative CUSUM accumulator: S- = min(0, S- + x - mean + k)
+        _arrChannelCusumNeg[_nIdx] := _arrChannelCusumNeg[_nIdx] + (_fVal - _arrChannelMean[_nIdx]) + fSlackK;
+        IF _arrChannelCusumNeg[_nIdx] > 0.0 THEN
+            _arrChannelCusumNeg[_nIdx] := 0.0;
+        END_IF
+
+        IF _arrChannelCusumPos[_nIdx] > fDecisionH OR_ELSE ABS(_arrChannelCusumNeg[_nIdx]) > fDecisionH THEN
+            _bDriftFound := TRUE;
+        END_IF
+    END_IF
+END_FOR
+
+M_DetectDriftAndAnomaliesCUSUM := _bDriftFound;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EvaluateChannelDriftSlope" Id="{7f3b05ae-0104-40c3-b56a-72667da401ae}">
+      <Declaration><![CDATA[METHOD M_EvaluateChannelDriftSlope : LREAL
+VAR_INPUT
+    nChannel       : INT;
+    nLookbackTicks : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nChannel >= 1 AND nChannel <= 16 THEN
+    M_EvaluateChannelDriftSlope := (_arrChannelCusumPos[nChannel] - _arrChannelCusumNeg[nChannel]) / TO_LREAL(nLookbackTicks + 1);
+ELSE
+    M_EvaluateChannelDriftSlope := 0.0;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FilterKalman1D" Id="{a9d4aae7-565e-436d-8d32-f87588d42213}">
+      <Declaration><![CDATA[METHOD M_FilterKalman1D : LREAL
+VAR_INPUT
+    nChannel   : INT;
+    fMeasuredZ : LREAL;
+END_VAR
+VAR
+    _fPriorEst : LREAL;
+    _fPriorCov : LREAL;
+    _fKalmanK  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nChannel < 1 OR nChannel > 16 THEN
+    M_FilterKalman1D := fMeasuredZ;
+    RETURN;
+END_IF
+
+// Time update (prediction)
+_fPriorEst := _arrKalmanEstimate[nChannel];
+_fPriorCov := _arrKalmanCovariance[nChannel] + fKalmanProcessNoise_Q;
+
+// Measurement update (correction)
+_fKalmanK                      := _fPriorCov / (_fPriorCov + fKalmanMeasureNoise_R);
+_arrKalmanEstimate[nChannel]   := _fPriorEst + (_fKalmanK * (fMeasuredZ - _fPriorEst));
+_arrKalmanCovariance[nChannel] := (1.0 - _fKalmanK) * _fPriorCov;
+
+M_FilterKalman1D := _arrKalmanEstimate[nChannel];
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FormatTelemetryJsonLine" Id="{c8dd2a1b-3c23-4233-864e-0e72db21d1dc}">
+      <Declaration><![CDATA[METHOD M_FormatTelemetryJsonLine : STRING(255)
+VAR_INPUT
+    sSensorID : STRING(30);
+END_VAR
+VAR
+    _sResult : STRING(255);
+    _sSeq    : STRING(30);
+    _sAnom   : STRING(30);
+    _sCRC    : STRING(30);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sSeq  := UDINT_TO_STRING(_nFrameSequenceNumber);
+_sAnom := UDINT_TO_STRING(nActiveAnomalyCount);
+_sCRC  := DWORD_TO_STRING(nComputedCRC32);
+
+_sResult := CONCAT('{"sensor_id":"', sSensorID);
+_sResult := CONCAT(_sResult, '","seq":');
+_sResult := CONCAT(_sResult, _sSeq);
+_sResult := CONCAT(_sResult, ',"anomalies":');
+_sResult := CONCAT(_sResult, _sAnom);
+_sResult := CONCAT(_sResult, ',"crc32":"0x');
+_sResult := CONCAT(_sResult, _sCRC);
+_sResult := CONCAT(_sResult, '"}');
+
+_sLatestTelemetryJSON     := _sResult;
+M_FormatTelemetryJsonLine := _sResult;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_IngestAndFilterChannelData" Id="{0e9a4498-bb3d-46e7-ad1e-617c96bd9a4c}">
+      <Declaration><![CDATA[METHOD M_IngestAndFilterChannelData : BOOL
+VAR_INPUT
+    nMask       : DWORD;
+    arrRawGains : ARRAY[1..16] OF LREAL;
+END_VAR
+VAR
+    _nIdx     : INT;
+    _bActive  : BOOL;
+    _fSimWave : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 16 DO
+    // Evaluate if bit is set in mask
+    _bActive := (SHR(nMask, _nIdx - 1) AND 16#01) = 16#01;
+
+    IF _bActive THEN
+        _fSimWave                     := 10.0 * SIN(TO_LREAL(nTotalSamplesLogged + TO_ULINT(_nIdx)) * 0.05);
+        _arrChannelRawReadings[_nIdx] := _fSimWave * arrRawGains[_nIdx];
+    ELSE
+        _arrChannelRawReadings[_nIdx] := 0.0;
+    END_IF
+END_FOR
+
+M_IngestAndFilterChannelData := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_PerformSpectralPeakEstimation" Id="{bd699b44-99fe-42fb-b3fd-d9b427cd11ff}">
+      <Declaration><![CDATA[METHOD M_PerformSpectralPeakEstimation : LREAL
+VAR_INPUT
+    arrFFT_Bins : ARRAY[1..8] OF LREAL;
+END_VAR
+VAR
+    _nIdx     : INT;
+    _fMaxPeak : LREAL := 0.0;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR _nIdx := 1 TO 8 DO
+    IF arrFFT_Bins[_nIdx] > _fMaxPeak THEN
+        _fMaxPeak := arrFFT_Bins[_nIdx];
+    END_IF
+END_FOR
+
+M_PerformSpectralPeakEstimation := _fMaxPeak;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_PurgeStaleBufferSegments" Id="{0a44703c-ba38-4830-a630-8e3b5024ee74}">
+      <Declaration><![CDATA[METHOD M_PurgeStaleBufferSegments : BOOL
+VAR
+    _fDummy : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[WHILE NOT _fbRollingBufferPrimary.bEmpty DO
+    _fbRollingBufferPrimary.M_Pop(fValue => _fDummy);
+END_WHILE
+
+M_PurgeStaleBufferSegments := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SerializeInfluxLineProtocol" Id="{b27299d0-8220-4ed9-9c0f-ad49346a1144}">
+      <Declaration><![CDATA[METHOD M_SerializeInfluxLineProtocol : STRING(255)
+VAR_INPUT
+    sMeasurement : STRING(30);
+    nChannel     : INT;
+END_VAR
+VAR
+    _sResult : STRING(255);
+    _sChan   : STRING(10);
+    _sVal    : STRING(30);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nChannel < 1 OR nChannel > 16 THEN
+    M_SerializeInfluxLineProtocol := '';
+    RETURN;
+END_IF
+
+_sChan := INT_TO_STRING(nChannel);
+_sVal  := LREAL_TO_STRING(_arrChannelFiltered[nChannel]);
+
+_sResult := CONCAT(sMeasurement, ',channel=');
+_sResult := CONCAT(_sResult, _sChan);
+_sResult := CONCAT(_sResult, ' value=');
+_sResult := CONCAT(_sResult, _sVal);
+
+_sInfluxLineBuffer            := _sResult;
+M_SerializeInfluxLineProtocol := _sResult;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateStatisticalMomentsWelford" Id="{40670311-7003-4d0b-92a2-56150e6ff7b8}">
+      <Declaration><![CDATA[METHOD M_UpdateStatisticalMomentsWelford : BOOL
+VAR
+    _nIdx    : INT;
+    _fDelta  : LREAL;
+    _fDelta2 : LREAL;
+    _fCount  : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fCount := TO_LREAL(nTotalSamplesLogged + 1);
+
+FOR _nIdx := 1 TO 16 DO
+    _fDelta                := _arrChannelFiltered[_nIdx] - _arrChannelMean[_nIdx];
+    _arrChannelMean[_nIdx] := _arrChannelMean[_nIdx] + (_fDelta / _fCount);
+
+    _fDelta2                   := _arrChannelFiltered[_nIdx] - _arrChannelMean[_nIdx];
+    _arrChannelM2_Accum[_nIdx] := _arrChannelM2_Accum[_nIdx] + (_fDelta * _fDelta2);
+
+    IF _fCount > 1.0 THEN
+        _arrChannelVariance[_nIdx] := _arrChannelM2_Accum[_nIdx] / (_fCount - 1.0);
+        _arrChannelStdDev[_nIdx]   := SQRT(_arrChannelVariance[_nIdx]);
+    ELSE
+        _arrChannelVariance[_nIdx] := 0.0;
+        _arrChannelStdDev[_nIdx]   := 0.0;
+    END_IF
+END_FOR
+
+M_UpdateStatisticalMomentsWelford := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ValidatePartitionDiskQuota" Id="{147a6107-f0a6-4f24-9d46-4e58af11fac9}">
+      <Declaration><![CDATA[METHOD M_ValidatePartitionDiskQuota : BOOL
+VAR_INPUT
+    nMaxFramesPerPartition : UDINT;
+    nActiveFrameCount      : UDINT;
+END_VAR
+VAR
+    _fUtilization : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nMaxFramesPerPartition = 0 THEN
+    M_ValidatePartitionDiskQuota := FALSE;
+    RETURN;
+END_IF
+
+_fUtilization                := (TO_REAL(nActiveFrameCount) / TO_REAL(nMaxFramesPerPartition)) * 100.0;
+M_ValidatePartitionDiskQuota := (_fUtilization < 90.0);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_ActiveTelemetryChannelCount" Id="{dece779d-5cc8-4ef7-895c-8d704e9f08ca}">
+      <Declaration><![CDATA[PROPERTY P_ActiveTelemetryChannelCount : INT
+]]></Declaration>
+      <Get Name="Get" Id="{87673eb2-4c80-4dfb-af5a-a7473561ccb4}">
+        <Declaration><![CDATA[VAR
+    _nIdx   : INT;
+    _nCount : INT := 0;
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[FOR _nIdx := 0 TO 31 DO
+    IF (SHR(nActiveChannelBitmask, _nIdx) AND 16#01) = 16#01 THEN
+        _nCount := _nCount + 1;
+    END_IF
+END_FOR
+
+P_ActiveTelemetryChannelCount := _nCount;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_ArchivePartitionIndex" Id="{a02ff847-1919-4319-b45f-8ecac4ce9f98}">
+      <Declaration><![CDATA[PROPERTY P_ArchivePartitionIndex : DINT
+]]></Declaration>
+      <Get Name="Get" Id="{476266e7-030e-4bea-ba56-18e700e23a3c}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_ArchivePartitionIndex := nArchivePartitionId;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{85597671-98d3-431e-b1aa-fd601f8fea45}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[nArchivePartitionId := P_ArchivePartitionIndex;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="P_BufferUtilizationRatio" Id="{f0c49d74-5cb5-4d2f-9933-48ca88982b3a}">
+      <Declaration><![CDATA[PROPERTY P_BufferUtilizationRatio : REAL
+]]></Declaration>
+      <Get Name="Get" Id="{0b11982d-5066-4c2a-8812-57350acd1288}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_BufferUtilizationRatio := fBufferUtilizationPct;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_DataCompressionEfficiency" Id="{eb577c43-d84d-46ee-a511-cbf42f38c0b7}">
+      <Declaration><![CDATA[PROPERTY P_DataCompressionEfficiency : REAL
+]]></Declaration>
+      <Get Name="Get" Id="{0f7d7dcf-8e6b-4615-ac21-a35340e26d5c}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_DataCompressionEfficiency := fOverallCompressionRatio;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_GlobalAnomalySeverity" Id="{ceff4331-6e8c-47d2-af73-bdcb953472f8}">
+      <Declaration><![CDATA[PROPERTY P_GlobalAnomalySeverity : REAL
+]]></Declaration>
+      <Get Name="Get" Id="{346d9fc3-a882-45ab-b221-ae75988b6391}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF bProcessAnomalyDetected THEN
+    P_GlobalAnomalySeverity := 85.0;
+ELSE
+    P_GlobalAnomalySeverity := 0.0;
+END_IF
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_TelemetrySamplingRateHz" Id="{d7ba74ee-eac0-4aa3-81fa-7296fbeb620f}">
+      <Declaration><![CDATA[PROPERTY P_TelemetrySamplingRateHz : UDINT
+]]></Declaration>
+      <Get Name="Get" Id="{fbf9d31b-141e-4768-89ef-06a8c1fa4dd7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_TelemetrySamplingRateHz := nSamplingFrequency_Hz;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{66c99ad8-2380-45c2-9248-e4c6ce0223e1}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF P_TelemetrySamplingRateHz > 0 AND P_TelemetrySamplingRateHz <= cMaxSamplingFrequency_Hz THEN
+    nSamplingFrequency_Hz := P_TelemetrySamplingRateHz;
+END_IF
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>

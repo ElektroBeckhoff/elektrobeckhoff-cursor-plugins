@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_PropertiesFull" Id="{6a851fec-f539-4349-b078-7a9f80c57bab}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_PropertiesFull
+VAR
+    _fPosition : LREAL;
+    _bEnabled  : BOOL;
+    _sDevName  : STRING(80);
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Property Name="Enabled" Id="{edddc1b8-ba0c-4a5c-a814-db1c51387ed5}">
+      <Declaration><![CDATA[PROPERTY Enabled : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{c621d76c-7d28-4edb-8721-8a8e09632dee}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Enabled := _bEnabled;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{37508d12-1ba5-43d2-8c05-5d4337df8d50}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_bEnabled := Enabled;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="Position" Id="{a152f216-7144-461d-9387-da22dcd40d18}">
+      <Declaration><![CDATA[PROPERTY Position : LREAL
+]]></Declaration>
+      <Get Name="Get" Id="{b818b00c-d33f-486e-85c1-1af992d94060}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Position := _fPosition;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{b7db9a44-aeb5-4e4d-b796-103760e5b07c}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF Position >= 0.0 THEN
+    _fPosition := Position;
+END_IF
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>

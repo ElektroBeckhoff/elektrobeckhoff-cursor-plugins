@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_DataRingBuffer" Id="{f91db1f9-5724-4e21-aa1f-389803405af8}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sample_DataRingBuffer
+VAR CONSTANT
+    cBufferSize : INT := 64;
+END_VAR
+VAR_OUTPUT
+    nCount : INT;
+    bFull  : BOOL;
+    bEmpty : BOOL := TRUE;
+END_VAR
+VAR
+    _arrBuffer : ARRAY[0..63] OF LREAL;
+    _nHead     : INT;
+    _nTail     : INT;
+    _nCount    : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[nCount := _nCount;
+bEmpty := (_nCount = 0);
+bFull  := (_nCount >= cBufferSize);
+]]></ST>
+    </Implementation>
+    <Method Name="M_Clear" Id="{898ee360-3eec-457a-8e87-f155b381e127}">
+      <Declaration><![CDATA[METHOD M_Clear : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nHead  := 0;
+_nTail  := 0;
+_nCount := 0;
+M_Clear := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Pop" Id="{b6b525fd-2fe0-4869-a196-8d80035a39c8}">
+      <Declaration><![CDATA[METHOD M_Pop : BOOL
+VAR_OUTPUT
+    fValue : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF _nCount <= 0 THEN
+    fValue := 0.0;
+    M_Pop  := FALSE;
+    RETURN;
+END_IF
+
+fValue  := _arrBuffer[_nTail];
+_nTail  := (_nTail + 1) MOD cBufferSize;
+_nCount := _nCount - 1;
+M_Pop   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Push" Id="{a9e247d6-3d29-4a49-ab46-25bba8d0a701}">
+      <Declaration><![CDATA[METHOD M_Push : BOOL
+VAR_INPUT
+    fValue : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF _nCount >= cBufferSize THEN
+    M_Push := FALSE;
+    RETURN;
+END_IF
+
+_arrBuffer[_nHead] := fValue;
+_nHead             := (_nHead + 1) MOD cBufferSize;
+_nCount            := _nCount + 1;
+M_Push             := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

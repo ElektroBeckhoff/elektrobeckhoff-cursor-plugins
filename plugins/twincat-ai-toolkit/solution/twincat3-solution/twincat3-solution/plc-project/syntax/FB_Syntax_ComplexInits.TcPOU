@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ComplexInits" Id="{f0f30913-64fc-494b-96dc-21b3e5cc2923}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_ComplexInits
+VAR
+    stConfig : ST_Syntax_Mini                := (nId := 10, bActive := TRUE, sName := 'InitTag');
+    aNumbers : ARRAY[1..5] OF INT            := [10, 20, 30, 40, 50];
+    aStructs : ARRAY[1..2] OF ST_Syntax_Mini := [(nId := 1, bActive := FALSE, sName := 'First'), (nId := 2, bActive := TRUE, sName := 'Second')];
+    a2D      : ARRAY[1..2, 1..2] OF INT      := [1, 2, 3, 4];
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF stConfig.nId = 10 THEN
+    stConfig.nId     := 20;
+    stConfig.bActive := FALSE;
+    stConfig.sName   := 'UpdatedTag';
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

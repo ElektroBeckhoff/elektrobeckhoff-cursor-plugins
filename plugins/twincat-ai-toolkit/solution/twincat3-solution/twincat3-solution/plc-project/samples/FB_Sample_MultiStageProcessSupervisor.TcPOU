@@ -1,0 +1,996 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Sample_MultiStageProcessSupervisor" Id="{841f0b34-8539-4495-b1ff-f9787686b6de}" SpecialFunc="None">
+    <Declaration><![CDATA[(*******************************************************************************
+ * POU Name:    FB_Sample_MultiStageProcessSupervisor
+ * Description: Highly complex multi-stage process supervisor demonstration
+ *              featuring extreme control flow nesting (10+ levels), extensive
+ *              multi-parameter FB/method calls, nested data matrices,
+ *              algorithms, pragmas, regions, methods, properties, and actions.
+ *******************************************************************************)
+{attribute 'reflection'}
+{attribute 'no_explicit_call' := 'Run cyclic supervisor via instance call'}
+FUNCTION_BLOCK FB_Sample_MultiStageProcessSupervisor
+VAR_INPUT
+    bEnable               : BOOL                := FALSE;                    (* Master supervisor enable *)
+    bStartProcess         : BOOL                := FALSE;                    (* Trigger process cycle *)
+    bAbortProcess         : BOOL                := FALSE;                    (* Emergency process abort *)
+    bAcknowledgeFault     : BOOL                := FALSE;                    (* Alarm acknowledgment *)
+    bManualOverride       : BOOL                := FALSE;                    (* Manual override mode *)
+    bSimulationModeActive : BOOL                := FALSE;                    (* Synthetic data simulation bypass *)
+    bPurgePipelineCommand : BOOL                := FALSE;                    (* Forced nitrogen line purging *)
+    nProcessMode          : INT                 := 1;                        (* 1=Continuous, 2=SingleBatch, 3=Calibration *)
+    nMaxRetryAttempts     : INT                 := 3;                        (* Max retry limit per stage *)
+    nSamplingFrequency_Hz : UINT                := 50;                       (* Telemetry sampling rate *)
+    fSetpointFlow_Lmin    : REAL                := 25.5;                     (* Target flow rate in [l/min] *)
+    fPressureLimit_Bar    : LREAL               := 6.5;                      (* Safe pressure ceiling in [bar] *)
+    fTemperatureMax_C     : REAL                := 85.0;                     (* Overtemperature trip limit *)
+    fDensityKgM3          : LREAL               := 998.2;                    (* Process fluid physical density *)
+    tStageTimeout         : TIME                := T#12S500MS;               (* Maximum allowed time per processing stage *)
+    tFilterCycleTime      : TIME                := T#100MS;                  (* Filter sampling interval *)
+    tThermalSettlingDwell : TIME                := T#2S500MS;                (* Dwell time for temperature equilibration *)
+    sBatchIdentifier      : STRING(80)          := 'BATCH-2026-08-ALPHA';    (* Tracking batch identifier *)
+    sOperatorSignature    : STRING(80)          := 'OP-ENGINEER-ID-4402';    (* Authorized operator login token *)
+    sWorkstationLocation  : STRING(80)          := 'BAY-PROCESSING-CELL-04'; (* Physical cell identifier *)
+    arrToleranceBands     : ARRAY[1..4] OF REAL := [0.05, 0.10, 0.15, 0.20]; (* Tolerance per stage *)
+END_VAR
+VAR_OUTPUT
+    bOperational           : BOOL;        (* Supervisor is actively running *)
+    bProcessBusy           : BOOL;        (* Process cycle currently executing *)
+    bProcessComplete       : BOOL;        (* Previous batch successfully completed *)
+    bFaultActive           : BOOL;        (* Active alarm condition *)
+    bWarningPresent        : BOOL;        (* Minor non-halting process warning *)
+    bHoldActive            : BOOL;        (* Process temporarily held *)
+    bStageTransitionActive : BOOL;        (* State change in progress *)
+    bCalibrationInProgress : BOOL;        (* Online matrix recalibration running *)
+    nActiveStageIndex      : INT;         (* Currently active process stage [1..5] *)
+    nProcessedBatches      : UDINT;       (* Completed batch counter *)
+    nFailedBatches         : UDINT;       (* Rejected quality batches counter *)
+    fFilteredFlow_Lmin     : REAL;        (* Averaged flow measurement *)
+    fPeakPressure_Bar      : LREAL;       (* Maximum observed pressure during batch *)
+    fMeanTemperature_C     : REAL;        (* Batch arithmetic mean temperature *)
+    fComputedEfficiency    : REAL;        (* Calculated process efficiency [0..100%] *)
+    fStatisticalCpkIndex   : REAL;        (* Process capability metric *)
+    nErrorCode             : UDINT;       (* 0=No error, 16#F001=Timeout, 16#F002=Overpressure *)
+    sStatusMessage         : STRING(255); (* Detailed status or error diagnostic text *)
+    sCurrentPhaseName      : STRING(80);  (* Human readable stage descriptor *)
+END_VAR
+VAR_IN_OUT
+    stDiagnostics : ST_Sample_DiagnosticsStruct; (* Shared diagnostic metrics structure *)
+END_VAR
+VAR
+    // --- 1. Timers and Edge Triggers ---
+    _fbRTrigStart       : R_TRIG;
+    _fbRTrigAbort       : R_TRIG;
+    _fbRTrigAck         : R_TRIG;
+    _fbRTrigPurge       : R_TRIG;
+    _fbTonStageWatchdog : TON;
+    _fbTonFilterTicker  : TON;
+    _fbTonSafetyDelay   : TON;
+    _fbTonThermalDwell  : TON;
+
+    // --- 2. Sub-Controller Instances ---
+    _fbSubController : FB_Sample_StateMachineController;
+    _fbRingBuffer    : FB_Sample_DataRingBuffer;
+
+    // --- 3. State Machine & Flow Control ---
+    _nMasterStep          : INT  := 0; (* Main state machine index *)
+    _nPreviousMasterStep  : INT  := 0; (* History register for pauses *)
+    _nSubStepIndex        : INT  := 0; (* Sub-sequence stage index *)
+    _nRetryCounter        : INT  := 0; (* Retries within active stage *)
+    _nDeepBranchSelector  : INT  := 1;
+    _bEmergencyDumpActive : BOOL := FALSE;
+    _bAutoRecoveryEnabled : BOOL := TRUE;
+
+    // --- 4. Matrices and Array Buffers ---
+    _arrStageMatrix       : ARRAY[1..3, 1..4] OF REAL;
+    _arrToleranceProfiles : ARRAY[1..4, 1..4] OF REAL;
+    _arrNodeSnapshots     : ARRAY[1..4] OF ST_Syntax_Mini := [
+        (nId := 1, bActive := TRUE, sName := 'Stage-Inlet'),
+        (nId := 2, bActive := TRUE, sName := 'Stage-Reaction'),
+        (nId := 3, bActive := TRUE, sName := 'Stage-Separation'),
+        (nId := 4, bActive := TRUE, sName := 'Stage-Outlet')
+    ];
+    _arrFlowHistoricalLog  : ARRAY[1..16] OF REAL;
+    _arrTempHistoricalLog  : ARRAY[1..16] OF REAL;
+    _arrPressureHistorical : ARRAY[1..16] OF LREAL;
+
+    // --- 5. Internal Accumulators & Diagnostics ---
+    _fFlowSum            : LREAL := 0.0;
+    _fTempSum            : LREAL := 0.0;
+    _nFlowSampleCount    : DINT  := 0;
+    _nTempSampleCount    : DINT  := 0;
+    _bCalibrationDone    : BOOL  := FALSE;
+    _nDiagnosticId       : UDINT := 16#1000_0001;
+    _nAssignedPipelineId : DINT;
+    _bSubBatchValid      : BOOL;
+    _nAnomalyFlags       : DWORD;
+    _sTelemetryJsonCache : STRING(255);
+END_VAR
+VAR_TEMP
+    _nOuterIdx          : INT;
+    _nInnerIdx          : INT;
+    _nStageLoop         : INT;
+    _nKLoop             : INT;
+    _nMatrixRow         : INT;
+    _nMatrixCol         : INT;
+    _fTempPressureRatio : LREAL;
+    _fTempWeightedSum   : REAL;
+    _fTempEnthalpyDelta : LREAL;
+    _bStagePassed       : BOOL;
+    _bExitLoopCondition : BOOL;
+    _bInnerConditionMet : BOOL;
+    _bCalibSuccess      : BOOL;
+    _sFormattedReport   : STRING(255);
+END_VAR
+VAR CONSTANT
+    cMaxPipelineStages    : INT   := 4;
+    cMinimumFlowRate      : REAL  := 0.5;
+    cEmergencyDecelTime   : TIME  := T#250MS;
+    cStandardGravity      : LREAL := 9.80665;
+    cGasConstantUniversal : LREAL := 8.314462618;
+    cSpecificHeatWater    : REAL  := 4.184; (* kJ/(kg*K) *)
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// -----------------------------------------------------------------------------
+// 1. Edge Detection and Sub-FB Input Evaluation
+// -----------------------------------------------------------------------------
+{region "Input Signal Ingestion & Edge Triggers"}
+    _fbRTrigStart(CLK := bStartProcess);
+    _fbRTrigAbort(CLK := bAbortProcess);
+    _fbRTrigAck(CLK := bAcknowledgeFault);
+    _fbRTrigPurge(CLK := bPurgePipelineCommand);
+
+    _fbTonFilterTicker(IN := NOT _fbTonFilterTicker.Q, PT := tFilterCycleTime);
+    _fbTonThermalDwell(IN := (_nMasterStep = 20), PT := tThermalSettlingDwell);
+    _fbTonStageWatchdog(IN := (bProcessBusy AND NOT bHoldActive), PT := tStageTimeout);
+
+    IF _fbTonFilterTicker.Q THEN
+        _fFlowSum         := _fFlowSum + fSetpointFlow_Lmin;
+        _nFlowSampleCount := _nFlowSampleCount + 1;
+
+        IF _nFlowSampleCount > 0 THEN
+            fFilteredFlow_Lmin := LREAL_TO_REAL(_fFlowSum / DINT_TO_LREAL(_nFlowSampleCount));
+    END_IF
+END_IF
+
+    // Watchdog trip logic
+    IF _fbTonStageWatchdog.Q AND NOT bFaultActive THEN
+        bFaultActive := TRUE;
+        nErrorCode     := 16#F001; // Stage timeout fault
+        sStatusMessage := 'CRITICAL: Stage execution time exceeded maximum configured timeout!';
+        _nMasterStep   := 999;
+END_IF
+{endregion}
+
+// -----------------------------------------------------------------------------
+// 2. Fault Acknowledgment, Purge & Emergency Abort Checks
+// -----------------------------------------------------------------------------
+{region "Safety Interlocks & Operator Actions"}
+    IF _fbRTrigAbort.Q THEN
+        _nMasterStep   := 999; (* Transition immediately to Emergency Stop *)
+        bFaultActive   := TRUE;
+        bProcessBusy   := FALSE;
+        nErrorCode     := 16#F009;
+        sStatusMessage := 'Process aborted by operator emergency intervention';
+    ELSIF _fbRTrigAck.Q AND bFaultActive THEN
+        bFaultActive   := FALSE;
+        nErrorCode     := 0;
+        sStatusMessage := 'Faults acknowledged; supervisor in standby';
+        _nMasterStep   := 0;
+END_IF
+
+    IF _fbRTrigPurge.Q AND NOT bProcessBusy THEN
+        _nMasterStep   := 5; // Direct purge routine
+        sStatusMessage := 'Nitrogen line purge sequence initiated';
+END_IF
+{endregion}
+
+// -----------------------------------------------------------------------------
+// 3. Extreme Deep Nested Master Process State Machine (10+ Levels)
+// -----------------------------------------------------------------------------
+{region "Master Execution Sequencer"}
+    IF bEnable AND NOT bFaultActive THEN
+        bOperational := TRUE;
+
+        CASE _nMasterStep OF
+
+            0: // Standby Idle
+                bProcessBusy           := FALSE;
+                bProcessComplete       := FALSE;
+                nActiveStageIndex      := 0;
+                sCurrentPhaseName      := 'IDLE_STANDBY';
+                fPeakPressure_Bar      := 0.0;
+                _nRetryCounter         := 0;
+
+                IF _fbRTrigStart.Q THEN
+                    bProcessBusy      := TRUE;
+                    nActiveStageIndex := 1;
+                    _nMasterStep      := 10;
+                    sStatusMessage    := 'Supervisor starting Stage 1: Pipeline Ingestion';
+                END_IF
+
+            5: // Nitrogen Purge Stage
+                sCurrentPhaseName := 'LINE_PURGE';
+                bProcessBusy      := TRUE;
+                A_ProcessBatchTransitionLog();
+                _nMasterStep      := 0;
+
+            10: // Stage 1: Pre-Check & Validation Matrix Sweep
+                sCurrentPhaseName := 'STAGE_1_PRECHECK';
+                IF fSetpointFlow_Lmin >= cMinimumFlowRate THEN
+                    IF fPressureLimit_Bar > 1.0 AND_THEN fPressureLimit_Bar < 15.0 THEN
+                        // Level 3 Nesting
+                        FOR _nOuterIdx := 1 TO 3 DO
+                            // Level 4 Nesting
+                            FOR _nInnerIdx := 1 TO 4 DO
+                                // Level 5 Nesting
+                                IF _arrStageMatrix[_nOuterIdx, _nInnerIdx] > 0.0 THEN
+                                    _fTempWeightedSum := _arrStageMatrix[_nOuterIdx, _nInnerIdx] * INT_TO_REAL(_nOuterIdx);
+                                    // Level 6 Nesting
+                                    IF _fTempWeightedSum > 2.0 THEN
+                                        // Level 7 Nesting
+                                        FOR _nKLoop := 1 TO 2 DO
+                                            // Level 8 Nesting
+                                            IF (_nKLoop = 1) OR_ELSE (_nInnerIdx > 2) THEN
+                                                // Level 9 Nesting
+                                                IF _arrNodeSnapshots[_nInnerIdx].bActive THEN
+                                                    // Level 10 Nesting: Deepest execution block
+                                                    _arrNodeSnapshots[_nInnerIdx].nId := _nOuterIdx * 10 + _nInnerIdx;
+                                                    _bInnerConditionMet               := TRUE;
+                                                END_IF
+                                            END_IF
+                                        END_FOR
+                                    END_IF
+                                END_IF
+                            END_FOR
+                        END_FOR
+
+                        IF _bInnerConditionMet THEN
+                            nActiveStageIndex := 2;
+                            _nMasterStep      := 20;
+                            sStatusMessage    := 'Stage 1 validation complete. Advancing to Stage 2.';
+                        END_IF
+                    ELSE
+                        bFaultActive   := TRUE;
+                        nErrorCode     := 16#F002;
+                        sStatusMessage := 'Pressure setpoint out of valid safe operating envelope';
+                        _nMasterStep   := 999;
+                    END_IF
+                ELSE
+                    bFaultActive   := TRUE;
+                    nErrorCode     := 16#F003;
+                    sStatusMessage := 'Configured setpoint flow below minimum required threshold';
+                    _nMasterStep   := 999;
+                END_IF
+
+            20: // Stage 2: Reaction Stabilization & Thermal Dwell
+                sCurrentPhaseName := 'STAGE_2_THERMAL_DWELL';
+                IF _fbTonThermalDwell.Q THEN
+                    A_CalculateStageAggregations();
+                    nActiveStageIndex := 3;
+                    _nMasterStep      := 30;
+                    sStatusMessage    := 'Thermal dwell achieved. Advancing to Stage 3.';
+                END_IF
+
+            30: // Stage 3: Multi-Parameter Sensor Batch Evaluation
+                sCurrentPhaseName := 'STAGE_3_SENSOR_EVAL';
+                _bStagePassed     := M_ProcessSensorBatch(
+                        fInletFlow          := fSetpointFlow_Lmin,
+                        fOutletFlow         := fFilteredFlow_Lmin,
+                        fInletPressure      := fPressureLimit_Bar,
+                        fOutletPressure     := 3.2,
+                        fCoreTemp           := 65.4,
+                        fJacketTemp         := 61.2,
+                        bValveOpen          := TRUE,
+                        bPumpRunning        := TRUE,
+                        nFilterState        := 1,
+                        tElapsed            := T#4S,
+                        fToleranceBand      := arrToleranceBands[2],
+                        sBatchId            := sBatchIdentifier,
+                        fComputedEfficiency => fComputedEfficiency,
+                        bThresholdExceeded  => bWarningPresent,
+                        nAnomalyBitmask     => _nAnomalyFlags);
+
+                IF _bStagePassed THEN
+                    nActiveStageIndex := 4;
+                    _nMasterStep      := 40;
+                    sStatusMessage    := 'Sensor batch evaluated successfully. Advancing to Stage 4.';
+                ELSIF _nRetryCounter < nMaxRetryAttempts THEN
+                    _nRetryCounter := _nRetryCounter + 1;
+                    sStatusMessage := 'Sensor evaluation anomaly detected. Retrying stage measurement...';
+                ELSE
+                    bFaultActive   := TRUE;
+                    nErrorCode     := 16#F004;
+                    sStatusMessage := 'Sensor evaluation failed maximum retry allowance.';
+                    _nMasterStep   := 999;
+                END_IF
+
+            40: // Stage 4: Statistical Process Control & Capability Metrics
+                sCurrentPhaseName := 'STAGE_4_SPC_METRICS';
+                _bCalibSuccess    := M_RunStatisticalProcessControl(
+                        arrSamples     := _arrFlowHistoricalLog,
+                        nSampleCount   := 16,
+                        fNominalTarget := fSetpointFlow_Lmin,
+                        fUpperLimit    := fSetpointFlow_Lmin + 2.0,
+                        fLowerLimit    := fSetpointFlow_Lmin - 2.0,
+                        fCalculatedCpk => fStatisticalCpkIndex);
+
+                nActiveStageIndex := 5;
+                _nMasterStep      := 50;
+                sStatusMessage    := 'SPC calculations complete. Advancing to Stage 5: Finalization.';
+
+            50: // Stage 5: Batch Completion & Telemetry Ingestion
+                sCurrentPhaseName    := 'STAGE_5_COMPLETION';
+                bProcessBusy         := FALSE;
+                bProcessComplete     := TRUE;
+                nProcessedBatches    := nProcessedBatches + 1;
+                sStatusMessage       := 'Batch successfully executed and validated.';
+                _sTelemetryJsonCache := M_FormatDiagnosticTelemetryJSON(nBatchNum := nProcessedBatches, fYield := fComputedEfficiency, sIdentifier := sBatchIdentifier);
+                A_ProcessBatchTransitionLog();
+                _nMasterStep         := 100;
+
+            100: // Batch Hold / Cycle Complete
+                sCurrentPhaseName := 'BATCH_DONE';
+                IF NOT bStartProcess THEN
+                    _nMasterStep := 0;
+                END_IF
+
+            999: // Emergency Shutdown & Depressurization
+                sCurrentPhaseName     := 'EMERGENCY_HALT';
+                bProcessBusy          := FALSE;
+                bOperational          := FALSE;
+                _bEmergencyDumpActive := TRUE;
+                nFailedBatches        := nFailedBatches + 1;
+                A_ExecutePressureReliefCycle();
+
+        END_CASE
+    ELSE
+        bOperational := FALSE;
+        bProcessBusy := FALSE;
+END_IF
+{endregion}
+]]></ST>
+    </Implementation>
+    <Action Name="A_CalculateStageAggregations" Id="{91a507ef-3191-4b34-8581-0ade1865dfed}">
+      <Implementation>
+        <ST><![CDATA[// Matrix and historical buffer aggregation routine
+_fTempSum      := 0.0;
+
+FOR _nOuterIdx := 1 TO 16 DO
+    _arrFlowHistoricalLog[_nOuterIdx]  := fFilteredFlow_Lmin * (1.0 + (INT_TO_REAL(_nOuterIdx) * 0.01));
+    _arrTempHistoricalLog[_nOuterIdx]  := fTemperatureMax_C - (INT_TO_REAL(_nOuterIdx) * 0.5);
+    _arrPressureHistorical[_nOuterIdx] := fPressureLimit_Bar * 0.95;
+    _fTempSum                          := _fTempSum + TO_LREAL(_arrTempHistoricalLog[_nOuterIdx]);
+END_FOR
+
+IF _nOuterIdx > 1 THEN
+    fMeanTemperature_C := TO_REAL(_fTempSum / 16.0);
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ExecutePressureReliefCycle" Id="{3e9ab7af-b500-4f78-aca7-64e71ce392c9}">
+      <Implementation>
+        <ST><![CDATA[// Emergency relief blowdown
+FOR _nStageLoop := 1 TO cMaxPipelineStages DO
+    _arrNodeSnapshots[_nStageLoop].bActive := FALSE;
+    _arrNodeSnapshots[_nStageLoop].nId     := 0;
+END_FOR
+
+fPeakPressure_Bar     := 0.0;
+_bEmergencyDumpActive := FALSE;
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ProcessBatchTransitionLog" Id="{197b84c8-60be-4af8-8548-976c6add9cd3}">
+      <Implementation>
+        <ST><![CDATA[// Record operational transition telemetry into shared diagnostic structure
+stDiagnostics.fArtificialLevelSum    := fFilteredFlow_Lmin;
+stDiagnostics.fTemperatureSensor     := fMeanTemperature_C;
+stDiagnostics.bOccupancyActive       := bProcessBusy;
+stDiagnostics.bLightExternalOverride := bFaultActive;
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ResetAccumulators" Id="{7aea8ce6-ce2c-4257-8753-5f7f34403dcb}">
+      <Implementation>
+        <ST><![CDATA[// Reset internal flow and temperature accumulators
+_fFlowSum           := 0.0;
+_fTempSum           := 0.0;
+_nFlowSampleCount   := 0;
+_nTempSampleCount   := 0;
+_nRetryCounter      := 0;
+_bInnerConditionMet := FALSE;
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_SynchronizeHardwareClocks" Id="{483c8bf2-0b91-4f55-9b0d-1377f838dfd8}">
+      <Implementation>
+        <ST><![CDATA[// Hardware clock telemetry alignment
+IF bOperational THEN
+    stDiagnostics.nLightCount := stDiagnostics.nLightCount + 1;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Method Name="M_CalculateEnthalpyBalance" Id="{2851a69a-11dd-4f07-b7a1-d791110b6c58}">
+      <Declaration><![CDATA[METHOD PUBLIC M_CalculateEnthalpyBalance : LREAL
+VAR_INPUT
+    fInletEnthalpy_kJ_kg  : LREAL;
+    fOutletEnthalpy_kJ_kg : LREAL;
+    fMassRate_kg_s        : LREAL;
+    fAmbientLossFraction  : REAL;
+END_VAR
+VAR_OUTPUT
+    fNetThermalPower_kW : LREAL;
+    fLossPower_kW       : LREAL;
+    bEnergyBalanced     : BOOL;
+END_VAR
+VAR
+    _fDeltaH : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fDeltaH            := fOutletEnthalpy_kJ_kg - fInletEnthalpy_kJ_kg;
+fNetThermalPower_kW := fMassRate_kg_s * _fDeltaH;
+fLossPower_kW       := fNetThermalPower_kW * REAL_TO_LREAL(fAmbientLossFraction);
+
+IF ABS(fNetThermalPower_kW) < 1000.0 THEN
+    bEnergyBalanced := TRUE;
+ELSE
+    bEnergyBalanced := FALSE;
+END_IF
+
+M_CalculateEnthalpyBalance := fNetThermalPower_kW;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalibrateFlowSensorMatrix" Id="{2aa96e9e-b9fc-4beb-b0fd-fcbc9d7edf94}">
+      <Declaration><![CDATA[METHOD PUBLIC M_CalibrateFlowSensorMatrix : BOOL
+VAR_INPUT
+    fZeroOffset_Lmin : REAL;
+    fSpanGainFactor  : REAL;
+END_VAR
+VAR
+    _nRow : INT;
+    _nCol : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF (fSpanGainFactor >= 0.5) AND (fSpanGainFactor <= 2.0) THEN
+    FOR _nRow := 1 TO 3 DO
+        FOR _nCol := 1 TO 4 DO
+            _arrStageMatrix[_nRow, _nCol] := (_arrStageMatrix[_nRow, _nCol] + fZeroOffset_Lmin) * fSpanGainFactor;
+        END_FOR
+    END_FOR
+    _bCalibrationDone             := TRUE;
+    M_CalibrateFlowSensorMatrix   := TRUE;
+ELSE
+    _bCalibrationDone             := FALSE;
+    M_CalibrateFlowSensorMatrix   := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ComputeAdaptiveFilterWeights" Id="{92253de0-409d-4c2d-a68d-3cda2e38daa7}">
+      <Declaration><![CDATA[METHOD PUBLIC M_ComputeAdaptiveFilterWeights : REAL
+VAR_INPUT
+    fAlphaSmoothing : REAL;
+    fInnovationZ    : REAL;
+    fResidualErr    : REAL;
+END_VAR
+VAR
+    _fGain : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fInnovationZ <> 0.0 THEN
+    _fGain := fAlphaSmoothing * (fResidualErr / fInnovationZ);
+ELSE
+    _fGain := fAlphaSmoothing;
+END_IF
+
+IF _fGain > 1.0 THEN
+    _fGain := 1.0;
+ELSIF _fGain < 0.01 THEN
+    _fGain := 0.01;
+END_IF
+
+M_ComputeAdaptiveFilterWeights := _fGain;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EvaluateLinearRegressionTrend" Id="{ea7d3327-9c2e-4f23-8dbc-b8713550690c}">
+      <Declaration><![CDATA[METHOD PUBLIC M_EvaluateLinearRegressionTrend : BOOL
+VAR_INPUT
+    arrXValues : ARRAY[1..16] OF REAL;
+    arrYValues : ARRAY[1..16] OF REAL;
+    nCount     : INT;
+END_VAR
+VAR_OUTPUT
+    fSlope     : REAL;
+    fIntercept : REAL;
+    fRSquared  : REAL;
+END_VAR
+VAR
+    _nIdx         : INT;
+    _fSumX        : REAL;
+    _fSumY        : REAL;
+    _fSumXY       : REAL;
+    _fSumX2       : REAL;
+    _fSumY2       : REAL;
+    _fNumerator   : REAL;
+    _fDenominator : REAL;
+    _fMeanX       : REAL;
+    _fMeanY       : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fSumX  := 0.0;
+_fSumY  := 0.0;
+_fSumXY := 0.0;
+_fSumX2 := 0.0;
+_fSumY2 := 0.0;
+
+IF nCount < 2 THEN
+    fSlope                          := 0.0;
+    fIntercept                      := 0.0;
+    fRSquared                       := 0.0;
+    M_EvaluateLinearRegressionTrend := FALSE;
+    RETURN;
+END_IF
+
+FOR _nIdx := 1 TO nCount DO
+    _fSumX  := _fSumX + arrXValues[_nIdx];
+    _fSumY  := _fSumY + arrYValues[_nIdx];
+    _fSumXY := _fSumXY + (arrXValues[_nIdx] * arrYValues[_nIdx]);
+    _fSumX2 := _fSumX2 + (arrXValues[_nIdx] * arrXValues[_nIdx]);
+    _fSumY2 := _fSumY2 + (arrYValues[_nIdx] * arrYValues[_nIdx]);
+END_FOR
+
+_fNumerator   := (INT_TO_REAL(nCount) * _fSumXY) - (_fSumX * _fSumY);
+_fDenominator := (INT_TO_REAL(nCount) * _fSumX2) - (_fSumX * _fSumX);
+
+IF ABS(_fDenominator) > 0.00001 THEN
+    fSlope     := _fNumerator / _fDenominator;
+    _fMeanX    := _fSumX / INT_TO_REAL(nCount);
+    _fMeanY    := _fSumY / INT_TO_REAL(nCount);
+    fIntercept := _fMeanY - (fSlope * _fMeanX);
+    fRSquared  := 0.95; // Approximate coefficient of determination
+    M_EvaluateLinearRegressionTrend := TRUE;
+ELSE
+    fSlope                          := 0.0;
+    fIntercept                      := 0.0;
+    fRSquared                       := 0.0;
+    M_EvaluateLinearRegressionTrend := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_EvaluateProcessThermodynamics" Id="{fe4d1f0c-6e0a-4b30-951e-f63faa2f7a89}">
+      <Declaration><![CDATA[METHOD PUBLIC M_EvaluateProcessThermodynamics : LREAL
+VAR_INPUT
+    fInletTemperature_K  : LREAL;
+    fOutletTemperature_K : LREAL;
+    fMassFlowRate_kg_s   : LREAL;
+    fSpecificHeat_J_kgK  : LREAL;
+END_VAR
+VAR_OUTPUT
+    fHeatTransferDuty_kW : LREAL;
+    fEntropyGeneration_W : LREAL;
+    bThermodynamicFault  : BOOL;
+END_VAR
+VAR
+    _fDeltaT : LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fDeltaT            := fOutletTemperature_K - fInletTemperature_K;
+bThermodynamicFault := FALSE;
+
+// Q_dot = m_dot * Cp * delta_T (in kW)
+fHeatTransferDuty_kW := (fMassFlowRate_kg_s * fSpecificHeat_J_kgK * _fDeltaT) / 1000.0;
+
+IF fInletTemperature_K > 0.0 AND_THEN fOutletTemperature_K > 0.0 THEN
+    // Delta_S = m_dot * Cp * ln(T2/T1)
+    fEntropyGeneration_W := fMassFlowRate_kg_s * fSpecificHeat_J_kgK * (fOutletTemperature_K / fInletTemperature_K);
+ELSE
+    fEntropyGeneration_W := 0.0;
+    bThermodynamicFault  := TRUE;
+END_IF
+
+IF fHeatTransferDuty_kW > 500.0 THEN
+    bThermodynamicFault := TRUE;
+END_IF
+
+M_EvaluateProcessThermodynamics := fHeatTransferDuty_kW;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteManualFlush" Id="{6f414264-b8fb-452f-9ee2-4022a106ee56}">
+      <Declaration><![CDATA[(*******************************************************************************
+ * Method: M_ExecuteManualFlush
+ * Summary: Executes manual bypass flush across all pipeline stage nodes
+ *******************************************************************************)
+METHOD M_ExecuteManualFlush : UDINT
+VAR_INPUT
+    nDuration_ms : UDINT;
+    fFlushRate   : REAL;
+END_VAR
+VAR
+    _nStageIndex   : INT;
+    _nFlushedCount : UDINT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nFlushedCount := 0;
+
+IF bManualOverride AND NOT bProcessBusy THEN
+    FOR _nStageIndex := 1 TO cMaxPipelineStages DO
+        IF _arrNodeSnapshots[_nStageIndex].bActive THEN
+            _arrNodeSnapshots[_nStageIndex].nId := _nStageIndex * 100;
+            _nFlushedCount                      := _nFlushedCount + 1;
+        END_IF
+    END_FOR
+END_IF
+
+M_ExecuteManualFlush := _nFlushedCount;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecutePIDTuningStep" Id="{3acfee7e-2ee9-4825-a11e-b5390653c687}">
+      <Declaration><![CDATA[METHOD PUBLIC M_ExecutePIDTuningStep : REAL
+VAR_INPUT
+    fProcessVariable : REAL;
+    fSetpoint        : REAL;
+    fKp              : REAL;
+    fTn_s            : REAL;
+    fTv_s            : REAL;
+    tCycleTime_s     : REAL;
+END_VAR
+VAR_IN_OUT
+    fIntegralAccum : REAL;
+    fPreviousError : REAL;
+END_VAR
+VAR
+    _fError          : REAL;
+    _fProportional   : REAL;
+    _fIntegral       : REAL;
+    _fDerivative     : REAL;
+    _fManipulatedVar : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fError        := fSetpoint - fProcessVariable;
+_fProportional := fKp * _fError;
+
+IF fTn_s > 0.001 THEN
+    fIntegralAccum := fIntegralAccum + (_fError * tCycleTime_s / fTn_s);
+END_IF
+
+IF tCycleTime_s > 0.0001 THEN
+    _fDerivative := fKp * fTv_s * ((_fError - fPreviousError) / tCycleTime_s);
+ELSE
+    _fDerivative := 0.0;
+END_IF
+
+fPreviousError   := _fError;
+_fManipulatedVar := _fProportional + fIntegralAccum + _fDerivative;
+
+IF _fManipulatedVar > 100.0 THEN
+    _fManipulatedVar := 100.0;
+ELSIF _fManipulatedVar < 0.0 THEN
+    _fManipulatedVar := 0.0;
+END_IF
+
+M_ExecutePIDTuningStep := _fManipulatedVar;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecutePneumaticValveSequence" Id="{0c1fd805-8483-49db-b206-6e2a883f08b5}">
+      <Declaration><![CDATA[METHOD PUBLIC M_ExecutePneumaticValveSequence : BOOL
+VAR_INPUT
+    nValveIndex    : INT;
+    bCommandOpen   : BOOL;
+    tActuationTime : TIME;
+END_VAR
+VAR_OUTPUT
+    bPositionConfirmed : BOOL;
+    bTravelTimeout     : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF nValveIndex >= 1 AND nValveIndex <= 8 THEN
+    IF bCommandOpen THEN
+        bPositionConfirmed := TRUE;
+        bTravelTimeout     := FALSE;
+    ELSE
+        bPositionConfirmed := FALSE;
+        bTravelTimeout     := FALSE;
+    END_IF
+
+    M_ExecutePneumaticValveSequence := TRUE;
+ELSE
+    bPositionConfirmed              := FALSE;
+    bTravelTimeout                  := TRUE;
+    M_ExecutePneumaticValveSequence := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_FormatDiagnosticTelemetryJSON" Id="{2b0f8c09-5587-4227-b133-c71c2b0dec7d}">
+      <Declaration><![CDATA[METHOD PUBLIC M_FormatDiagnosticTelemetryJSON : STRING(255)
+VAR_INPUT
+    nBatchNum   : UDINT;
+    fYield      : REAL;
+    sIdentifier : STRING(80);
+END_VAR
+VAR
+    _sOut : STRING(255);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_sOut := CONCAT('{"batch":', UDINT_TO_STRING(nBatchNum));
+_sOut := CONCAT(_sOut, ',"id":"');
+_sOut := CONCAT(_sOut, sIdentifier);
+_sOut := CONCAT(_sOut, '","yield_pct":');
+_sOut := CONCAT(_sOut, REAL_TO_STRING(fYield));
+_sOut := CONCAT(_sOut, ',"status":"OK"}');
+
+M_FormatDiagnosticTelemetryJSON := _sOut;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_PerformPreFlightSafetyAudit" Id="{190dddb6-f6b0-40ee-8271-ceaa5d20f8df}">
+      <Declaration><![CDATA[METHOD PUBLIC M_PerformPreFlightSafetyAudit : BOOL
+VAR_INPUT
+    fMinPressure_Bar : LREAL;
+    fMaxTemp_C       : REAL;
+END_VAR
+VAR_OUTPUT
+    nAuditViolationCode : UDINT;
+END_VAR
+VAR
+    _nIdx : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[nAuditViolationCode := 0;
+
+FOR _nIdx := 1 TO cMaxPipelineStages DO
+    IF NOT _arrNodeSnapshots[_nIdx].bActive THEN
+        nAuditViolationCode := 16#A001; // Inactive node
+        M_PerformPreFlightSafetyAudit := FALSE;
+        RETURN;
+    END_IF
+END_FOR
+
+IF fMinPressure_Bar < 0.5 THEN
+    nAuditViolationCode           := 16#A002;
+    M_PerformPreFlightSafetyAudit := FALSE;
+    RETURN;
+END_IF
+
+M_PerformPreFlightSafetyAudit := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ProcessSensorBatch" Id="{81e49052-0690-4ed3-9d2f-e34711320ed3}">
+      <Declaration><![CDATA[(*******************************************************************************
+ * Method: M_ProcessSensorBatch
+ * Summary: Multi-parameter (12 inputs, 3 outputs) comprehensive sensor batch
+ *          evaluation and diagnostic method with deep algorithm logic.
+ *******************************************************************************)
+METHOD M_ProcessSensorBatch : BOOL
+VAR_INPUT
+    fInletFlow      : REAL;
+    fOutletFlow     : REAL;
+    fInletPressure  : LREAL;
+    fOutletPressure : LREAL;
+    fCoreTemp       : REAL;
+    fJacketTemp     : REAL;
+    bValveOpen      : BOOL;
+    bPumpRunning    : BOOL;
+    nFilterState    : INT;
+    tElapsed        : TIME;
+    fToleranceBand  : REAL;
+    sBatchId        : STRING(80);
+END_VAR
+VAR_OUTPUT
+    fComputedEfficiency : REAL;
+    bThresholdExceeded  : BOOL;
+    nAnomalyBitmask     : DWORD;
+END_VAR
+VAR
+    _fDeltaPressure    : LREAL;
+    _fTempGradient     : REAL;
+    _nEvalIndex        : INT;
+    _arrLocalGradients : ARRAY[1..4] OF REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[bThresholdExceeded  := FALSE;
+nAnomalyBitmask     := 16#0000_0000;
+fComputedEfficiency := 0.0;
+
+{region "Sensor Delta Computation"}
+    _fDeltaPressure := ABS(fInletPressure - fOutletPressure);
+    _fTempGradient  := ABS(fCoreTemp - fJacketTemp);
+
+    IF (fInletFlow > 0.0) AND (fOutletFlow >= 0.0) THEN
+        fComputedEfficiency := (fOutletFlow / fInletFlow) * 100.0;
+
+        IF fComputedEfficiency > 100.0 THEN
+            fComputedEfficiency := 100.0;
+    END_IF
+END_IF
+{endregion}
+
+{region "Multi-Condition Anomaly Classification"}
+    IF _fDeltaPressure > 2.5 THEN
+        nAnomalyBitmask    := nAnomalyBitmask OR 16#0000_0001;
+        bThresholdExceeded := TRUE;
+END_IF
+
+    IF _fTempGradient > 30.0 THEN
+        nAnomalyBitmask    := nAnomalyBitmask OR 16#0000_0002;
+        bThresholdExceeded := TRUE;
+END_IF
+
+    IF NOT bValveOpen AND bPumpRunning THEN
+        nAnomalyBitmask    := nAnomalyBitmask OR 16#0000_0004;
+        bThresholdExceeded := TRUE;
+END_IF
+
+    IF nFilterState < 0 THEN
+        nAnomalyBitmask := nAnomalyBitmask OR 16#0000_0008;
+END_IF
+
+    IF (fToleranceBand > 0.0) AND (_fTempGradient > (50.0 * fToleranceBand)) THEN
+        nAnomalyBitmask := nAnomalyBitmask OR 16#0000_0010;
+END_IF
+{endregion}
+
+// Local array initialization and gradient sweep
+FOR _nEvalIndex := 1 TO 4 DO
+    _arrLocalGradients[_nEvalIndex] := _fTempGradient / INT_TO_REAL(_nEvalIndex);
+    IF _arrLocalGradients[_nEvalIndex] > 100.0 THEN
+        bThresholdExceeded := TRUE;
+    END_IF
+END_FOR
+
+M_ProcessSensorBatch := (nAnomalyBitmask = 16#0000_0000) AND NOT bThresholdExceeded;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_RunStatisticalProcessControl" Id="{07b83d35-8542-4012-9ac1-b16324eb3464}">
+      <Declaration><![CDATA[METHOD PUBLIC M_RunStatisticalProcessControl : BOOL
+VAR_INPUT
+    arrSamples     : ARRAY[1..16] OF REAL;
+    nSampleCount   : INT;
+    fNominalTarget : REAL;
+    fUpperLimit    : REAL;
+    fLowerLimit    : REAL;
+END_VAR
+VAR_OUTPUT
+    fCalculatedCpk : REAL;
+END_VAR
+VAR
+    _nIdx    : INT;
+    _fSum    : REAL;
+    _fMean   : REAL;
+    _fVarSum : REAL;
+    _fSigma  : REAL;
+    _fCpu    : REAL;
+    _fCpl    : REAL;
+    _fDiff   : REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_fSum    := 0.0;
+_fVarSum := 0.0;
+
+IF nSampleCount <= 1 THEN
+    fCalculatedCpk                 := 0.0;
+    M_RunStatisticalProcessControl := FALSE;
+    RETURN;
+END_IF
+
+FOR _nIdx := 1 TO nSampleCount DO
+    _fSum := _fSum + arrSamples[_nIdx];
+END_FOR
+
+_fMean := _fSum / INT_TO_REAL(nSampleCount);
+
+FOR _nIdx := 1 TO nSampleCount DO
+    _fDiff   := arrSamples[_nIdx] - _fMean;
+    _fVarSum := _fVarSum + (_fDiff * _fDiff);
+END_FOR
+
+_fSigma := SQRT(_fVarSum / INT_TO_REAL(nSampleCount - 1));
+
+IF _fSigma > 0.0001 THEN
+    _fCpu          := (fUpperLimit - _fMean) / (3.0 * _fSigma);
+    _fCpl          := (_fMean - fLowerLimit) / (3.0 * _fSigma);
+    fCalculatedCpk := MIN(_fCpu, _fCpl);
+ELSE
+    fCalculatedCpk := 2.0; // Perfect zero-variance process
+END_IF
+
+M_RunStatisticalProcessControl := (fCalculatedCpk >= 1.33);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_ActiveStage" Id="{f9be24f0-5a2b-4113-a9f6-ecab7f178c04}">
+      <Declaration><![CDATA[PROPERTY P_ActiveStage : INT
+]]></Declaration>
+      <Get Name="Get" Id="{371d075e-74e1-40a6-a9b2-eeccd7983672}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_ActiveStage := nActiveStageIndex;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{287ffebf-d3b6-4905-ae38-67657db1d7e7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF (P_ActiveStage >= 0) AND (P_ActiveStage <= cMaxPipelineStages) THEN
+    _nSubStepIndex := P_ActiveStage;
+END_IF
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="P_IsReadyForNextBatch" Id="{494a826e-d87b-4644-ac2a-ea23df0eacd7}">
+      <Declaration><![CDATA[PROPERTY P_IsReadyForNextBatch : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{a62cccc5-0735-4a94-9f26-7e5751f4d4d0}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_IsReadyForNextBatch := bOperational AND NOT bProcessBusy AND NOT bFaultActive;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_OverallHealth" Id="{de387a4c-5c3f-4805-ac60-020458c966a1}">
+      <Declaration><![CDATA[PROPERTY P_OverallHealth : REAL
+]]></Declaration>
+      <Get Name="Get" Id="{5a71207f-d7fd-4bd0-93cb-e7cccdb3a862}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF bFaultActive THEN
+    P_OverallHealth := 0.0;
+ELSIF bOperational THEN
+    P_OverallHealth := 100.0;
+ELSE
+    P_OverallHealth := 50.0;
+END_IF
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_ProcessStateName" Id="{f428e02a-131f-46d4-8f4f-c75d2af4822d}">
+      <Declaration><![CDATA[PROPERTY P_ProcessStateName : STRING(80)
+]]></Declaration>
+      <Get Name="Get" Id="{de8148b8-8fde-4046-be07-77c9ab052fe7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_ProcessStateName := sCurrentPhaseName;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

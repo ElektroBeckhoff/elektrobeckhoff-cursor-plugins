@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <Itf Name="I_Sample_WidgetInterface" Id="{ea3ed226-01cd-41a5-aeee-629cb98e2a56}">
+    <Declaration><![CDATA[INTERFACE I_Sample_WidgetInterface EXTENDS __SYSTEM.IQueryInterface
+]]></Declaration>
+    <Property Name="AdsPath" Id="{f0994cb6-9680-4f9b-a925-da9d41bc82dc}">
+      <Declaration><![CDATA[PROPERTY AdsPath : STRING(255)
+]]></Declaration>
+      <Get Name="Get" Id="{93096580-dc6d-4d93-ae8d-5df2e7d46e51}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="AttributeVariable1" Id="{5b0a22b2-e1d1-4276-befe-0778dc75a4fc}">
+      <Declaration><![CDATA[PROPERTY AttributeVariable1 : STRING(80)
+]]></Declaration>
+      <Get Name="Get" Id="{e998ee19-d201-4183-b101-bb87c52cc006}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{7013e9ac-90ff-4f25-9c1b-fd89ad546560}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Method Name="BuildAttributes" Id="{44836eff-9aee-43ea-ab37-d8aaaae2d8a0}">
+      <Declaration><![CDATA[METHOD BuildAttributes : UDINT
+VAR_INPUT
+    nFlags : DWORD;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="ProcessCommand" Id="{bf97cbb7-ccb5-44dc-a4b1-af42f795bfeb}">
+      <Declaration><![CDATA[METHOD ProcessCommand : BOOL
+VAR_INPUT
+    nCommandId : DINT;
+    fValue     : LREAL;
+END_VAR
+VAR_OUTPUT
+    bHandled : BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>

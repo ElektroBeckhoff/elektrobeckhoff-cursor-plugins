@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_ExST" Id="{a9ca13e1-51a6-46c6-ba73-5a846c68aec3}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_ExST
+VAR
+    nI      : INT;
+    nSum    : INT;
+    bFlag   : BOOL;
+    rRef    : REFERENCE TO INT;
+    nTarget : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF (nI <> 0) AND_THEN (nSum > 0) OR bFlag THEN
+    nSum := nSum + 1;
+END_IF
+
+FOR nI := 1 TO 5 DO
+    IF nI MOD 2 = 0 THEN
+        CONTINUE;
+    END_IF
+
+    nSum := nSum + nI;
+END_FOR
+
+JMP _skip;
+nSum := -1;
+_skip:
+
+rRef REF= nTarget;
+rRef := 42;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

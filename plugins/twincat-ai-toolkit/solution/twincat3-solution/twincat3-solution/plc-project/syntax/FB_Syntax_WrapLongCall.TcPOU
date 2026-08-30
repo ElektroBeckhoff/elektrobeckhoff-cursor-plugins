@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_WrapLongCall" Id="{36852b5a-90e7-4dd0-920a-a7db555da74d}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_WrapLongCall
+VAR
+    sA   : STRING(80);
+    sB   : STRING(80);
+    sC   : STRING(80);
+    sD   : STRING(80);
+    sE   : STRING(80);
+    sOut : STRING(255);
+    bOk  : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[bOk := FindAndReplace(
+        pSrcString    := ADR(sA),
+        pDeleteString := ADR(sB),
+        pInsertString := ADR(sC),
+        pDstString    := ADR(sD),
+        nDstSize      := SIZEOF(sD));
+
+IF bOk THEN
+    sOut := CONCAT(CONCAT(CONCAT(sA, sB), sC), CONCAT(sD, sE));
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

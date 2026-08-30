@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_IfMultilineCalls" Id="{5b203008-c657-4a7f-a331-701f05bebd84}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_IfMultilineCalls
+VAR
+    sStr1   : STRING(80);
+    sStr2   : STRING(80);
+    sResult : STRING(255);
+    rTarget : REFERENCE TO INT;
+    nVal    : INT;
+    bOk     : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF len(sStr1) > 0 AND len(sStr2) > 0 THEN
+    bOk := FALSE;
+ELSE
+    bOk := TRUE;
+END_IF
+
+IF NOT __ISVALIDREF(rTarget) THEN
+    nVal := 0;
+ELSE
+    nVal := rTarget;
+END_IF
+
+IF (len(sStr1) > 0) AND (len(sStr2) > 0) AND (len(sResult) = 0) THEN
+    bOk := TRUE;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

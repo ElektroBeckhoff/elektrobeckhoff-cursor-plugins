@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_DirectAddressing" Id="{d8063876-bc38-4e84-ad58-8b73d15ff50d}">
+    <Declaration><![CDATA[TYPE ST_Syntax_DirectAddressing :
+    STRUCT
+        bInSafetyDoor AT %I* : BOOL;
+        nInPosition   AT %I* : INT;
+        bOutMotorOn   AT %Q* : BOOL;
+        nOutSpeed     AT %Q* : WORD;
+        nMemoryStatus AT %M* : DWORD;
+    END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

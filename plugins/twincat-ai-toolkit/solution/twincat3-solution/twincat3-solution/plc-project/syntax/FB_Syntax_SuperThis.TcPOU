@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_SuperThis" Id="{7798dfa9-1d76-49d4-b77b-aa3497a4c3bb}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_SuperThis EXTENDS FB_Syntax_Derived
+VAR
+    _nLocal          : INT;
+    _nExtendedStatus : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[SUPER^.M_Init();
+_nLocal          := THIS^.M_GetValue();
+_nExtendedStatus := THIS^.P_ExtendedStatus;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

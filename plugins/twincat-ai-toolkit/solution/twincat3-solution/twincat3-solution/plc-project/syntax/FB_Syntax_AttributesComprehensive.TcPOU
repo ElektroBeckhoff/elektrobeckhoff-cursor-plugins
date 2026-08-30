@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_AttributesComprehensive" Id="{61a4d148-5cfd-442e-86d2-018735143ef3}" SpecialFunc="None">
+    <Declaration><![CDATA[// 1. Multiple attributes on POU level (stacked)
+{attribute 'reflection'}
+{attribute 'hide_all_locals'}
+{attribute 'no_explicit_call' := 'Call methods instead of FB body directly'}
+FUNCTION_BLOCK FB_Syntax_AttributesComprehensive
+VAR_INPUT
+    // 2. Attribute above variable (standard single line)
+    {attribute 'TcEncoding' := 'UTF-8'}
+    sUtf8Input : STRING(255);
+
+    // 3. Attribute inline before variable name
+    {attribute 'hide'} bHiddenFlag : BOOL;
+
+    // Normal input for alignment reference
+    nNormalInput : INT := 10;
+END_VAR
+VAR_OUTPUT
+    // 4. Attribute with value without spaces around :=
+    {attribute 'displaymode':='hex'}
+    dwStatusHex : DWORD;
+
+    // Normal output
+    bDone : BOOL;
+END_VAR
+VAR
+    // 5. Multiple stacked attributes above a variable
+    {attribute 'reflection'}
+    {attribute 'instance-path'}
+    {attribute 'noinit'}
+    _sInstancePath : STRING(255);
+
+    // 6. Multiple inline attributes on one line before variable
+    {attribute 'hide'} {attribute 'noinit'} _nInternalCached : DINT;
+
+    // 7. Attribute above variable with initial assignment and inline comment
+    {attribute 'TcLinkTo' := 'TIID^Device 1^Term 1^Channel 1^Input'}
+    _bHardwareInput : BOOL := FALSE; (* Linked to EtherCAT terminal *)
+
+    _nCycleCount : UDINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Increment cycle
+_nCycleCount := _nCycleCount + 1;
+bDone        := TRUE;
+dwStatusHex  := 16#A5A5;
+]]></ST>
+    </Implementation>
+    <Method Name="M_ProtectedAction" Id="{76e08d64-3fc0-4f01-b767-fefbce0429f3}">
+      <Declaration><![CDATA[// 8. Attribute on method level
+{attribute 'TcRpcEnable'}
+METHOD M_ProtectedAction : BOOL
+VAR_INPUT
+    {attribute 'hide'}
+    nSecretCode : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_ProtectedAction := (nSecretCode = 42);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_Diagnostics" Id="{9a879602-b2c5-444d-b818-2843c4ae516c}">
+      <Declaration><![CDATA[// 9. Attribute on property level
+{attribute 'monitoring' := 'call'}
+PROPERTY P_Diagnostics : STRING
+]]></Declaration>
+      <Get Name="Get" Id="{19886563-0082-4357-abcd-dc994a5ce7d2}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_Diagnostics := _sInstancePath;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

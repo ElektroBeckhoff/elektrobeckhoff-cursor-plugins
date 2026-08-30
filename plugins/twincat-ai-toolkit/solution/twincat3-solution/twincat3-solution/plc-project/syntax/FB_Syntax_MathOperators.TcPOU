@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_MathOperators" Id="{39c15b18-ad0b-4354-8332-78b02d68b169}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_MathOperators
+VAR
+    fInA, fInB, fResult : LREAL;
+    nInA, nInB, nResult : DINT;
+    wInA, wResult       : WORD;
+    bSelect             : BOOL;
+    nSelectIndex        : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Numeric functions
+fResult := ABS(fInA);
+fResult := SQRT(fInA);
+fResult := LN(fInA);
+fResult := LOG(fInA);
+fResult := EXP(fInA);
+fResult := SIN(fInA);
+fResult := COS(fInA);
+fResult := TAN(fInA);
+fResult := ASIN(fInA);
+fResult := ACOS(fInA);
+fResult := ATAN(fInA);
+fResult := EXPT(fInA, 2.0);
+
+// Selection and limiting
+fResult := LIMIT(0.0, fInA, 100.0);
+fResult := MIN(fInA, fInB);
+fResult := MAX(fInA, fInB);
+fResult := SEL(bSelect, fInA, fInB);
+nResult := MUX(
+        nSelectIndex,
+        10,
+        20,
+        30,
+        40);
+
+// Bit shift and rotate
+wResult := SHL(wInA, 2);
+wResult := SHR(wInA, 2);
+wResult := ROL(wInA, 1);
+wResult := ROR(wInA, 1);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

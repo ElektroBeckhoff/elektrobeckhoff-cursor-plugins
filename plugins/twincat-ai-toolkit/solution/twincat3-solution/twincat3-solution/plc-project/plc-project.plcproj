@@ -1,0 +1,379 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <FileVersion>1.0.0.0</FileVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{e9c6d989-4808-400b-9d53-094e2b677b7c}</ProjectGuid>
+    <SubObjectsSortedByName>True</SubObjectsSortedByName>
+    <DownloadApplicationInfo>true</DownloadApplicationInfo>
+    <WriteProductVersion>true</WriteProductVersion>
+    <GenerateTpy>false</GenerateTpy>
+    <Name>plc_project</Name>
+    <ProgramVersion>3.1.4026.24</ProgramVersion>
+    <Application>{180ee3d9-323b-4e2b-a495-a5bce3b166f8}</Application>
+    <TypeSystem>{61165469-544b-4407-a749-bf03adf674f2}</TypeSystem>
+    <Implicit_Task_Info>{731242c2-ca0e-4b09-a63d-471724e8de6a}</Implicit_Task_Info>
+    <Implicit_KindOfTask>{f43f2e29-fe5f-4efd-a7b3-6beec49cf41f}</Implicit_KindOfTask>
+    <Implicit_Jitter_Distribution>{046b9c26-d280-49d1-a817-37759ed96171}</Implicit_Jitter_Distribution>
+    <LibraryReferences>{e5f80ace-c13c-41ca-81b3-e38ccad05d0f}</LibraryReferences>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PlcTask.TcTTO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\E_Sample_LargeEnum.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\F_Sample_ScaleColorValue.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_AutonomousWarehouseFleetManager.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_BatchRecipeExecutionEngine.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_DataRingBuffer.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_HighDensityDataAnalyticsLogger.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_MultiAxisMotionCoordinator.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_MultiStageProcessSupervisor.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_StateMachineController.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_ValueBase.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\FB_Sample_WidgetBase.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\GVL_Sample_ParamInflux.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\GVL_Sample_ShadingConfig.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\I_Sample_WidgetInterface.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="samples\ST_Sample_DiagnosticsStruct.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\E_Syntax_ExhaustiveComments.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\E_Syntax_ExplicitIntTyped.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\E_Syntax_Flags.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\E_Syntax_MultilineAligned.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\E_Syntax_TypedExplicit.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_3Args.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_4Args.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_5Args.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_Syntax_Add.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_Syntax_GenericAny.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\F_Syntax_Return.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_AbstractBase.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Action.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_AdvancedSystemExtensions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_AllVarTypes.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_AssignAlignmentHeuristics.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_AttributesComprehensive.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_BitAccess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Calls.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_CaseRanges.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ComplexExpressions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ComplexInits.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ComprehensiveVarBlocks.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ConditionalCompile.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ControlFlow.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_DeepControlFlow.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_DeepNesting.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Derived.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_DisableRegions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_DynamicMem.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Exceptions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ExhaustiveArraysAndFBInit.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ExhaustiveComments.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ExhaustiveEdgeCases.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ExhaustivePragmas.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Expressions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_ExST.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_FBInitMethods.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Final.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_IfMultilineCalls.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_LargeServicePOU.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_LoopControl.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_MathOperators.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_MultiDimArraysAndInits.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_MultiInterfaceDevice.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_NestedLogCall.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_OOP.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_Pragmas.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_PragmasAndRegions.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_PropertiesFull.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_PropertySet.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_QueryInterface.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_StringLiterals.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_StweepDisable.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_SuperThis.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_TimeDate.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_VarBlocks.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_VarInOut.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_WrapCallsComprehensive.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FB_Syntax_WrapLongCall.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\FindAndReplace.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\GVL_Syntax_Address.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\GVL_Syntax_Config.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\GVL_Syntax_Global.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\GVL_Syntax_Literals.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\I_Syntax_AdvancedDevice.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\I_Syntax_BaseDevice.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\I_Syntax_ExhaustiveComments.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\I_Syntax_Extended.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\I_Syntax_Widget.TcIO">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\MAIN.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\PRG_Syntax_Main.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_Bitfields.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_ComplexTree.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_DeepNested.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_Derived.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_DirectAddressing.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_Dyn.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_ExhaustiveArrays.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_ExhaustiveComments.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_Mini.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\ST_Syntax_PointerRef.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\T_Syntax_ArraysMultiDim.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\T_Syntax_SubrangeEdgeCases.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\T_Syntax_Types.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\U_Syntax_ExhaustiveComments.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\U_Syntax_MultiWordUnion.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="syntax\U_Syntax_Union.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="samples" />
+    <Folder Include="syntax" />
+  </ItemGroup>
+  <ItemGroup>
+    <PlaceholderReference Include="Tc2_Standard">
+      <DefaultResolution>Tc2_Standard, * (Beckhoff Automation GmbH)</DefaultResolution>
+      <Namespace>Tc2_Standard</Namespace>
+    </PlaceholderReference>
+    <PlaceholderReference Include="Tc2_System">
+      <DefaultResolution>Tc2_System, * (Beckhoff Automation GmbH)</DefaultResolution>
+      <Namespace>Tc2_System</Namespace>
+    </PlaceholderReference>
+    <PlaceholderReference Include="Tc3_Module">
+      <DefaultResolution>Tc3_Module, * (Beckhoff Automation GmbH)</DefaultResolution>
+      <Namespace>Tc3_Module</Namespace>
+    </PlaceholderReference>
+  </ItemGroup>
+  <ProjectExtensions>
+    <PlcProjectOptions>
+      <XmlArchive>
+        <Data>
+          <o xml:space="preserve" t="OptionKey">
+      <v n="Name">"&lt;ProjectRoot&gt;"</v>
+      <d n="SubKeys" t="Hashtable" ckt="String" cvt="OptionKey">
+        <v>{40450F57-0AA3-4216-96F3-5444ECB29763}</v>
+        <o>
+          <v n="Name">"{40450F57-0AA3-4216-96F3-5444ECB29763}"</v>
+          <d n="SubKeys" t="Hashtable" />
+          <d n="Values" t="Hashtable" ckt="String" cvt="String">
+            <v>ActiveVisuProfile</v>
+            <v>IR0whWr8bwfwBwAAiD2qpQAAAABVAgAA37x72QAAAAABAAAAAAAAAAEaUwB5AHMAdABlAG0ALgBTAHQAcgBpAG4AZwACTHsAZgA5ADUAYgBiADQAMgA2AC0ANQA1ADIANAAtADQAYgA0ADUALQA5ADQAMAAwAC0AZgBiADAAZgAyAGUANwA3AGUANQAxAGIAfQADCE4AYQBtAGUABDBUAHcAaQBuAEMAQQBUACAAMwAuADEAIABCAHUAaQBsAGQAIAA0ADAAMgA0AC4ANwAFFlAAcgBvAGYAaQBsAGUARABhAHQAYQAGTHsAMQA2AGUANQA1AGIANgAwAC0ANwAwADQAMwAtADQAYQA2ADMALQBiADYANQBiAC0ANgAxADQANwAxADMAOAA3ADgAZAA0ADIAfQAHEkwAaQBiAHIAYQByAGkAZQBzAAhMewAzAGIAZgBkADUANAA1ADkALQBiADAANwBmAC0ANABkADYAZQAtAGEAZQAxAGEALQBhADgAMwAzADUANgBhADUANQAxADQAMgB9AAlMewA5AGMAOQA1ADgAOQA2ADgALQAyAGMAOAA1AC0ANAAxAGIAYgAtADgAOAA3ADEALQA4ADkANQBmAGYAMQBmAGUAZABlADEAYQB9AAoOVgBlAHIAcwBpAG8AbgALBmkAbgB0AAwKVQBzAGEAZwBlAA0KVABpAHQAbABlAA4aVgBpAHMAdQBFAGwAZQBtAE0AZQB0AGUAcgAPDkMAbwBtAHAAYQBuAHkAEAxTAHkAcwB0AGUAbQARElYAaQBzAHUARQBsAGUAbQBzABIwVgBpAHMAdQBFAGwAZQBtAHMAUwBwAGUAYwBpAGEAbABDAG8AbgB0AHIAbwBsAHMAEyhWAGkAcwB1AEUAbABlAG0AcwBXAGkAbgBDAG8AbgB0AHIAbwBsAHMAFCRWAGkAcwB1AEUAbABlAG0AVABlAHgAdABFAGQAaQB0AG8AcgAVIlYAaQBzAHUATgBhAHQAaQB2AGUAQwBvAG4AdAByAG8AbAAWFHYAaQBzAHUAaQBuAHAAdQB0AHMAFwxzAHkAcwB0AGUAbQAYGFYAaQBzAHUARQBsAGUAbQBCAGEAcwBlABkmRABlAHYAUABsAGEAYwBlAGgAbwBsAGQAZQByAHMAVQBzAGUAZAAaCGIAbwBvAGwAGyJQAGwAdQBnAGkAbgBDAG8AbgBzAHQAcgBhAGkAbgB0AHMAHEx7ADQAMwBkADUAMgBiAGMAZQAtADkANAAyAGMALQA0ADQAZAA3AC0AOQBlADkANAAtADEAYgBmAGQAZgAzADEAMABlADYAMwBjAH0AHRxBAHQATABlAGEAcwB0AFYAZQByAHMAaQBvAG4AHhRQAGwAdQBnAGkAbgBHAHUAaQBkAB8WUwB5AHMAdABlAG0ALgBHAHUAaQBkACBIYQBmAGMAZAA1ADQANAA2AC0ANAA5ADEANAAtADQAZgBlADcALQBiAGIANwA4AC0AOQBiAGYAZgBlAGIANwAwAGYAZAAxADcAIRRVAHAAZABhAHQAZQBJAG4AZgBvACJMewBiADAAMwAzADYANgBhADgALQBiADUAYwAwAC0ANABiADkAYQAtAGEAMAAwAGUALQBlAGIAOAA2ADAAMQAxADEAMAA0AGMAMwB9ACMOVQBwAGQAYQB0AGUAcwAkTHsAMQA4ADYAOABmAGYAYwA5AC0AZQA0AGYAYwAtADQANQAzADIALQBhAGMAMAA2AC0AMQBlADMAOQBiAGIANQA1ADcAYgA2ADkAfQAlTHsAYQA1AGIAZAA0ADgAYwAzAC0AMABkADEANwAtADQAMQBiADUALQBiADEANgA0AC0ANQBmAGMANgBhAGQAMgBiADkANgBiADcAfQAmFk8AYgBqAGUAYwB0AHMAVAB5AHAAZQAnVFUAcABkAGEAdABlAEwAYQBuAGcAdQBhAGcAZQBNAG8AZABlAGwARgBvAHIAQwBvAG4AdgBlAHIAdABpAGIAbABlAEwAaQBiAHIAYQByAGkAZQBzACgQTABpAGIAVABpAHQAbABlACkUTABpAGIAQwBvAG0AcABhAG4AeQAqHlUAcABkAGEAdABlAFAAcgBvAHYAaQBkAGUAcgBzACs4UwB5AHMAdABlAG0ALgBDAG8AbABsAGUAYwB0AGkAbwBuAHMALgBIAGEAcwBoAHQAYQBiAGwAZQAsEnYAaQBzAHUAZQBsAGUAbQBzAC1INgBjAGIAMQBjAGQAZQAxAC0AZAA1AGQAYwAtADQAYQAzAGIALQA5ADAANQA0AC0AMgAxAGYAYQA3ADUANgBhADMAZgBhADQALihJAG4AdABlAHIAZgBhAGMAZQBWAGUAcgBzAGkAbwBuAEkAbgBmAG8AL0x7AGMANgAxADEAZQA0ADAAMAAtADcAZgBiADkALQA0AGMAMwA1AC0AYgA5AGEAYwAtADQAZQAzADEANABiADUAOQA5ADYANAAzAH0AMBhNAGEAagBvAHIAVgBlAHIAcwBpAG8AbgAxGE0AaQBuAG8AcgBWAGUAcgBzAGkAbwBuADIMTABlAGcAYQBjAHkAMzBMAGEAbgBnAHUAYQBnAGUATQBvAGQAZQBsAFYAZQByAHMAaQBvAG4ASQBuAGYAbwA0MEwAbwBhAGQATABpAGIAcgBhAHIAaQBlAHMASQBuAHQAbwBQAHIAbwBqAGUAYwB0ADUaQwBvAG0AcABhAHQAaQBiAGkAbABpAHQAeQDQAAIaA9ADAS0E0AUGGgfQBwgaAUUHCQjQAAkaBEUKCwQDAAAABQAAAA0AAAAAAAAA0AwLrQIAAADQDQEtDtAPAS0Q0AAJGgRFCgsEAwAAAAUAAAANAAAAKAAAANAMC60BAAAA0A0BLRHQDwEtENAACRoERQoLBAMAAAAFAAAADQAAAAAAAADQDAutAgAAANANAS0S0A8BLRDQAAkaBEUKCwQDAAAABQAAAA0AAAAUAAAA0AwLrQIAAADQDQEtE9APAS0Q0AAJGgRFCgsEAwAAAAUAAAANAAAAAAAAANAMC60CAAAA0A0BLRTQDwEtENAACRoERQoLBAMAAAAFAAAADQAAAAAAAADQDAutAgAAANANAS0V0A8BLRDQAAkaBEUKCwQDAAAABQAAAA0AAAAAAAAA0AwLrQIAAADQDQEtFtAPAS0X0AAJGgRFCgsEAwAAAAUAAAANAAAAKAAAANAMC60EAAAA0A0BLRjQDwEtENAZGq0BRRscAdAAHBoCRR0LBAMAAAAFAAAADQAAAAAAAADQHh8tINAhIhoCRSMkAtAAJRoFRQoLBAMAAAADAAAAAAAAAAoAAADQJgutAAAAANADAS0n0CgBLRHQKQEtENAAJRoFRQoLBAMAAAADAAAAAAAAAAoAAADQJgutAQAAANADAS0n0CgBLRHQKQEtEJoqKwFFAAEC0AABLSzQAAEtF9AAHy0t0C4vGgPQMAutAQAAANAxC60XAAAA0DIarQDQMy8aA9AwC60CAAAA0DELrQMAAADQMhqtANA0Gq0A0DUarQA=</v>
+          </d>
+        </o>
+      </d>
+      <d n="Values" t="Hashtable" />
+    </o>
+        </Data>
+        <TypeList>
+          <Type n="Hashtable">System.Collections.Hashtable</Type>
+          <Type n="OptionKey">{54dd0eac-a6d8-46f2-8c27-2f43c7e49861}</Type>
+          <Type n="String">System.String</Type>
+        </TypeList>
+      </XmlArchive>
+    </PlcProjectOptions>
+  </ProjectExtensions>
+</Project>

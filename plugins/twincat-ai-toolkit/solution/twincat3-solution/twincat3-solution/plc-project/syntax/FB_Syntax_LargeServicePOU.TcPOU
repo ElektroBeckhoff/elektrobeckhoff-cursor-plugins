@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_LargeServicePOU" Id="{7110cc7c-b41b-4f82-bf5b-c3f1de98aaf5}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_LargeServicePOU
+VAR_INPUT
+    bEnable    : BOOL;
+    tCycleTime : TIME := T#10MS;
+END_VAR
+VAR_OUTPUT
+    bActive     : BOOL;
+    bError      : BOOL;
+    hrErrorCode : HRESULT;
+    sStatusMsg  : STRING(255);
+END_VAR
+VAR
+    _nState       : INT;
+    _nCount       : DINT;
+    _fThroughput  : LREAL;
+    _nMaxRetries  : UINT := 3;
+    _stTreeConfig : ST_Syntax_ComplexTree;
+    _fbTimer      : TON;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF NOT bEnable THEN
+    _nState := 0;
+    bActive := FALSE;
+    RETURN;
+END_IF
+
+bActive := TRUE;
+_fbTimer(IN := (_nState > 0), PT := tCycleTime);
+
+CASE _nState OF
+    0:
+        IF THIS^.M_Initialize(bForce := FALSE) THEN
+            _nState := 10;
+        END_IF
+
+    10:
+        _nCount := _nCount + 1;
+        IF _fbTimer.Q THEN
+            A_UpdateStats();
+            _nState := 20;
+        END_IF
+
+    20:
+        IF THIS^.P_IsBusy THEN
+            ;
+        ELSE
+            _nState := 10;
+        END_IF
+
+    99:
+        A_HandleErrors();
+END_CASE
+]]></ST>
+    </Implementation>
+    <Action Name="A_HandleErrors" Id="{b0ebb926-8156-4b52-96d1-cbd85415d5dd}">
+      <Implementation>
+        <ST><![CDATA[bError      := TRUE;
+hrErrorCode := 16#80004005;
+sStatusMsg  := 'Service encountered an unrecoverable fault';
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_UpdateStats" Id="{99e9bc63-b1af-4cb0-ae9c-b6612b5cb1a7}">
+      <Implementation>
+        <ST><![CDATA[_fThroughput := DINT_TO_LREAL(_nCount) / 10.0;
+]]></ST>
+      </Implementation>
+    </Action>
+    <Method Name="M_Configure" Id="{c952506d-768d-4be1-b49c-4016f0e55799}">
+      <Declaration><![CDATA[METHOD M_Configure : BOOL
+VAR_INPUT
+    stConfig : ST_Syntax_ComplexTree;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_stTreeConfig := stConfig;
+M_Configure   := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Execute" Id="{0d05253c-133b-4b07-9a4d-7afc28e18ad3}">
+      <Declaration><![CDATA[METHOD M_Execute : HRESULT
+VAR_INPUT
+    fInput : LREAL;
+END_VAR
+VAR_OUTPUT
+    fResult  : LREAL;
+    bSuccess : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fInput < 0.0 THEN
+    fResult   := 0.0;
+    bSuccess  := FALSE;
+    M_Execute := 16#80070057; // E_INVALIDARG
+    RETURN;
+END_IF
+
+fResult   := SQRT(fInput) * 2.5;
+bSuccess  := TRUE;
+M_Execute := 0; // S_OK
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Initialize" Id="{1eccb1a4-ee8c-4193-8cf2-2a9feabb999a}">
+      <Declaration><![CDATA[METHOD M_Initialize : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF bForce OR (_nState = 0) THEN
+    _nCount      := 0;
+    _fThroughput := 0.0;
+    bError       := FALSE;
+    hrErrorCode  := 0;
+    sStatusMsg   := 'Initialized';
+    M_Initialize := TRUE;
+ELSE
+    M_Initialize := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ProcessBatch" Id="{c3d57bfe-6782-492b-9210-75305b9d1865}">
+      <Declaration><![CDATA[METHOD M_ProcessBatch : DINT
+VAR_INPUT
+    arrData : ARRAY[1..10] OF LREAL;
+END_VAR
+VAR
+    i      : INT;
+    nValid : DINT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[nValid := 0;
+
+FOR i := 1 TO 10 DO
+    IF arrData[i] > 0.0 THEN
+        nValid := nValid + 1;
+    END_IF
+END_FOR
+
+M_ProcessBatch := nValid;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Reset" Id="{50221911-2b60-4d39-b296-251faa88161d}">
+      <Declaration><![CDATA[METHOD M_Reset : BOOL
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nState := 0;
+bError  := FALSE;
+M_Reset := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_CurrentThroughput" Id="{e526dc8a-52da-4d54-9ff0-7053d2bf5e13}">
+      <Declaration><![CDATA[PROPERTY P_CurrentThroughput : LREAL
+]]></Declaration>
+      <Get Name="Get" Id="{6afaa085-ec60-4188-bdc8-74bc77f8c3e3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_CurrentThroughput := _fThroughput;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_IsBusy" Id="{e0f28111-2ae3-4e9d-b3ff-5f566bf5f7ec}">
+      <Declaration><![CDATA[PROPERTY P_IsBusy : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{e3499966-a360-4c56-980f-ede8e0cc4582}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_IsBusy := (_nState >= 10) AND (_nState < 90);
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="P_MaxRetries" Id="{0a87635c-c5e3-4439-8331-19c73c3b1e91}">
+      <Declaration><![CDATA[PROPERTY P_MaxRetries : UINT
+]]></Declaration>
+      <Get Name="Get" Id="{d1856299-5510-42a5-981a-f076e48186c2}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_MaxRetries := _nMaxRetries;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{a6f84157-23a7-4a36-9c41-72b3e2236fae}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IF P_MaxRetries > 0 AND P_MaxRetries <= 10 THEN
+    _nMaxRetries := P_MaxRetries;
+END_IF
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>

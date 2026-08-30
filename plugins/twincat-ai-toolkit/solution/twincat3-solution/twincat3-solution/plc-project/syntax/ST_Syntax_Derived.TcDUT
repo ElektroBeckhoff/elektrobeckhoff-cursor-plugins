@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_Syntax_Derived" Id="{a5da701b-1a78-4251-91bd-8bb3f15fddee}">
+    <Declaration><![CDATA[TYPE ST_Syntax_Derived EXTENDS ST_Syntax_Mini :
+    STRUCT
+        fExtendedValue : LREAL      := 3.14159;
+        sDescription   : STRING(80) := 'Derived Struct';
+        bDerivedActive : BOOL;
+    END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

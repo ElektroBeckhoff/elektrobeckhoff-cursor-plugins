@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_OOP" Id="{0306bcb6-6e06-4540-86d2-51a4ca547d0a}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_OOP
+VAR
+    _nInternal : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_nInternal := _nInternal + 1;
+]]></ST>
+    </Implementation>
+    <Method Name="M_Increment" Id="{d955123b-591e-457d-b44f-26a5e9f23c76}">
+      <Declaration><![CDATA[METHOD M_Increment : BOOL
+VAR_INPUT
+    nDelta : INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_nInternal  := _nInternal + nDelta;
+M_Increment := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="P_Count" Id="{ab96ac50-24ec-492b-9f0c-0cc05dda2ea8}">
+      <Declaration><![CDATA[PROPERTY P_Count : INT
+]]></Declaration>
+      <Get Name="Get" Id="{e431525a-4cb6-4194-916c-e59e954fa028}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_Count := _nInternal;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="T_Syntax_SubrangeEdgeCases" Id="{41effd7a-f45b-44b6-80c2-943946c08448}">
+    <Declaration><![CDATA[TYPE T_Syntax_SubrangeEdgeCases : INT(1..100) := 50;
+
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

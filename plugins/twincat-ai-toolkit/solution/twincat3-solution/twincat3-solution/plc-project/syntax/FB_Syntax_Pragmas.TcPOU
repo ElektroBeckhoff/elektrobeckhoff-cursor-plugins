@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_Pragmas" Id="{fa333a5b-3b1c-45b4-adaa-60a93a52ba05}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_Pragmas
+VAR
+    nValue : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[{region 'Init'}
+    nValue := 1;
+{endregion}
+
+{formatting.disable}
+nValue := 99;
+{formatting.enable}
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

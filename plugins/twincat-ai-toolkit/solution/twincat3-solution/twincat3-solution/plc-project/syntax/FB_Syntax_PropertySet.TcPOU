@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_Syntax_PropertySet" Id="{0da76f9d-fcd6-4b45-962b-5e428c160940}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Syntax_PropertySet
+VAR
+    _nStored : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_nStored := P_Value;
+]]></ST>
+    </Implementation>
+    <Property Name="P_Value" Id="{6bc720a5-6e9b-40f5-9aa3-74319d8a2df7}">
+      <Declaration><![CDATA[PROPERTY P_Value : INT
+]]></Declaration>
+      <Get Name="Get" Id="{a7246a3f-003f-483b-bdac-db32ed8111a3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[P_Value := _nStored;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{50e7ded3-9b05-483f-b0de-99dc831afe71}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_nStored := P_Value;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>
