@@ -83,8 +83,9 @@ class InfoSysTypeProvider:
                     matched_entry = entry
                     break
 
-            if not matched_entry and results:
-                matched_entry = results[0]
+            if not matched_entry:
+                self._cache[key] = None
+                return None
 
             page_path = matched_entry.get("path") if matched_entry else None
             if not page_path:
@@ -104,7 +105,7 @@ class InfoSysTypeProvider:
 
             # 1. Map entity kind (Function Block vs Function vs Struct vs Interface vs Enum)
             upper_title = title.upper()
-            kind = SymbolKind.FUNCTION_BLOCK
+            kind = None
 
             if (
                 "FUNCTION_BLOCK" in sym_type_raw
@@ -136,6 +137,10 @@ class InfoSysTypeProvider:
                 or ret_type is not None
             ):
                 kind = SymbolKind.FUNCTION
+
+            if kind is None:
+                self._cache[key] = None
+                return None
 
             library_name = page.get("library") or matched_entry.get("library") or ""
 

@@ -132,6 +132,11 @@ def resolve_symbol_at_cursor(
             matched_span = span
             break
 
+    # If the file is an XML TcPlcObject and cursor is outside all CDATA blocks,
+    # cursor is on XML markup tags (e.g. <Implementation>, <POU>) -> no ST symbol.
+    if indexed.xml_doc.cdata_spans and not matched_span:
+        return None
+
     scope = get_effective_scope_for_file(index, file_path, pos, matched_span=matched_span)
 
     if matched_span:
@@ -154,7 +159,7 @@ def resolve_symbol_at_cursor(
         prev_tok = semantic_tokens[target_idx - 1] if target_idx > 0 else None
         prev_prev_tok = semantic_tokens[target_idx - 2] if target_idx > 1 else None
     else:
-        # Plain ST or whole file tokenization fallback
+        # Plain ST file (.st)
         tokens, _ = tokenize_st(raw_text, include_trivia=True)
         target_tok, prev_tok, prev_prev_tok = find_token_at_position(tokens, pos.line, pos.col)
         semantic_tokens = [t for t in tokens if not t.is_trivia]
@@ -167,7 +172,62 @@ def resolve_symbol_at_cursor(
     ):
         return None
 
-    # 1. Chained Member Access: e.g. "fbStation1.fbMotor.stParam.fSpeed" or "stData.field"
+    # 1. Named Call Parameter: e.g. "fbTimer(IN := TRUE)" or "fbRTrig(CLK => bDone)"
+    if (
+        matched_span
+        and target_idx >= 0
+        and target_idx + 1 < len(semantic_tokens)
+        and semantic_tokens[target_idx + 1].type in (TokenType.ASSIGN, TokenType.OUTPUT_ASSIGN)
+    ):
+        nesting = 0
+        call_open_idx = -1
+        for b_idx in range(target_idx - 1, -1, -1):
+            tok = semantic_tokens[b_idx]
+            if tok.type in (TokenType.PAREN_CLOSE, TokenType.BRACKET_CLOSE):
+                nesting += 1
+            elif tok.type in (TokenType.PAREN_OPEN, TokenType.BRACKET_OPEN):
+                if nesting > 0:
+                    nesting -= 1
+                else:
+                    call_open_idx = b_idx
+                    break
+
+        if call_open_idx > 0:
+            caller_tokens = []
+            c_idx = call_open_idx - 1
+            while c_idx >= 0:
+                tok = semantic_tokens[c_idx]
+                if tok.type in (
+                    TokenType.IDENTIFIER,
+                    TokenType.KEYWORD_THIS,
+                    TokenType.KEYWORD_SUPER,
+                    TokenType.DOT,
+                    TokenType.POINTER_DEREF,
+                    TokenType.INT_LITERAL,
+                    TokenType.BRACKET_OPEN,
+                    TokenType.BRACKET_CLOSE,
+                ):
+                    caller_tokens.insert(0, tok)
+                    c_idx -= 1
+                else:
+                    break
+
+            if caller_tokens:
+                caller_str = "".join(t.value for t in caller_tokens)
+                caller_sym = index.resolver.resolve_chain(caller_str, scope) or index.resolver.resolve_identifier(caller_str, scope)
+                if caller_sym:
+                    callee_type_name = caller_sym.type_ref or caller_sym.name
+                    type_desc = index.type_index.get_type(callee_type_name, context_path=file_path)
+                    if type_desc:
+                        t_lower = target_tok.value.lower()
+                        for f_name, f_sym in type_desc.fields.items():
+                            if f_name.lower() == t_lower:
+                                return f_sym
+                        for p_name, p_sym in type_desc.properties.items():
+                            if p_name.lower() == t_lower:
+                                return p_sym
+
+    # 2. Chained Member Access: e.g. "fbStation1.fbMotor.stParam.fSpeed" or "stData.field"
     if prev_tok and prev_tok.type == TokenType.DOT:
         if matched_span and target_idx >= 0:
             chain_tokens = [target_tok]
@@ -204,7 +264,7 @@ def resolve_symbol_at_cursor(
             if type_desc:
                 return index.resolver.resolve_member_access(type_desc.name, target_tok.value, scope)
 
-    # 2. Regular identifier resolution (Local -> OOP / Member -> Global / GVL)
+    # 3. Regular identifier resolution (Local -> OOP / Member -> Global / GVL)
     return index.resolver.resolve_identifier(target_tok.value, scope)
 
 

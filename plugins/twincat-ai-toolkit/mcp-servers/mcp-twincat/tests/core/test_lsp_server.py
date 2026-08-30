@@ -760,4 +760,85 @@ END_VAR]]></Declaration>
         assert loc_sol is not None
         assert uri_to_path(loc_sol.uri) == dut_sol.resolve()
 
+    def test_hover_outside_cdata_on_xml_tags_returns_none(self, tmp_path):
+        """Verify that hovering on XML tags like <Implementation>, <POU>, etc. does not show ST hover."""
+        pou_file = tmp_path / "FB_Sample.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Sample" Id="{11111111-1111-1111-1111-111111111111}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Sample
+VAR
+    nVal : INT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[nVal := 10;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+        uri = path_to_uri(pou_file)
+
+        # 1. Hover on <Implementation> (line 8, char 6 -> 0-based line 7, char 6)
+        params_impl = lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=7, character=6),
+        )
+        assert handle_hover(index, params_impl) is None
+
+        # 2. Hover on </Implementation> (line 10, char 6 -> 0-based line 9, char 6)
+        params_close = lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=9, character=6),
+        )
+        assert handle_hover(index, params_close) is None
+
+        # 3. Hover on <?xml (line 1, char 2 -> 0-based line 0, char 2)
+        params_xml = lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=0, character=2),
+        )
+        assert handle_hover(index, params_xml) is None
+
+    def test_hover_named_call_parameters_resolves_field(self, tmp_path):
+        """Verify that hovering on named call parameters like IN := or CLK := resolves the input variable."""
+        pou_file = tmp_path / "FB_Caller.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Caller" Id="{22222222-2222-2222-2222-222222222222}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Caller
+VAR
+    fbTimer : TON;
+    bStart  : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[fbTimer(IN := bStart, PT := T#1S);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+        uri = path_to_uri(pou_file)
+
+        # Hover on IN (0-based line 9, char 28)
+        params_in = lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=9, character=28),
+        )
+        hover_in = handle_hover(index, params_in)
+        assert hover_in is not None
+        assert "(VARIABLE) IN : BOOL" in hover_in.contents.value
+
+        # Hover on PT (0-based line 9, char 43)
+        params_pt = lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=9, character=43),
+        )
+        hover_pt = handle_hover(index, params_pt)
+        assert hover_pt is not None
+        assert "(VARIABLE) PT : TIME" in hover_pt.contents.value
+
+
 
