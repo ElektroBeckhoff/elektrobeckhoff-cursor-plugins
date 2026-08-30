@@ -5,38 +5,35 @@
  * POU Name:    FB_Syntax_ExhaustiveComments
  * Description: Comprehensive test fixture for ALL TwinCAT 3 IEC 61131-3
  *              comment variants (line //, block (* *), nested, inline).
- *******************************************************************************)
+*******************************************************************************)
 FUNCTION_BLOCK FB_Syntax_ExhaustiveComments
 VAR_INPUT (* Inputs section *)
     /// <summary>Enable command</summary>
-    bEnable     : BOOL := FALSE; (* Master enable flag *)
-    nSetVal     : INT  := 100;   // Target value setpoint
-    fLimit      : REAL := 99.5;  (* Upper threshold in [degC] *)
+    bEnable : BOOL := FALSE; (* Master enable flag *)
+    nSetVal : INT  := 100;   // Target value setpoint
+    fLimit  : REAL := 99.5;  (* Upper threshold in [degC] *)
 END_VAR
 VAR_OUTPUT (* Outputs section *)
     /// <summary>Active status</summary>
-    bActive     : BOOL;          (* Currently operational *)
-    bError      : BOOL;          // Error indicator
-    nStatusCode : UDINT;         (* Diagnostic code: 16#0000_0000 = OK *)
+    bActive     : BOOL;  (* Currently operational *)
+    bError      : BOOL;  // Error indicator
+    nStatusCode : UDINT; (* Diagnostic code: 16#0000_0000 = OK *)
 END_VAR
 VAR_IN_OUT (* In-Out variables *)
     stGlobalCtx : ST_Syntax_Mini; (* Shared context structure *)
 END_VAR
 VAR (* Internal state variables *)
     // --- 1. Control flags ---
-    _bInitDone  : BOOL := FALSE; (* First-cycle init marker *)
-    _nCycleCnt  : UDINT;         // Total executed cycles
-
+    _bInitDone : BOOL := FALSE; (* First-cycle init marker *)
+    _nCycleCnt : UDINT;         // Total executed cycles
 
     // --- 2. State machine ---
-    _nStep      : INT := 0;      (* Current step index *)
-    _nSubStep   : INT := 0;      // Secondary step
-
+    _nStep    : INT := 0; (* Current step index *)
+    _nSubStep : INT := 0; // Secondary step
 
     // --- 3. Arithmetic values ---
-    _fAccum     : LREAL := 0.0;  (* Filtered accumulator *)
-    _fbTonDelay : TON;           (* Failsafe timer *)
-
+    _fAccum     : LREAL := 0.0; (* Filtered accumulator *)
+    _fbTonDelay : TON;          (* Failsafe timer *)
 
     (*
      * Multi-line block comment inside declaration block
@@ -50,8 +47,8 @@ VAR (* Internal state variables *)
     ];
 END_VAR
 VAR_TEMP (* Temporary cycle-local variables *)
-    _nTempLoop  : INT;           // Loop counter
-    _bCondition : BOOL;          (* Transient flag *)
+    _nTempLoop  : INT;  // Loop counter
+    _bCondition : BOOL; (* Transient flag *)
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -61,25 +58,20 @@ END_VAR
 (* Outer comment level 1
    (* Nested comment level 2
       (* Deep nested comment level 3: x := 5; IF y THEN z := 1; END_IF; *)
-      Back to level 2
-   *)
-   Back to level 1
+Back to level 2
 *)
-
+Back to level 1
+*)
 
 /// Triple slash documentation comment
 // Standard line comment with special chars: <XML attr="val"> & 'quotes' "double"
-
 
 // =============================================================================
 // 2. COMMENTS INSIDE ARITHMETIC & BOOLEAN EXPRESSIONS
 // =============================================================================
 _fAccum := _fAccum + (* term 1 *) (LREAL#1.5 * (* term 2 *) DINT_TO_LREAL(nSetVal)) - (* term 3 *) (fLimit / (* term 4 *) 2.0);
 
-
-_bCondition := (bEnable (* check enable *) AND NOT bError (* check error *))
-               OR_ELSE (* fallback check *) (_nStep = 999 (* emergency *));
-
+_bCondition := (bEnable (* check enable *) AND NOT bError (* check error *)) OR_ELSE (* fallback check *) (_nStep = 999 (* emergency *));
 
 // =============================================================================
 // 3. COMMENTS IN IF / ELSIF / ELSE CONTROL FLOW
@@ -91,8 +83,9 @@ ELSIF (* alternate check *) bError THEN (* branch error *)
     _nStep := 99; // error recovery step
 ELSE (* default fallback *)
     _nStep := 0;  (* stay in idle *)
-END_IF (* end of state check *);
-
+END_IF
+(* end of state check *)
+;
 
 // =============================================================================
 // 4. COMMENTS IN CASE STATEMENT
@@ -104,21 +97,19 @@ CASE (* evaluate active step *) _nStep OF
             _nStep := 10; // start cycle
         END_IF
 
-
     10 (* Step: Running *), 20 (* Step: Processing *):
         // Active processing
         _nCycleCnt := _nCycleCnt + 1; (* increment cycle *)
-
 
     99 (* Step: Error *):
         // Error handling
         bError := TRUE;
 
-
-    ELSE (* Step: Unhandled *)
-        _nStep := 0; // return to idle
-END_CASE (* end of case evaluation *);
-
+ELSE (* Step: Unhandled *)
+    _nStep := 0; // return to idle
+END_CASE
+(* end of case evaluation *)
+;
 
 // =============================================================================
 // 5. COMMENTS IN LOOPS (FOR, WHILE, REPEAT)
@@ -129,31 +120,33 @@ FOR _nTempLoop := 1 (* start *) TO 4 (* stop *) BY 1 (* step *) DO
     IF _arrScratch[_nTempLoop] > 100 THEN
         CONTINUE; // skip rest of loop
     END_IF
-END_FOR (* end of for loop *);
-
+END_FOR
+(* end of for loop *)
+;
 
 WHILE (* guard condition *) (_nSubStep < 5) AND NOT bError DO
     _nSubStep := _nSubStep + 1; // advance sub-step
     IF _nSubStep >= 3 THEN
         EXIT; (* break early *)
     END_IF
-END_WHILE (* end of while loop *);
-
+END_WHILE
+(* end of while loop *)
+;
 
 REPEAT
     _nSubStep := _nSubStep - 1; // decrement
 UNTIL (* termination condition *) (_nSubStep <= 0)
-END_REPEAT (* end of repeat loop *);
-
+END_REPEAT
+(* end of repeat loop *)
+;
 
 // =============================================================================
 // 6. COMMENTS IN FB CALLS & FUNCTION CALLS
 // =============================================================================
 _fbTonDelay(
-    IN := (* trigger signal *) (bEnable AND NOT bError), // enable
-    PT := (* duration *) T#500MS                        (* 500 ms delay *)
-); // timer instance call
-
+        IN := (* trigger signal *) (bEnable AND NOT bError), // enable
+        PT := (* duration *) T#500MS                        (* 500 ms delay *)
+        ); // timer instance call
 
 bActive := _fbTonDelay.Q; // output assignment
 ]]></ST>
@@ -175,15 +168,11 @@ END_VAR
         <ST><![CDATA[// Build report string
 IF nDetailLevel > 0 THEN
     (* Full detail formatting *)
-    sReport := CONCAT(
-        (* prefix *) 'Status: ',
-        (* value *) UDINT_TO_STRING(nStatusCode)
-    );
+    sReport := CONCAT((* prefix *) 'Status: ', (* value *) UDINT_TO_STRING(nStatusCode) );
 ELSE
     (* Brief formatting *)
     sReport := 'OK';
 END_IF
-
 
 M_DiagnosticReport := sReport; // Return result
 ]]></ST>

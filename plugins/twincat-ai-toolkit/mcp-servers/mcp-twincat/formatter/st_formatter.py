@@ -99,6 +99,19 @@ _RE_COMP_EQ_COLLAPSE_RIGHT = re.compile(r"(?<![:<]=)=(?!=)(\s{2,})")
 _RE_SEMI_SPACE = re.compile(r"\s+;")
 _RE_REF_ARROW_REPAIR = re.compile(r"(?<![:<])=\s+>")
 
+_RE_WORD_OP_COLLAPSE_LEFT = re.compile(r"(\S)\s{2,}\b(MOD|AND|OR|XOR|AND_THEN|OR_ELSE)\b", re.IGNORECASE)
+_RE_WORD_OP_COLLAPSE_RIGHT = re.compile(r"\b(MOD|AND|OR|XOR|AND_THEN|OR_ELSE|NOT)\s{2,}(?=\S)", re.IGNORECASE)
+_RE_ARITH_COLLAPSE_LEFT = re.compile(r"(\S)\s{2,}(\+|\-|\*|/|\*\*)(?=\s|\S)")
+_RE_ARITH_COLLAPSE_RIGHT = re.compile(r"(\+|\-|\*|/|\*\*)\s{2,}(?=\S)")
+_RE_COMMA_SPACE_BEFORE = re.compile(r"\s+,(?=\s|\S|$)")
+_RE_COMMA_SPACE_AFTER = re.compile(r",\s{2,}(?=\S)")
+_RE_PAREN_OPEN_COLLAPSE = re.compile(r"\(\s{2,}(?=\S)")
+_RE_PAREN_CLOSE_COLLAPSE = re.compile(r"(?<=\S)\s{2,}\)")
+_RE_BRACKET_OPEN_COLLAPSE = re.compile(r"\[\s{2,}(?=\S)")
+_RE_BRACKET_CLOSE_COLLAPSE = re.compile(r"(?<=\S)\s{2,}\]")
+_RE_CARET_SPACE = re.compile(r"\s+\^")
+_RE_DOT_MEMBER = re.compile(r"(?<=[A-Za-z0-9_\^\]\)])\s*\.\s*(?=[A-Za-z_])")
+
 
 @dataclass(slots=True)
 class _MaskEntry:
@@ -259,15 +272,29 @@ def _normalize_code_tokens(
             line = _RE_ASSIGN_LACK_RIGHT.sub(r":= \1", line)
             line = _RE_ASSIGN_NO_SPACE_PUNC.sub(r":=\1", line)
 
-        if normalize_comparisons and ("=" in line or "<" in line or ">" in line):
-            line = _RE_COMP_EQ_GT.sub("=>", line)
-            line = _RE_COMP_LT_GT.sub("<>", line)
-            line = _RE_COMP_LT_EQ.sub("<=", line)
-            line = _RE_COMP_GT_EQ.sub(">=", line)
-            line = _RE_COMP_NE_COLLAPSE_LEFT.sub(r"\1 <>", line)
-            line = _RE_COMP_NE_COLLAPSE_RIGHT.sub("<> ", line)
-            line = _RE_COMP_EQ_COLLAPSE_LEFT.sub(r"\1 =", line)
-            line = _RE_COMP_EQ_COLLAPSE_RIGHT.sub("= ", line)
+        if normalize_comparisons:
+            if "=" in line or "<" in line or ">" in line:
+                line = _RE_COMP_EQ_GT.sub("=>", line)
+                line = _RE_COMP_LT_GT.sub("<>", line)
+                line = _RE_COMP_LT_EQ.sub("<=", line)
+                line = _RE_COMP_GT_EQ.sub(">=", line)
+                line = _RE_COMP_NE_COLLAPSE_LEFT.sub(r"\1 <>", line)
+                line = _RE_COMP_NE_COLLAPSE_RIGHT.sub("<> ", line)
+                line = _RE_COMP_EQ_COLLAPSE_LEFT.sub(r"\1 =", line)
+                line = _RE_COMP_EQ_COLLAPSE_RIGHT.sub("= ", line)
+
+            line = _RE_WORD_OP_COLLAPSE_LEFT.sub(r"\1 \2", line)
+            line = _RE_WORD_OP_COLLAPSE_RIGHT.sub(r"\1 ", line)
+            line = _RE_ARITH_COLLAPSE_LEFT.sub(r"\1 \2", line)
+            line = _RE_ARITH_COLLAPSE_RIGHT.sub(r"\1 ", line)
+            line = _RE_COMMA_SPACE_BEFORE.sub(",", line)
+            line = _RE_COMMA_SPACE_AFTER.sub(", ", line)
+            line = _RE_PAREN_OPEN_COLLAPSE.sub("(", line)
+            line = _RE_PAREN_CLOSE_COLLAPSE.sub(r")", line)
+            line = _RE_BRACKET_OPEN_COLLAPSE.sub("[", line)
+            line = _RE_BRACKET_CLOSE_COLLAPSE.sub(r"]", line)
+            line = _RE_CARET_SPACE.sub("^", line)
+            line = _RE_DOT_MEMBER.sub(".", line)
 
         if normalize_semicolons and ";" in line:
             indent_len = len(line) - len(line.lstrip(" "))

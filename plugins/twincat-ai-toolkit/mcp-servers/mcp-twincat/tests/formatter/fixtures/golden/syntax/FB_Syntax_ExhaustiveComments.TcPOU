@@ -58,9 +58,9 @@ END_VAR
 (* Outer comment level 1
    (* Nested comment level 2
       (* Deep nested comment level 3: x := 5; IF y THEN z := 1; END_IF; *)
-Back TO level 2
+Back to level 2
 *)
-Back TO level 1
+Back to level 1
 *)
 
 /// Triple slash documentation comment

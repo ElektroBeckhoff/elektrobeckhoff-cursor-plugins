@@ -24,6 +24,39 @@ def test_spaces_around_operators():
     print("  [PASS] Spaces: := normalized, arithmetic preserved")
 
 
+def test_spaces_word_operators_excess_spaces_collapsed():
+    """Verify multiple spaces around MOD, AND, OR, XOR, NOT are collapsed to single space."""
+    config = load_config()
+    source = (
+        "_nHead := (_nHead + 1) MOD    cBufferSize;\n"
+        "IF bEnable   AND    bReady   OR    bOverride THEN\n"
+        "    x := NOT    bReset;\n"
+        "END_IF;\n"
+    )
+    result = _format_st_pipeline(source, config)
+    assert "_nHead := (_nHead + 1) MOD cBufferSize;" in result
+    assert "IF bEnable AND bReady OR bOverride THEN" in result
+    assert "x := NOT bReset;" in result
+    print("  [PASS] Spaces: word operators multi-space collapsed")
+
+
+def test_spaces_arithmetic_commas_parens_collapsed():
+    """Verify multiple spaces in expressions, arithmetic, commas, and parens are collapsed."""
+    config = load_config()
+    source = (
+        "fVal := (   fA   +    fB   *   fC   )  -   fD;\n"
+        "MyCall(   param1  ,   param2   ,   param3   );\n"
+        "arrData[   1  ,   2   ] := 42;\n"
+        "pDev  ^ . M_Run();\n"
+    )
+    result = _format_st_pipeline(source, config)
+    assert "fVal := (fA + fB * fC) - fD;" in result
+    assert "MyCall(param1, param2, param3);" in result
+    assert "arrData[1, 2] := 42;" in result
+    assert "pDev^.M_Run();" in result
+    print("  [PASS] Spaces: arithmetic, commas, parens, brackets, and deref multi-space collapsed")
+
+
 def test_spaces_no_space_around_dot():
     """Verify no spaces around dot (around_dot=false)."""
     config = load_config()

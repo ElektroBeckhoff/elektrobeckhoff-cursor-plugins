@@ -8,11 +8,11 @@
  *              - Partial bit access (%X, %B, %W, %D, .0)
  *              - Exponentiation (**)
 *              - All typed numeric literals (BYTE#, WORD#, DWORD#, LWORD#, etc.)
-*              - All DATE/TIME literal families (T#, LTIME#, DATE#, TOD#, DT#, etc.)
-*              - ARRAY repetition initializers [8(0), 4(1.5)]
-*              - STRING escape sequences ($', $$, $N, $R, $T, $L, $P, $0A, $41)
+*              - All date/time literal families (T#, LTIME#, DATE#, TOD#, DT#, etc.)
+*              - Array repetition initializers [8(0), 4(1.5)]
+*              - String escape sequences ($', $$, $N, $R, $T, $L, $P, $0A, $41)
 *              - Direct addressing (AT %I*, AT %Q*, AT %M*, AT %IX0.0, etc.)
-*              - Nested regions AND XML special characters
+*              - Nested regions and XML special characters
 *******************************************************************************)
 FUNCTION_BLOCK FB_Syntax_ExhaustiveEdgeCases
 VAR_INPUT
