@@ -4,9 +4,11 @@ from .handlers import (
     handle_completion,
     handle_definition,
     handle_document_symbol,
+    handle_format_section,
     handle_formatting,
     handle_hover,
     handle_implementation,
+    handle_range_formatting,
     handle_type_definition,
 )
 from .server import TwinCatLanguageServer, create_lsp_server
@@ -41,5 +43,7 @@ __all__ = [
     "handle_completion",
     "handle_document_symbol",
     "handle_formatting",
+    "handle_range_formatting",
+    "handle_format_section",
     "get_diagnostics_for_file",
 ]

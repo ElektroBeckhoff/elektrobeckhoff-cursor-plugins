@@ -78,6 +78,7 @@ class FormatResult:
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     diff: str = ""
+    validation_issues: tuple[ValidationIssue, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

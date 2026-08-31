@@ -115,7 +115,10 @@ def resolve_symbol_at_cursor(
     """Resolve identifier symbol at cursor position using twincat_core.semantic."""
     indexed = index.get_file(file_path)
     if not indexed:
-        return None
+        if file_path.exists():
+            indexed = index.update_file(file_path, declaration_only=False)
+        else:
+            return None
 
     raw_text = indexed.xml_doc.raw_text
     # Calculate 0-based character offset in full file
@@ -132,6 +135,15 @@ def resolve_symbol_at_cursor(
     # cursor is on XML markup tags (e.g. <Implementation>, <POU>) -> no ST symbol.
     if indexed.xml_doc.cdata_spans and not matched_span:
         return None
+
+    if matched_span and matched_span.kind in (
+        CdataKind.POU_IMPLEMENTATION,
+        CdataKind.METHOD_IMPLEMENTATION,
+        CdataKind.PROPERTY_GET_IMPLEMENTATION,
+        CdataKind.PROPERTY_SET_IMPLEMENTATION,
+        CdataKind.ACTION_IMPLEMENTATION,
+    ) and not indexed.has_full_implementation:
+        indexed = index.update_file(file_path, declaration_only=False)
 
     scope = get_effective_scope_for_file(index, file_path, pos, matched_span=matched_span)
 
@@ -525,15 +537,16 @@ def format_hover_for_symbol(
             header += f" IMPLEMENTS {', '.join(type_desc.implements_names)}"
 
         st_decl = [header]
-        if type_desc and type_desc.fields:
+        if type_desc:
+            all_fields = index.type_index.get_all_fields(type_desc.name, context_path=file_path)
             # ONLY public interface: VAR_INPUT, VAR_IN_OUT, VAR_OUTPUT (internal VAR is excluded)
-            inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
-            in_outs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
-            outputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
+            inputs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
 
             # Fallback for external library types from InfoSys where var_block_type might be default
             if not inputs and not in_outs and not outputs and type_desc.is_external:
-                for f in type_desc.fields.values():
+                for f in all_fields.values():
                     f_name_lower = f.name.lower()
                     if f_name_lower.startswith(("berror", "bdone", "bbusy", "hrerror", "eerror", "q", "et")):
                         outputs.append(f)
@@ -634,10 +647,11 @@ def format_hover_for_symbol(
         lines.append(f"```iecst\n({kind_str}) {sym.name}{type_str}\n```")
 
         # If variable is an FB instance, also render the FB's public signature block
-        if type_desc and type_desc.kind in (SymbolKind.FUNCTION_BLOCK, SymbolKind.POU) and type_desc.fields:
-            inputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
-            in_outs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
-            outputs = [f for f in type_desc.fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
+        if type_desc and type_desc.kind in (SymbolKind.FUNCTION_BLOCK, SymbolKind.POU):
+            all_fields = index.type_index.get_all_fields(type_desc.name, context_path=file_path)
+            inputs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_INPUT"]
+            in_outs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_IN_OUT"]
+            outputs = [f for f in all_fields.values() if (f.var_block_type or "").upper() == "VAR_OUTPUT"]
             if inputs or in_outs or outputs:
                 fb_sub = [f"FUNCTION_BLOCK {type_desc.name}"]
                 if inputs:
@@ -684,10 +698,12 @@ def format_hover_for_symbol(
         SymbolKind.INTERFACE,
         SymbolKind.VARIABLE,
     ):
-        if type_desc.properties:
-            lines.append("**Properties:**\n" + "\n".join(f"- `{p.name}`" + (f" : `{p.type_ref}`" if p.type_ref else "") for p in type_desc.properties.values()))
-        if type_desc.methods:
-            lines.append("**Methods:**\n" + "\n".join(f"- `{m.name}()`" + (f" : `{m.type_ref}`" if m.type_ref else "") for m in type_desc.methods.values()))
+        all_props = index.type_index.get_all_properties(type_desc.name, context_path=file_path)
+        all_methods = index.type_index.get_all_methods(type_desc.name, context_path=file_path)
+        if all_props:
+            lines.append("**Properties:**\n" + "\n".join(f"- `{p.name}`" + (f" : `{p.type_ref}`" if p.type_ref else "") for p in all_props.values()))
+        if all_methods:
+            lines.append("**Methods:**\n" + "\n".join(f"- `{m.name}()`" + (f" : `{m.type_ref}`" if m.type_ref else "") for m in all_methods.values()))
 
     # 4. Doc Comments / Description
     if sym.doc_comment:
@@ -761,6 +777,13 @@ def handle_completion(
     if re_member:
         chain_expr = re_member.group(1)
         filter_prefix = re_member.group(2).lower()
+        seen_labels: set[str] = set()
+
+        def add_item(it: lsp.CompletionItem):
+            lbl_key = it.label.lower()
+            if lbl_key not in seen_labels:
+                seen_labels.add(lbl_key)
+                items.append(it)
 
         target_sym = index.resolver.resolve_chain(chain_expr, scope) or index.resolver.resolve_identifier(chain_expr, scope)
         if target_sym:
@@ -772,9 +795,10 @@ def handle_completion(
 
             type_desc = index.type_index.get_type(type_name, context_path=file_path)
             if type_desc:
-                for f in type_desc.fields.values():
+                all_fields = index.type_index.get_all_fields(type_name, context_path=file_path)
+                for f in all_fields.values():
                     if not filter_prefix or f.name.lower().startswith(filter_prefix):
-                        items.append(
+                        add_item(
                             lsp.CompletionItem(
                                 label=f.name,
                                 kind=lsp.CompletionItemKind.Field,
@@ -782,9 +806,10 @@ def handle_completion(
                                 documentation=f.doc_comment or None,
                             )
                         )
-                for m in type_desc.methods.values():
+                all_methods = index.type_index.get_all_methods(type_name, context_path=file_path)
+                for m in all_methods.values():
                     if not filter_prefix or m.name.lower().startswith(filter_prefix):
-                        items.append(
+                        add_item(
                             lsp.CompletionItem(
                                 label=m.name,
                                 kind=lsp.CompletionItemKind.Method,
@@ -793,9 +818,10 @@ def handle_completion(
                                 insert_text=m.name,
                             )
                         )
-                for p in type_desc.properties.values():
+                all_props = index.type_index.get_all_properties(type_name, context_path=file_path)
+                for p in all_props.values():
                     if not filter_prefix or p.name.lower().startswith(filter_prefix):
-                        items.append(
+                        add_item(
                             lsp.CompletionItem(
                                 label=p.name,
                                 kind=lsp.CompletionItemKind.Property,
@@ -805,7 +831,7 @@ def handle_completion(
                         )
                 for em in type_desc.enum_members.values():
                     if not filter_prefix or em.name.lower().startswith(filter_prefix):
-                        items.append(
+                        add_item(
                             lsp.CompletionItem(
                                 label=em.name,
                                 kind=lsp.CompletionItemKind.EnumMember,
@@ -820,7 +846,7 @@ def handle_completion(
                 if gvl_scope:
                     for s in gvl_scope.symbols.values():
                         if not filter_prefix or s.name.lower().startswith(filter_prefix):
-                            items.append(
+                            add_item(
                                 lsp.CompletionItem(
                                     label=s.name,
                                     kind=lsp.CompletionItemKind.Variable,
@@ -844,7 +870,7 @@ def handle_completion(
                                     else lsp.CompletionItemKind.Field
                                 )
                             )
-                            items.append(
+                            add_item(
                                 lsp.CompletionItem(
                                     label=s.name,
                                     kind=kind_val,
@@ -1031,13 +1057,263 @@ def handle_formatting(
     return [lsp.TextEdit(range=full_range, new_text=formatted_text)]
 
 
+def _get_section_description(span: CdataSpan) -> str:
+    """Generate a clean human-readable name for a CDATA section."""
+    name = span.parent_name
+    kind = span.kind
+    if kind == CdataKind.METHOD_IMPLEMENTATION:
+        return f"Method '{name}' (Implementation)" if name else "Method Implementation"
+    if kind == CdataKind.METHOD_DECLARATION:
+        return f"Method '{name}' (Declaration)" if name else "Method Declaration"
+    if kind == CdataKind.ACTION_IMPLEMENTATION:
+        return f"Action '{name}'" if name else "Action"
+    if kind == CdataKind.PROPERTY_GET_IMPLEMENTATION:
+        return f"Property '{name}' (Get Implementation)" if name else "Property Get Implementation"
+    if kind == CdataKind.PROPERTY_SET_IMPLEMENTATION:
+        return f"Property '{name}' (Set Implementation)" if name else "Property Set Implementation"
+    if kind == CdataKind.PROPERTY_GET_DECLARATION:
+        return f"Property '{name}' (Get Declaration)" if name else "Property Get Declaration"
+    if kind == CdataKind.PROPERTY_SET_DECLARATION:
+        return f"Property '{name}' (Set Declaration)" if name else "Property Set Declaration"
+    if kind == CdataKind.PROPERTY_DECLARATION:
+        return f"Property '{name}' (Declaration)" if name else "Property Declaration"
+    if kind == CdataKind.POU_DECLARATION:
+        return f"POU '{name}' (Declaration)" if name else "POU Declaration"
+    if kind == CdataKind.POU_IMPLEMENTATION:
+        return f"POU '{name}' (Implementation)" if name else "POU Implementation"
+    if kind == CdataKind.DUT_DECLARATION:
+        return f"DUT '{name}'" if name else "DUT"
+    if kind == CdataKind.GVL_DECLARATION:
+        return f"GVL '{name}'" if name else "GVL"
+    if kind == CdataKind.ITF_DECLARATION:
+        return f"Interface '{name}'" if name else "Interface"
+    return f"{span.parent_tag} '{name}'" if name else (span.parent_tag or "Current Section")
+
+
+_RE_XML_ATTR_NAME = re.compile(r'Name=(?:"([^"]*)"|\'([^\']*)\')', re.IGNORECASE)
+
+
+def handle_range_formatting(
+    index: WorkspaceIndex,
+    params: lsp.DocumentRangeFormattingParams,
+    unsaved_text: Optional[str] = None,
+) -> list[lsp.TextEdit]:
+    """Handle textDocument/rangeFormatting request using twincat_core + formatter."""
+    from formatter.config import FormatterConfig
+    from formatter.file_processor import _format_st_pipeline
+    from ..xml.reader import read_tc_xml
+
+    file_path = uri_to_path(params.text_document.uri)
+    config = FormatterConfig()
+
+    text_to_format = unsaved_text
+    if text_to_format is None:
+        indexed = index.get_file(file_path)
+        text_to_format = indexed.xml_doc.raw_text if indexed else (file_path.read_text(encoding="utf-8") if file_path.exists() else "")
+
+    if not text_to_format:
+        return []
+
+    sel_start_offset = line_col_to_offset(text_to_format, params.range.start.line + 1, params.range.start.character + 1)
+    sel_end_offset = line_col_to_offset(text_to_format, params.range.end.line + 1, params.range.end.character + 1)
+    if sel_start_offset > sel_end_offset:
+        sel_start_offset, sel_end_offset = sel_end_offset, sel_start_offset
+
+    doc = read_tc_xml(text_to_format, file_path=file_path)
+    edits: list[lsp.TextEdit] = []
+
+    if doc.cdata_spans:
+        overlapping_spans = [
+            span for span in doc.cdata_spans
+            if span.content.strip()
+            and span.content_start <= sel_end_offset
+            and span.content_end >= sel_start_offset
+        ]
+
+        if not overlapping_spans:
+            overlapping_spans = [
+                span for span in doc.cdata_spans
+                if span.content.strip()
+                and (
+                    sel_start_offset <= span.cdata_raw_start <= sel_end_offset
+                    or sel_start_offset <= span.cdata_raw_end <= sel_end_offset
+                )
+            ]
+
+        for span in overlapping_spans:
+            formatted = _format_st_pipeline(span.content, config)
+            if span.content.endswith("\r\n"):
+                formatted = formatted.replace("\r\n", "\n").replace("\n", "\r\n")
+                if not formatted.endswith("\r\n"):
+                    formatted += "\r\n"
+            elif span.content.endswith("\n"):
+                if not formatted.endswith("\n"):
+                    formatted += "\n"
+
+            if formatted != span.content:
+                s_line, s_col = offset_to_line_col(text_to_format, span.content_start)
+                e_line, e_col = offset_to_line_col(text_to_format, span.content_end)
+                r = lsp.Range(
+                    start=lsp.Position(line=s_line - 1, character=s_col - 1),
+                    end=lsp.Position(line=e_line - 1, character=e_col - 1),
+                )
+                edits.append(lsp.TextEdit(range=r, new_text=formatted))
+    else:
+        # Pure ST file (non-XML)
+        lines = text_to_format.splitlines(keepends=True)
+        if lines:
+            s_idx = min(max(0, params.range.start.line), len(lines) - 1)
+            e_idx = min(max(0, params.range.end.line), len(lines) - 1)
+            if s_idx > e_idx:
+                s_idx, e_idx = e_idx, s_idx
+
+            selected_text = "".join(lines[s_idx : e_idx + 1])
+            formatted = _format_st_pipeline(selected_text, config)
+            if selected_text.endswith("\r\n"):
+                formatted = formatted.replace("\r\n", "\n").replace("\n", "\r\n")
+                if not formatted.endswith("\r\n"):
+                    formatted += "\r\n"
+            elif selected_text.endswith("\n"):
+                if not formatted.endswith("\n"):
+                    formatted += "\n"
+
+            if formatted != selected_text:
+                end_char = len(lines[e_idx])
+                r = lsp.Range(
+                    start=lsp.Position(line=s_idx, character=0),
+                    end=lsp.Position(line=e_idx, character=end_char),
+                )
+                edits.append(lsp.TextEdit(range=r, new_text=formatted))
+
+    return edits
+
+
+def handle_format_section(
+    index: WorkspaceIndex,
+    file_path: Path,
+    position: lsp.Position,
+    unsaved_text: Optional[str] = None,
+) -> dict[str, Any]:
+    """Handle twincat/formatSection request by formatting the enclosing CDATA section or member."""
+    from formatter.config import FormatterConfig
+    from formatter.file_processor import _format_st_pipeline
+    from ..xml.reader import read_tc_xml
+
+    config = FormatterConfig()
+
+    text_to_format = unsaved_text
+    if text_to_format is None:
+        indexed = index.get_file(file_path)
+        text_to_format = indexed.xml_doc.raw_text if indexed else (file_path.read_text(encoding="utf-8") if file_path.exists() else "")
+
+    if not text_to_format:
+        return {"edits": [], "sectionName": "", "success": False}
+
+    cursor_offset = line_col_to_offset(text_to_format, position.line + 1, position.character + 1)
+    doc = read_tc_xml(text_to_format, file_path=file_path)
+
+    if not doc.cdata_spans:
+        # Pure ST file without XML
+        formatted = _format_st_pipeline(text_to_format, config)
+        if "\r\n" in text_to_format:
+            formatted = formatted.replace("\r\n", "\n").replace("\n", "\r\n")
+        lines = text_to_format.splitlines()
+        line_count = len(lines)
+        last_line_len = len(lines[-1]) if lines else 0
+        full_range = lsp.Range(
+            start=lsp.Position(line=0, character=0),
+            end=lsp.Position(line=max(0, line_count - 1), character=last_line_len),
+        )
+        edits = [lsp.TextEdit(range=full_range, new_text=formatted)] if formatted != text_to_format else []
+        return {"edits": edits, "sectionName": "Structured Text Document", "success": True}
+
+    # 1. Check if cursor is directly inside a CDATA span (content or raw tag)
+    target_span: Optional[CdataSpan] = None
+    for span in doc.cdata_spans:
+        if span.cdata_raw_start <= cursor_offset <= span.cdata_raw_end or span.content_start <= cursor_offset <= span.content_end:
+            target_span = span
+            break
+
+    target_spans: list[CdataSpan] = []
+    section_name = ""
+
+    if target_span:
+        target_spans = [target_span]
+        section_name = _get_section_description(target_span)
+    else:
+        # 2. Check if cursor is on an XML element enclosing a member (e.g. <Method>, <Action>, <Property>)
+        matched_member_spans: list[CdataSpan] = []
+        for tag in ("Method", "Action", "Property", "Get", "Set", "POU", "DUT", "GVL", "Itf"):
+            pattern = re.compile(rf'<\s*{tag}\b([^>]*)>(.*?)</\s*{tag}\s*>', re.DOTALL | re.IGNORECASE)
+            for m in pattern.finditer(text_to_format):
+                if m.start() <= cursor_offset <= m.end():
+                    elem_spans = [
+                        s for s in doc.cdata_spans
+                        if m.start() <= s.cdata_raw_start and s.cdata_raw_end <= m.end()
+                    ]
+                    if elem_spans:
+                        matched_member_spans = elem_spans
+                        name_match = _RE_XML_ATTR_NAME.search(m.group(1))
+                        name_val = (name_match.group(1) or name_match.group(2)) if name_match else ""
+                        section_name = f"{tag} '{name_val}'" if name_val else tag
+                        break
+            if matched_member_spans:
+                break
+
+        if matched_member_spans:
+            target_spans = matched_member_spans
+        else:
+            closest_span = min(
+                doc.cdata_spans,
+                key=lambda s: min(abs(s.cdata_raw_start - cursor_offset), abs(s.cdata_raw_end - cursor_offset)),
+            )
+            target_spans = [closest_span]
+            section_name = _get_section_description(closest_span)
+
+    edits: list[lsp.TextEdit] = []
+    for span in target_spans:
+        if not span.content.strip():
+            continue
+        formatted = _format_st_pipeline(span.content, config)
+        if span.content.endswith("\r\n"):
+            formatted = formatted.replace("\r\n", "\n").replace("\n", "\r\n")
+            if not formatted.endswith("\r\n"):
+                formatted += "\r\n"
+        elif span.content.endswith("\n"):
+            if not formatted.endswith("\n"):
+                formatted += "\n"
+
+        if formatted != span.content:
+            s_line, s_col = offset_to_line_col(text_to_format, span.content_start)
+            e_line, e_col = offset_to_line_col(text_to_format, span.content_end)
+            r = lsp.Range(
+                start=lsp.Position(line=s_line - 1, character=s_col - 1),
+                end=lsp.Position(line=e_line - 1, character=e_col - 1),
+            )
+            edits.append(lsp.TextEdit(range=r, new_text=formatted))
+
+    return {
+        "edits": edits,
+        "sectionName": section_name,
+        "success": True,
+    }
+
+
 def get_diagnostics_for_file(
     index: WorkspaceIndex, file_path: Path
 ) -> list[lsp.Diagnostic]:
     """Retrieve syntax and semantic diagnostics for a file from WorkspaceIndex."""
     indexed = index.get_file(file_path)
     if not indexed:
-        return []
+        try:
+            indexed = index.update_file(file_path, declaration_only=False)
+        except Exception:
+            return []
+    elif not indexed.has_full_implementation:
+        try:
+            indexed = index.update_file(file_path, declaration_only=False)
+        except Exception:
+            pass
 
     diags = list(indexed.diagnostics)
     # Add semantic analysis diagnostics

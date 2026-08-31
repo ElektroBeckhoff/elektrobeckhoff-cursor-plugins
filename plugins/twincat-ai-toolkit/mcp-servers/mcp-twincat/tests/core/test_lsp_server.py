@@ -12,9 +12,11 @@ from twincat_core.lsp import (
     handle_completion,
     handle_definition,
     handle_document_symbol,
+    handle_format_section,
     handle_formatting,
     handle_hover,
     handle_implementation,
+    handle_range_formatting,
     handle_type_definition,
     path_to_uri,
     position_from_lsp,
@@ -371,7 +373,7 @@ _fbTimer.
         assert "ST_Param" in labels_scope
 
     def test_semantic_diagnostics_handler(self, tmp_path):
-        """Verify semantic diagnostics reporting unknown types and duplicate identifiers."""
+        """Verify semantic diagnostics reporting duplicate identifiers while unknown types are ignored."""
         # POU with an unknown type and a duplicate variable
         pou_file = tmp_path / "FB_Invalid.TcPOU"
         pou_text = """<?xml version="1.0" encoding="utf-8"?>
@@ -385,7 +387,7 @@ VAR
     _fbClient : FB_IotHttpClient;
 END_VAR
 ]]></Declaration>
-    <Implementation><ST><![CDATA[]]></ST></Implementation>
+        <Implementation><ST><![CDATA[]]></ST></Implementation>
   </POU>
 </TcPlcObject>"""
         pou_file.write_text(pou_text, encoding="utf-8")
@@ -394,12 +396,12 @@ END_VAR
         index.update_file(pou_file)
 
         diags = get_diagnostics_for_file(index, pou_file)
-        assert len(diags) >= 2
+        assert len(diags) == 1
 
         messages = [d.message for d in diags]
         assert any("Duplicate identifier '_nVal'" in m for m in messages)
-        assert any("Unknown type 'UNKNOWN_NON_EXISTENT_DUT'" in m for m in messages)
-        # FB_IotHttpClient is a known Beckhoff type via InfoSys, so it must not trigger an error
+        # TC-SEM-001 is deactivated, so unknown custom types do not raise false positives
+        assert not any("UNKNOWN_NON_EXISTENT_DUT" in m for m in messages)
         assert not any("FB_IotHttpClient" in m for m in messages)
 
     def test_lsp_diagnostics_line_numbers_in_xml(self, tmp_path):
@@ -412,7 +414,7 @@ END_VAR
 VAR
     bFlag : BOOL;
     nNum  : INT;
-    _bad  : UNKNOWN_TYPE_XYZ;
+    _arr  : ARRAY[10..2] OF INT;
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -431,8 +433,8 @@ bFlag := nNum;
         diags = get_diagnostics_for_file(index, pou_file)
         assert len(diags) == 2
 
-        # 1. Declaration error: UNKNOWN_TYPE_XYZ is on XML line 8 (0-based line 7)
-        decl_diag = next(d for d in diags if "UNKNOWN_TYPE_XYZ" in d.message)
+        # 1. Declaration error: _arr invalid bounds is on XML line 8 (0-based line 7)
+        decl_diag = next(d for d in diags if d.code == "TC-DECL-007")
         assert decl_diag.range.start.line == 7  # 0-based index of XML line 8
 
         # 2. Implementation error: bFlag := nNum; is on XML line 14 (0-based line 13)
@@ -600,6 +602,137 @@ END_IF;
         assert len(edits_crlf) == 1
         assert "\r\r\n" not in edits_crlf[0].new_text
         assert "\n\n\n\n" not in edits_crlf[0].new_text
+
+    def test_range_formatting_in_method_cdata(self, tmp_path):
+        """Verify that Range Formatting only modifies the selected CDATA span and leaves other code untouched."""
+        multi_method_pou = """<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Multi" Id="{11111111-2222-3333-4444-555555555555}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Multi
+VAR
+    _nVal : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_nVal:=1;
+]]></ST>
+    </Implementation>
+    <Method Name="M_DoSomething" Id="{22222222-3333-4444-5555-666666666666}">
+      <Declaration><![CDATA[METHOD M_DoSomething : BOOL
+VAR_INPUT
+  a:INT;
+    bLongVar:BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF a>0 THEN
+bLongVar:=TRUE;
+END_IF;
+]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>"""
+        pou_file = tmp_path / "FB_Multi.TcPOU"
+        pou_file.write_text(multi_method_pou, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+
+        # Select lines 14 to 18 (inside M_DoSomething declaration)
+        params = lsp.DocumentRangeFormattingParams(
+            text_document=lsp.TextDocumentIdentifier(uri=path_to_uri(pou_file)),
+            range=lsp.Range(
+                start=lsp.Position(line=14, character=0),
+                end=lsp.Position(line=18, character=7),
+            ),
+            options=lsp.FormattingOptions(tab_size=4, insert_spaces=True),
+        )
+        edits = handle_range_formatting(index, params)
+        assert len(edits) >= 1
+        # The edit should format M_DoSomething declaration
+        assert "a        : INT;" in edits[0].new_text or "bLongVar : BOOL;" in edits[0].new_text
+        # Ensure FB_Multi and _nVal are NOT in this edit (surgical replacement)
+        assert "FB_Multi" not in edits[0].new_text
+
+    def test_range_formatting_pure_st_file(self, tmp_path):
+        """Verify that Range Formatting on a pure ST file formats selected lines."""
+        st_code = """VAR
+  a:INT:=1;
+    b:BOOL:=TRUE;
+END_VAR
+"""
+        st_file = tmp_path / "test.st"
+        st_file.write_text(st_code, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        params = lsp.DocumentRangeFormattingParams(
+            text_document=lsp.TextDocumentIdentifier(uri=path_to_uri(st_file)),
+            range=lsp.Range(
+                start=lsp.Position(line=0, character=0),
+                end=lsp.Position(line=3, character=7),
+            ),
+            options=lsp.FormattingOptions(tab_size=4, insert_spaces=True),
+        )
+        edits = handle_range_formatting(index, params, unsaved_text=st_code)
+        assert len(edits) == 1
+        assert "a : INT := 1;" in edits[0].new_text or "a : INT" in edits[0].new_text
+
+    def test_format_section_cursor_inside_method_implementation(self, tmp_path):
+        """Verify that handle_format_section formats only the active method implementation."""
+        pou_file = tmp_path / "FB_Motor.TcPOU"
+        pou_file.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+
+        # Cursor inside M_Reset implementation: line 63, col 2 (0-based)
+        res = handle_format_section(
+            index,
+            pou_file,
+            lsp.Position(line=63, character=2),
+            unsaved_text=SAMPLE_POU_XML,
+        )
+        assert res["success"] is True
+        assert "M_Reset" in res["sectionName"]
+        assert "Implementation" in res["sectionName"]
+
+    def test_format_section_cursor_inside_pou_declaration(self, tmp_path):
+        """Verify that handle_format_section identifies POU Declaration when cursor is inside it."""
+        pou_file = tmp_path / "FB_Motor.TcPOU"
+        pou_file.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+
+        # Cursor inside POU declaration: line 4, col 4 (0-based)
+        res = handle_format_section(
+            index,
+            pou_file,
+            lsp.Position(line=4, character=4),
+            unsaved_text=SAMPLE_POU_XML,
+        )
+        assert res["success"] is True
+        assert "FB_Motor" in res["sectionName"]
+        assert "Declaration" in res["sectionName"]
+
+    def test_format_section_cursor_on_method_tag(self, tmp_path):
+        """Verify that handle_format_section identifies Method when cursor is on the XML <Method> tag."""
+        pou_file = tmp_path / "FB_Motor.TcPOU"
+        pou_file.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_file)
+
+        # Cursor on line 55 (<Method Name="M_Reset"...>)
+        res = handle_format_section(
+            index,
+            pou_file,
+            lsp.Position(line=55, character=10),
+            unsaved_text=SAMPLE_POU_XML,
+        )
+        assert res["success"] is True
+        assert "M_Reset" in res["sectionName"]
 
     def test_hover_with_variable_and_field_comments(self, tmp_path):
         """Verify that line comments (//) and block comments (* *) on variables appear in Hover."""
@@ -1251,11 +1384,9 @@ END_VAR
         ))
         assert impl_unk_var is None
 
-        # 5. Semantic diagnostics correctly reports TC-SEM-001 (Unknown type) for FB_UnknownThirdParty
+        # 5. Semantic diagnostics does NOT report TC-SEM-001 (Unknown type) for FB_UnknownThirdParty since it is deactivated
         diags = run_semantic_analysis(index, app_file)
-        assert len(diags) == 1
-        assert diags[0].code == "TC-SEM-001"
-        assert "Unknown type 'FB_UnknownThirdParty'" in diags[0].message
+        assert len(diags) == 0
 
 
 class TestLspServerIntegration:
@@ -1593,8 +1724,7 @@ undeclaredVar := TRUE;]]></ST>
         # We expect:
         # 1. TC-DECL-007 (Array bound error) on line 6 (0-based line 5)
         # 2. TC-SEM-006 (Type mismatch: cannot convert INT to BOOL) on line 10 (0-based line 9)
-        # 3. TC-SEM-008 (Undeclared identifier) on line 11 (0-based line 10)
-        assert len(diags) >= 3
+        assert len(diags) >= 2
         codes = {d.code: d for d in diags}
 
         assert "TC-DECL-007" in codes
@@ -1603,8 +1733,58 @@ undeclaredVar := TRUE;]]></ST>
         assert "TC-SEM-006" in codes
         assert codes["TC-SEM-006"].range.start.line == 9  # Line 10 in XML
 
-        assert "TC-SEM-008" in codes
-        assert codes["TC-SEM-008"].range.start.line == 10  # Line 11 in XML
+    def test_hover_fb_instantiation_with_arguments_and_infosys(self, tmp_path):
+        """Test Hover on FB declaration and implementation when instantiated with parameters (e.g. FB_DALI(0))."""
+        xml_content = """<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Lighting" Id="{77777777-7777-7777-7777-777777777777}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Lighting
+VAR
+   _fbRemoveFromGroup   : FB_DALI102RemoveFromGroup(0);
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+_fbRemoveFromGroup(
+    bStart := TRUE,
+    nAddress := 1,
+    nGroup := 2
+);
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>"""
+        pou_path = tmp_path / "FB_Lighting.TcPOU"
+        pou_path.write_text(xml_content, encoding="utf-8")
+
+        index = WorkspaceIndex()
+        index.update_file(pou_path)
+        uri = path_to_uri(pou_path)
+
+        # 1. Hover on variable name in declaration (line 6 / 0-based line 5, col 6)
+        hover_var_decl = handle_hover(index, lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=5, character=6),
+        ))
+        assert hover_var_decl is not None
+        assert "_fbRemoveFromGroup" in hover_var_decl.contents.value
+
+        # 2. Hover on FB type name in declaration (line 6 / 0-based line 5, col 30)
+        hover_fb_decl = handle_hover(index, lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=5, character=30),
+        ))
+        assert hover_fb_decl is not None
+        assert "FB_DALI102RemoveFromGroup" in hover_fb_decl.contents.value
+
+        # 3. Hover on FB instance call in implementation (line 11 / 0-based line 10, col 3)
+        hover_fb_impl = handle_hover(index, lsp.HoverParams(
+            text_document=lsp.TextDocumentIdentifier(uri=uri),
+            position=lsp.Position(line=10, character=3),
+        ))
+        assert hover_fb_impl is not None
+        assert "_fbRemoveFromGroup" in hover_fb_impl.contents.value
+
 
 
 

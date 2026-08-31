@@ -327,6 +327,45 @@ class TestBatchProcessing:
                 if os.path.exists(f):
                     os.unlink(f)
 
+    def test_batch_accumulates_validation_issues(self):
+        cfg = FormatterConfig()
+        cfg.safety.backup = False
+        files = []
+        try:
+            # File 0: valid
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".TcPOU", delete=False, encoding="utf-8") as f:
+                f.write(
+                    '<?xml version="1.0" encoding="utf-8"?>\n'
+                    '<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">\n'
+                    '  <POU Name="FB_Valid" Id="{11111111-1111-1111-1111-111111111111}">\n'
+                    '    <Declaration><![CDATA[FUNCTION_BLOCK FB_Valid\nVAR\n    x : INT;\nEND_VAR\n]]></Declaration>\n'
+                    '    <Implementation><![CDATA[x := 1;\n]]></Implementation>\n'
+                    '  </POU>\n'
+                    '</TcPlcObject>\n'
+                )
+                files.append(f.name)
+            # File 1: invalid GUID format
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".TcPOU", delete=False, encoding="utf-8") as f:
+                f.write(
+                    '<?xml version="1.0" encoding="utf-8"?>\n'
+                    '<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">\n'
+                    '  <POU Name="FB_InvalidGuid" Id="{invalid-guid}">\n'
+                    '    <Declaration><![CDATA[FUNCTION_BLOCK FB_InvalidGuid\nVAR\n    x : INT;\nEND_VAR\n]]></Declaration>\n'
+                    '    <Implementation><![CDATA[x := 1;\n]]></Implementation>\n'
+                    '  </POU>\n'
+                    '</TcPlcObject>\n'
+                )
+                files.append(f.name)
+
+            batch = process_batch(files, cfg, dry_run=True, validate=True, format_st=False, format_xml=False)
+            assert batch.total == 2
+            assert len(batch.validation_issues) >= 1
+            assert any(i.rule == "guid_format" for i in batch.validation_issues)
+        finally:
+            for f in files:
+                if os.path.exists(f):
+                    os.unlink(f)
+
     def test_discover_files_filters_extensions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create various files

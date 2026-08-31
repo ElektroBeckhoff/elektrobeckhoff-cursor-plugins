@@ -16,7 +16,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Sequence
 
@@ -107,6 +107,7 @@ def process_file(
 
     warnings: list[str] = []
     errors: list[str] = []
+    file_issues: list[ValidationIssue] = []
 
     # 1. Pre-format syntax safety check (reject broken source files, leave untouched)
     if format_st and config.safety.syntax_check:
@@ -125,6 +126,7 @@ def process_file(
             check_guids=config.validation.check_guids,
             check_structure=config.validation.check_structure,
         )
+        file_issues.extend(issues)
         for issue in issues:
             if issue.level == "error":
                 errors.append(f"[{issue.rule}] {issue.message}")
@@ -222,20 +224,29 @@ def process_file(
         errors=tuple(errors),
         warnings=tuple(warnings),
         diff=diff_text,
+        validation_issues=tuple(file_issues),
     )
 
 
 def _process_file_worker(
     args: tuple[str, FormatterConfig, bool, bool, bool, bool, bool, FormatScope | None],
 ) -> FormatResult:
-    """Helper worker for multi-process batch execution."""
+    """Helper worker for multi-threaded batch execution."""
     p, config, dry_run, validate, format_st, format_xml, sort_xml, scope = args
-    return process_file(
-        p, config,
-        dry_run=dry_run, validate=validate,
-        format_st=format_st, format_xml=format_xml,
-        sort_xml=sort_xml, scope=scope,
-    )
+    try:
+        return process_file(
+            p, config,
+            dry_run=dry_run, validate=validate,
+            format_st=format_st, format_xml=format_xml,
+            sort_xml=sort_xml, scope=scope,
+        )
+    except Exception as exc:
+        return FormatResult(
+            path=p,
+            success=False,
+            changed=False,
+            errors=(f"Unexpected error: {exc}",),
+        )
 
 
 def process_batch(
@@ -250,7 +261,7 @@ def process_batch(
     max_workers: int | None = None,
     scope: FormatScope | None = None,
 ) -> BatchResult:
-    """Process multiple files with optional parallelism (multi-process for true multi-core speedup)."""
+    """Process multiple files with optional parallelism via ThreadPoolExecutor."""
     batch = BatchResult(total=len(paths))
 
     if len(paths) <= 1 or max_workers == 1:
@@ -263,30 +274,14 @@ def process_batch(
             )
             _accumulate_result(batch, result)
     else:
+        effective_workers = max_workers or min(os.cpu_count() or 4, 8)
         tasks = [
             (p, config, dry_run, validate, format_st, format_xml, sort_xml, scope)
             for p in paths
         ]
-        effective_workers = max_workers or min(os.cpu_count() or 4, 16)
-        chunksize = max(1, min(32, len(paths) // (effective_workers * 4)))
-        try:
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                for result in executor.map(_process_file_worker, tasks, chunksize=chunksize):
-                    _accumulate_result(batch, result)
-        except Exception:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(
-                        process_file, p, config,
-                        dry_run=dry_run, validate=validate,
-                        format_st=format_st, format_xml=format_xml,
-                        sort_xml=sort_xml, scope=scope,
-                    ): p
-                    for p in paths
-                }
-                for future in as_completed(futures):
-                    result = future.result()
-                    _accumulate_result(batch, result)
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            for result in executor.map(_process_file_worker, tasks):
+                _accumulate_result(batch, result)
 
     return batch
 
@@ -1525,6 +1520,8 @@ def _format_st_in_cdata_blocks(
 def _accumulate_result(batch: BatchResult, result: FormatResult) -> None:
     """Add a single file result to batch totals."""
     batch.results.append(result)
+    if result.validation_issues:
+        batch.validation_issues.extend(result.validation_issues)
     if result.errors:
         batch.errors += 1
     elif result.changed:
