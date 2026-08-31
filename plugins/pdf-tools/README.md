@@ -38,23 +38,24 @@ PDF conversion via opendataloader-pdf (`mcp-servers/mcp-pdf/`).
 | `pdf_convert` | Convert PDF(s) to Markdown/JSON/HTML/text (local mode, ~60 pages/sec) | Java 11+, opendataloader-pdf |
 | `pdf_convert_hybrid` | Convert complex PDFs with AI backend (hybrid mode, #1 benchmark accuracy) | Java 11+, opendataloader-pdf[hybrid], running backend |
 
-### Requirements
+### Requirements & Dependencies
 
-- **Java 11+** — opendataloader-pdf spawns JVM processes ([download from Adoptium](https://adoptium.net))
-- **Python 3.10+** — MCP server runtime
+- **Java 11+** — Required for the opendataloader-pdf JVM extraction process ([download from Adoptium](https://adoptium.net) or system package manager)
+- **Python 3.10+** — MCP server runtime (Python 3.10, 3.11, 3.12)
 
+Dependencies in `mcp-servers/mcp-pdf/requirements.txt`:
 ```
 mcp>=1.27.0
 opendataloader-pdf>=2.4.0
 ```
 
-Install with:
+Install standard dependencies:
 
 ```bash
-pip install opendataloader-pdf
+pip install -r requirements.txt
 ```
 
-For hybrid mode (scanned PDFs, complex tables, formulas):
+For optional hybrid mode (scanned PDFs, complex tables, formulas via OCR/AI):
 
 ```bash
 pip install "opendataloader-pdf[hybrid]"

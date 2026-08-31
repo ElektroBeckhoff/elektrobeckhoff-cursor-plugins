@@ -292,12 +292,37 @@ Headless, instantaneous syntax and semantic validation across files and folders 
 - **Skill:** `twincat3-check-syntax`
 - **Diagnostic codes:** `TC-DECL-*` (declarations), `TC-STMT-*` (control flow), `TC-EXPR-*` (expressions), `TC-SEM-*` (types, inheritance, duplicates, interface conformance).
 
-### Requirements
+### Requirements & Dependencies
 
+#### Python Environment
+- **Python 3.10+** (tested on 3.10, 3.11, 3.12)
+- Dependencies in `plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat/requirements.txt`:
+  - `mcp>=1.27.0` — FastMCP / Model Context Protocol server
+  - `pywin32>=306` — Windows COM/DTE automation for TcXaeShell (Windows only)
+  - `pyads>=3.4.0` — Beckhoff ADS protocol for live symbols and runtime diagnostics
+  - `pygls>=2.0.0` — Language Server Protocol framework for `twincat_core.lsp`
+
+Install via pip:
+```bash
+pip install -r requirements.txt
 ```
-mcp>=1.27.0
-pywin32>=306
-```
+
+#### TwinCAT 3 XAE (Windows)
+- **TwinCAT 3.1 Build 4024.x or 4026.x**: Required for project validation (`twincat_check_all_objects`), compilation (`twincat_build`), library export (`twincat_export_library`), and TcXaeShell COM automation.
+- *Headless / Cross-Platform Mode*: File-based tools (`twincat_check_syntax`, `twincat_format`, `twincat_migrate`, `twincat_autodocs`, and Language Server features) operate directly on source XML/ST files and run on Windows, Linux, and macOS without TwinCAT XAE installed.
+
+#### Beckhoff Offline Documentation (InfoSys MSHC)
+- **Role**: Provides fast offline search, type signatures, and documentation hover tooltips for Beckhoff standard library types (e.g. `FB_JsonDomParser`, `FB_IotMqttClient`, `TON`, `MEMCPY`).
+- **Location**: Automatically discovered under `C:\ProgramData\Microsoft\HelpLibrary2\Catalogs\VisualStudio*\ContentStore\<LANG>\BKINFOSYS3_VS_100_<LANG>.*.mshc` (supports EN-US and DE-DE, VS12/15/16/17 catalogs).
+- **Installation Methods**:
+  1. Download and run `TC3-InfoSys.exe` from [Beckhoff InfoSystem Download](https://download.beckhoff.com/download/Software/TwinCAT/TwinCAT3/InfoSystem/) (Run as Administrator, choose Complete or desired languages).
+  2. In TcXaeShell: `Help` > `Manage Help Settings` > `Install content from online` > Add *Beckhoff Information System* > `Update`.
+- **Graceful Fallback**: If offline InfoSys is not installed, the Language Server and MCP tools use built-in type definitions and negative caching without throwing errors or causing background slowdowns.
+
+#### Optional Tooling
+- **STweep for TwinCAT 3**: Required only for TcXaeShell-integrated STweep formatting (`twincat_stweep_*`). Python-based formatting (`twincat_format`) is built-in and requires no extra software.
+- **TwinCAT Usermode Runtime (UmRT / TC170x)**: Required for headless runtime execution and system tests (`twincat_umrt_*`).
+- **Node.js 18+ & NPM**: Required only when building the VS Code / Cursor extension (`vscode-extension/`) from TypeScript source. Pre-built `.vsix` binaries are included.
 
 ### Troubleshooting: MCP server fails to start
 

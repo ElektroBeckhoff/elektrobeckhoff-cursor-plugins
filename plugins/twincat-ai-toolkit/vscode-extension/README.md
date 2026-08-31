@@ -35,6 +35,7 @@ Directly backed by `twincat_core.lsp`:
 | Command | Title | Description |
 | :--- | :--- | :--- |
 | `twincat.restartServer` | **TwinCAT: Restart Language Server** | Restarts the background Python Language Server. |
+| `twincat.formatSection` | **TwinCAT AI: Format Current Section / Member** | Formats the ST code of the current POU member/section (`Ctrl+K Ctrl+S`). |
 | `twincat.ai.checkSyntax` | **TwinCAT AI: Check Syntax & Diagnostics** | Runs fast headless syntax and semantic validation on the active file or selected folder. |
 | `twincat.ai.pagefaultAudit` | **TwinCAT AI: Pagefault & Safety Audit** | Audits active file or folder for pagefaults, unchecked pointers, and memory safety risks. |
 | `twincat.ai.addComments` | **TwinCAT AI: Add Comments (\* \*)** | Generates structured IEC 61131-3 block comments matching density rules. |
@@ -78,8 +79,18 @@ Customize extension behavior in your `settings.json`:
 
 ## Requirements & Setup
 
-1. **Python 3.10+** (used to run the embedded `twincat_core` Language Server).
-2. **VS Code 1.85.0+** or **Cursor IDE**.
+### 1. Core Prerequisites
+- **VS Code 1.85.0+** or **Cursor IDE**.
+- **Python 3.10+**: Required to run the background `twincat_core.lsp` Language Server.
+- **Python Dependencies**:
+  ```bash
+  pip install pygls>=2.0.0
+  ```
+  *(For full MCP & ADS features, install `plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat/requirements.txt`).*
+
+### 2. Optional Integrations
+- **Offline Beckhoff InfoSys (.mshc)**: If installed at `C:\ProgramData\Microsoft\HelpLibrary2\Catalogs\VisualStudio*`, the Language Server dynamically queries Beckhoff standard library documentation for rich hover tooltips and signatures. If not installed, it falls back seamlessly to built-in type catalogs without latency.
+- **Node.js 18+ & NPM**: Required only if modifying and recompiling the extension TypeScript source code (`npm run build`). Pre-packaged `.vsix` binaries are provided.
 
 ---
 

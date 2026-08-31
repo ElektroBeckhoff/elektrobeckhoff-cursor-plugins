@@ -43,17 +43,44 @@ ElektroBeckhoff/elektrobeckhoff-cursor-plugins
 
 Then enable the plugins you need in Cursor’s plugin UI.
 
-## Prerequisites
+## Prerequisites & Dependencies
 
-| Plugin | Requirement | Install |
-|--------|-------------|---------|
-| twincat-ai-toolkit | Windows + TwinCAT XAE (for build / format / UmRT MCP tools) | [Beckhoff](https://www.beckhoff.com/twincat) |
-| twincat-ai-toolkit | Python 3.10+ (for MCP server) | [python.org](https://www.python.org) |
-| pdf-tools | Python 3.10+ (for MCP server) | [python.org](https://www.python.org) |
-| pdf-tools | Java 11+ (opendataloader-pdf runtime) | [Adoptium](https://adoptium.net) |
-| pdf-tools | opendataloader-pdf | `pip install opendataloader-pdf` |
+### Summary Matrix
 
-Rules, skills, commands, and agents that do not call XAE work without TwinCAT installed; MCP validate/format/export/runtime requires Windows + XAE.
+| Plugin | Component | Requirement | Scope | Purpose |
+|--------|-----------|-------------|:-----:|---------|
+| **twincat-ai-toolkit** | **Python** | Python 3.10+ | Required | MCP server runtime & `twincat_core` Language Server (LSP) |
+| | **Python Packages** | `mcp>=1.27.0`, `pywin32>=306`, `pyads>=3.4.0`, `pygls>=2.0.0` | Required | Core tooling dependencies (`requirements.txt`) |
+| | **TwinCAT 3 XAE** | TwinCAT 3.1 (Build 4024.x or 4026.x) | Optional* | Project compilation, validation, library export, ADS, and UmRT |
+| | **Beckhoff InfoSys** | Offline InfoSys (`.mshc` Help Library) | Optional | Offline type lookup, API docstrings, and hover signatures |
+| | **STweep for TwinCAT** | STweep 3.x CLI / TcXaeShell plugin | Optional | XAE-integrated code formatting (`twincat_stweep_*`) |
+| | **TwinCAT UmRT** | Usermode Runtime (TC170x / TC3.1 4026+) | Optional | Headless runtime system tests without real-time kernel |
+| | **Node.js** | Node.js 18+ & NPM | Optional | Rebuilding the VS Code / Cursor extension from source |
+| **pdf-tools** | **Python** | Python 3.10+ | Required | MCP server runtime |
+| | **Python Packages** | `mcp>=1.27.0`, `opendataloader-pdf>=2.4.0` | Required | PDF extraction & conversion (`requirements.txt`) |
+| | **Java Runtime** | Java 11+ (JRE or JDK) | Required | Underlying opendataloader-pdf JVM extraction engine |
+
+*\* Note: All headless tools (`twincat_check_syntax`, Python ST formatter, FBD/CFC migrator, AutoDocs, and LSP diagnostics) are 100% cross-platform (Windows, Linux, macOS) and do **not** require TwinCAT XAE. XAE is only required for COM build/export automation and live PLC communication on Windows.*
+
+### Installing Dependencies
+
+#### 1. TwinCAT AI Toolkit MCP & Core
+```bash
+cd plugins/twincat-ai-toolkit/mcp-servers/mcp-twincat
+pip install -r requirements.txt
+```
+
+#### 2. PDF Tools MCP
+```bash
+cd plugins/pdf-tools/mcp-servers/mcp-pdf
+pip install -r requirements.txt
+```
+*(Ensure Java 11+ is installed from [Adoptium](https://adoptium.net) or your system package manager).*
+
+#### 3. Beckhoff Offline InfoSys (.mshc)
+The toolkit automatically detects offline Beckhoff documentation in `C:\ProgramData\Microsoft\HelpLibrary2\Catalogs\VisualStudio*`. If not present, the tools gracefully fall back to web search or built-in catalogs.
+- **Installer**: Download `TC3-InfoSys.exe` from [Beckhoff InfoSystem Download](https://download.beckhoff.com/download/Software/TwinCAT/TwinCAT3/InfoSystem/)
+- **In TcXaeShell**: `Help` > `Manage Help Settings` > `Install content from online` > add *Beckhoff Information System* > `Update`.
 
 ## License
 
