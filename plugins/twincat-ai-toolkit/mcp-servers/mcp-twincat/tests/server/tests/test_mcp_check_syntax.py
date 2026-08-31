@@ -103,12 +103,12 @@ sName := nVal;
   <POU Name="FB_Warn" Id="{44444444-4444-4444-4444-444444444444}">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_Warn
 VAR
-    nInt  : INT;
-    nDint : DINT;
+    sStr  : STRING;
+    wsStr : WSTRING;
 END_VAR
 ]]></Declaration>
     <Implementation><![CDATA[
-nInt := nDint;
+sStr := wsStr;
 ]]></Implementation>
   </POU>
 </TcPlcObject>""", encoding="utf-8")

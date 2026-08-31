@@ -112,6 +112,97 @@ def _clean_type_str(type_str: str) -> str:
     return t.upper()
 
 
+def _is_8bit_string(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
+    """Check if type represents an 8-bit ASCII string (STRING, STRING(n), T_MaxString, alias)."""
+    if not t:
+        return False
+    u = t.upper().strip()
+    if u.startswith("WSTRING"):
+        return False
+    if u in ("STRING", "STRING_LITERAL", "T_MAXSTRING", "ANY_STRING"):
+        return True
+    if u.startswith("STRING(") or u.startswith("STRING [") or u.startswith("STRING "):
+        return True
+    if (u.startswith("T_") or u.startswith("TYPE_") or u.startswith("ST_")) and u.endswith("STRING") and not u.endswith("WSTRING"):
+        return True
+    if u.endswith("STRING") and not u.endswith("WSTRING") and not (u.startswith("FB_") or u.startswith("I_") or u.startswith("E_") or u.startswith("F_")):
+        return True
+    if type_index:
+        desc = type_index.get_type(u, context_path=context_path)
+        if desc and desc.kind == SymbolKind.ALIAS and desc.base_type_name:
+            return _is_8bit_string(desc.base_type_name, type_index, context_path)
+    return False
+
+
+def _is_16bit_string(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
+    """Check if type represents a 16-bit Unicode string (WSTRING, WSTRING(n), alias)."""
+    if not t:
+        return False
+    u = t.upper().strip()
+    if u in ("WSTRING", "WSTRING_LITERAL", "ANY_WSTRING"):
+        return True
+    if u.startswith("WSTRING(") or u.startswith("WSTRING [") or u.startswith("WSTRING "):
+        return True
+    if (u.startswith("T_") or u.startswith("TYPE_") or u.startswith("ST_")) and u.endswith("WSTRING"):
+        return True
+    if u.endswith("WSTRING") and not (u.startswith("FB_") or u.startswith("I_") or u.startswith("E_") or u.startswith("F_")):
+        return True
+    if type_index:
+        desc = type_index.get_type(u, context_path=context_path)
+        if desc and desc.kind == SymbolKind.ALIAS and desc.base_type_name:
+            return _is_16bit_string(desc.base_type_name, type_index, context_path)
+    return False
+
+
+def _is_any_string_type(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
+    return _is_8bit_string(t, type_index, context_path) or _is_16bit_string(t, type_index, context_path)
+
+
+def _is_interface_type(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
+    """Check if type name represents an Interface in IEC 61131-3 / TwinCAT 3."""
+    if not t:
+        return False
+    u = t.upper().strip()
+    if u in ("INT", "INT_LITERAL", "INT64", "INT32", "INT16", "INT8", "INDEX", "INIT"):
+        return False
+    if u in ("INTERFACE", "__INTERFACE", "I_UNKNOWN", "ITFID"):
+        return True
+    if "." in u:
+        u = u.split(".")[-1].strip()
+    if u.startswith("I_") or u.startswith("ITF_"):
+        return True
+    if type_index:
+        desc = type_index.get_type(t, context_path=context_path)
+        if desc and desc.kind == SymbolKind.INTERFACE:
+            return True
+    return False
+
+
+def _is_fb_type(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
+    """Check if type name represents a Function Block in IEC 61131-3 / TwinCAT 3."""
+    if not t:
+        return False
+    u = t.upper().strip()
+    if u in ("POU", "FUNCTION_BLOCK", "FB"):
+        return True
+    if "." in u:
+        u = u.split(".")[-1].strip()
+    if u.startswith("FB_"):
+        return True
+    if type_index:
+        desc = type_index.get_type(t, context_path=context_path)
+        if desc and desc.kind in (SymbolKind.FUNCTION_BLOCK, SymbolKind.POU):
+            return True
+    return False
+
+
+def _is_null_or_zero(s: str) -> bool:
+    if not s:
+        return False
+    u = s.upper().strip()
+    return u in ("0", "16#0", "0#0", "NULL", "NULL_PTR", "PVOID", "INT_LITERAL", "ANY_INT")
+
+
 def _implements_interface(
     s_desc: Any,
     target_itf_name: str,
@@ -219,12 +310,22 @@ def check_type_assignment(
         return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
     all_ints = {**SIGNED_INTS, **UNSIGNED_INTS, **BIT_STRINGS}
+    is_t_8str = _is_8bit_string(t_clean, type_index, context_path)
+    is_s_8str = _is_8bit_string(s_clean, type_index, context_path)
+    is_t_16str = _is_16bit_string(t_clean, type_index, context_path)
+    is_s_16str = _is_16bit_string(s_clean, type_index, context_path)
 
-    # 2b. Literal & Polymorphic Integer Types (ANY_INT, ANY_BIT, ANY_NUM)
+    # 2b. Literal & Polymorphic Integer Types (ANY_INT, INT_LITERAL, ANY_NUM, ANY_BIT)
     if s_clean in ("ANY_INT", "INT_LITERAL", "ANY_NUM", "ANY_BIT"):
         if t_clean in all_ints or t_clean in FLOATS or t_clean in ("ANY_INT", "ANY_NUM", "ANY_BIT", "ANY_REAL"):
             return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
-        if t_clean.startswith("POINTER TO") or t_clean == "POINTER":
+        if (
+            t_clean.startswith("POINTER TO")
+            or t_clean == "POINTER"
+            or t_clean.startswith("REFERENCE TO")
+            or t_clean == "REFERENCE"
+            or _is_interface_type(t_clean, type_index, context_path)
+        ):
             return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
         if t_clean in BOOLEAN_TYPES:
             return TypeCheckResult(
@@ -232,7 +333,7 @@ def check_type_assignment(
                 message=f"Cannot convert integer literal to '{target_type}'",
                 code="TC-SEM-006",
             )
-        if t_clean in STRING_TYPES:
+        if is_t_8str or is_t_16str:
             return TypeCheckResult(
                 TypeCheckResultKind.TYPE_MISMATCH_ERROR,
                 message=f"Cannot convert integer literal to '{target_type}' without TO_STRING()",
@@ -259,7 +360,7 @@ def check_type_assignment(
                 message=f"Cannot convert floating point literal to '{target_type}'",
                 code="TC-SEM-006",
             )
-        if t_clean in STRING_TYPES:
+        if is_t_8str or is_t_16str:
             return TypeCheckResult(
                 TypeCheckResultKind.TYPE_MISMATCH_ERROR,
                 message=f"Cannot convert floating point literal to '{target_type}' without TO_STRING()",
@@ -286,7 +387,17 @@ def check_type_assignment(
             code="TC-SEM-006",
         )
 
-    # 3. References & Pointers
+    # 3. References & Pointers & Zero / Null
+    if _is_null_or_zero(s_clean):
+        if (
+            t_clean.startswith("POINTER TO")
+            or t_clean == "POINTER"
+            or t_clean.startswith("REFERENCE TO")
+            or t_clean == "REFERENCE"
+            or _is_interface_type(t_clean, type_index, context_path)
+        ):
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+
     if t_clean.startswith("REFERENCE TO") or t_clean == "REFERENCE":
         target_inner = t_clean[12:].strip() if t_clean.startswith("REFERENCE TO") else "ANY"
         if s_clean.startswith("REFERENCE TO"):
@@ -299,8 +410,8 @@ def check_type_assignment(
         return check_type_assignment(t_clean, source_inner, type_index, context_path)
 
     if t_clean.startswith("POINTER TO") or t_clean == "POINTER":
-        if s_clean in ("PVOID", "0", "NULL", "16#0") or s_clean.startswith("POINTER TO"):
-            if s_clean in ("PVOID", "0", "NULL", "16#0") or t_clean == "POINTER TO BYTE" or s_clean == "POINTER TO BYTE":
+        if _is_null_or_zero(s_clean) or s_clean.startswith("POINTER TO"):
+            if _is_null_or_zero(s_clean) or t_clean == "POINTER TO BYTE" or s_clean == "POINTER TO BYTE":
                 return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
             if t_clean == s_clean:
                 return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
@@ -326,20 +437,50 @@ def check_type_assignment(
         )
 
     # 4. OOP & Interface Conformance Check
-    if type_index:
-        t_desc = type_index.get_type(t_clean, context_path=context_path)
-        s_desc = type_index.get_type(s_clean, context_path=context_path)
+    t_desc = type_index.get_type(t_clean, context_path=context_path) if type_index else None
+    s_desc = type_index.get_type(s_clean, context_path=context_path) if type_index else None
 
-        if t_desc and s_desc:
-            # Target is Interface, Source is POU or Interface implementing/extending it
-            if t_desc.kind == SymbolKind.INTERFACE:
-                if _implements_interface(s_desc, t_clean, type_index, context_path):
-                    return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+    all_primitive_types = set(all_ints.keys()) | BOOLEAN_TYPES | {"STRING", "WSTRING"} | set(FLOATS.keys()) | set(TIME_TYPES.keys()) | set(DATE_TYPES.keys())
 
-            # Target is base FB / POU, Source is derived FB (EXTENDS multi-level)
-            if t_desc.kind in (SymbolKind.POU, SymbolKind.FUNCTION_BLOCK):
-                if _inherits_from_class(s_desc, t_clean, type_index, context_path):
-                    return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+    # Target is Interface
+    if _is_interface_type(t_clean, type_index, context_path):
+        if _is_null_or_zero(s_clean):
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if s_clean in all_primitive_types or is_s_8str or is_s_16str:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot assign primitive type '{source_type}' to interface '{target_type}'",
+                code="TC-SEM-006",
+            )
+        is_source_itf = _is_interface_type(s_clean, type_index, context_path)
+        is_source_fb = _is_fb_type(s_clean, type_index, context_path)
+        # In TwinCAT, assigning an FB, Interface, or external library type to an Interface is valid
+        if is_source_itf or is_source_fb or s_desc is None or t_desc is None:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if s_desc and _implements_interface(s_desc, t_clean, type_index, context_path):
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if s_desc and s_desc.kind == SymbolKind.STRUCT:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot assign STRUCT '{source_type}' to interface '{target_type}'",
+                code="TC-SEM-006",
+            )
+        return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+
+    # Source is Interface but Target is Primitive
+    if _is_interface_type(s_clean, type_index, context_path):
+        if t_clean in all_primitive_types or is_t_8str or is_t_16str:
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot assign interface '{source_type}' to primitive type '{target_type}'",
+                code="TC-SEM-006",
+            )
+
+    # Target is base FB / POU, Source is derived FB (EXTENDS multi-level)
+    if t_desc and s_desc:
+        if t_desc.kind in (SymbolKind.POU, SymbolKind.FUNCTION_BLOCK):
+            if _inherits_from_class(s_desc, t_clean, type_index, context_path):
+                return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
     # 5. Booleans
     if t_clean in BOOLEAN_TYPES:
@@ -358,21 +499,48 @@ def check_type_assignment(
             code="TC-SEM-006",
         )
 
-    # 6. Strings
-    if t_clean in STRING_TYPES or s_clean in STRING_TYPES:
-        if t_clean == "WSTRING" and s_clean == "STRING":
-            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)  # Widening
-        if t_clean == "STRING" and s_clean == "WSTRING":
+    # 6. Strings (STRING, STRING(n), T_MaxString, WSTRING, aliases)
+    if (is_t_8str or is_t_16str) and (is_s_8str or is_s_16str):
+        if is_t_8str and is_s_8str:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if is_t_16str and is_s_16str:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        if is_t_16str and is_s_8str:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)  # Widening STRING to WSTRING
+        if is_t_8str and is_s_16str:
             return TypeCheckResult(
                 TypeCheckResultKind.NARROWING_WARNING,
                 message="Implicit conversion from 'WSTRING' to 'STRING': possible loss of non-ASCII characters",
                 code="TC-SEM-007",
             )
-        return TypeCheckResult(
-            TypeCheckResultKind.TYPE_MISMATCH_ERROR,
-            message=f"Cannot convert string type '{source_type}' to '{target_type}'",
-            code="TC-SEM-006",
-        )
+
+    if (is_t_8str or is_t_16str) != (is_s_8str or is_s_16str):
+        if is_t_8str or is_t_16str:
+            if s_clean in all_ints or s_clean in ("ANY_INT", "INT_LITERAL", "ANY_NUM", "ANY_BIT"):
+                return TypeCheckResult(
+                    TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                    message=f"Cannot convert integer type '{source_type}' to '{target_type}' without TO_STRING()",
+                    code="TC-SEM-006",
+                )
+            if s_clean in FLOATS or s_clean in ("ANY_REAL", "REAL_LITERAL"):
+                return TypeCheckResult(
+                    TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                    message=f"Cannot convert floating point type '{source_type}' to '{target_type}' without TO_STRING()",
+                    code="TC-SEM-006",
+                )
+        if is_s_8str or is_s_16str:
+            if t_clean in all_ints:
+                return TypeCheckResult(
+                    TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                    message=f"Cannot convert string type '{source_type}' to integer '{target_type}' without conversion",
+                    code="TC-SEM-006",
+                )
+            if t_clean in FLOATS:
+                return TypeCheckResult(
+                    TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                    message=f"Cannot convert string type '{source_type}' to float '{target_type}' without conversion",
+                    code="TC-SEM-006",
+                )
 
     # 7. Date & Time Types
     for type_group, name in (
@@ -442,76 +610,29 @@ def check_type_assignment(
             code="TC-SEM-006",
         )
 
-    # 9. Signed Integers to Signed Integers
-    if t_clean in SIGNED_INTS and s_clean in SIGNED_INTS:
-        t_rank = SIGNED_INTS[t_clean][1]
-        s_rank = SIGNED_INTS[s_clean][1]
-        if t_rank >= s_rank:
-            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
-        return TypeCheckResult(
-            TypeCheckResultKind.NARROWING_WARNING,
-            message=f"Implicit conversion from '{source_type}' to '{target_type}': possible loss of data",
-            code="TC-SEM-007",
-        )
-
-    # 10. Unsigned Integers to Unsigned Integers
-    if t_clean in UNSIGNED_INTS and s_clean in UNSIGNED_INTS:
-        t_rank = UNSIGNED_INTS[t_clean][1]
-        s_rank = UNSIGNED_INTS[s_clean][1]
-        if t_rank >= s_rank:
-            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
-        return TypeCheckResult(
-            TypeCheckResultKind.NARROWING_WARNING,
-            message=f"Implicit conversion from '{source_type}' to '{target_type}': possible loss of data",
-            code="TC-SEM-007",
-        )
-
-    # 11. Bit Strings to Bit Strings
-    if t_clean in BIT_STRINGS and s_clean in BIT_STRINGS:
-        t_rank = BIT_STRINGS[t_clean][1]
-        s_rank = BIT_STRINGS[s_clean][1]
-        if t_rank >= s_rank:
-            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
-        return TypeCheckResult(
-            TypeCheckResultKind.NARROWING_WARNING,
-            message=f"Implicit conversion from '{source_type}' to '{target_type}': possible loss of data",
-            code="TC-SEM-007",
-        )
-
-    # 12. Cross-group Numeric / BitString conversions (Sign change / Size mismatch)
-    all_ints = {**SIGNED_INTS, **UNSIGNED_INTS, **BIT_STRINGS}
+    # 9. Integer & Bit-String Conversions (SINT, INT, DINT, LINT, USINT, UINT, UDINT, ULINT, BYTE, WORD, DWORD, LWORD, HRESULT)
     if t_clean in all_ints and s_clean in all_ints:
-        t_size = all_ints[t_clean][0]
-        s_size = all_ints[s_clean][0]
+        # In TwinCAT 3 ST, numeric and bit-string assignments are freely supported and coerced
+        return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
-        if s_size > t_size:
-            return TypeCheckResult(
-                TypeCheckResultKind.NARROWING_WARNING,
-                message=f"Implicit conversion from '{source_type}' to '{target_type}': possible loss of data and sign change",
-                code="TC-SEM-007",
-            )
-        if s_size == t_size and (t_clean in SIGNED_INTS) != (s_clean in SIGNED_INTS):
-            return TypeCheckResult(
-                TypeCheckResultKind.NARROWING_WARNING,
-                message=f"Implicit conversion from '{source_type}' to '{target_type}': possible change of sign",
-                code="TC-SEM-007",
-            )
-        if s_size < t_size:
-            if s_clean in SIGNED_INTS and t_clean not in SIGNED_INTS:
-                return TypeCheckResult(
-                    TypeCheckResultKind.NARROWING_WARNING,
-                    message=f"Implicit conversion from signed '{source_type}' to unsigned '{target_type}': possible change of sign",
-                    code="TC-SEM-007",
-                )
-            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
-
-    # 13. Complex / User Types (DUTs, Structs, FBs) Mismatch
+    # 10. Complex / User Types (DUTs, Structs, FBs) Mismatch
     if (
         t_clean not in all_ints
         and s_clean not in all_ints
         and t_clean not in BOOLEAN_TYPES
         and s_clean not in BOOLEAN_TYPES
     ):
+        if type_index:
+            t_desc = type_index.get_type(t_clean, context_path=context_path)
+            s_desc = type_index.get_type(s_clean, context_path=context_path)
+            # If either type is from an external library or not indexed locally, assume compatible
+            if not t_desc or not s_desc:
+                return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+            if t_desc.name.lower() == s_desc.name.lower():
+                return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        else:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+
         return TypeCheckResult(
             TypeCheckResultKind.TYPE_MISMATCH_ERROR,
             message=f"Cannot convert type '{source_type}' to '{target_type}'",

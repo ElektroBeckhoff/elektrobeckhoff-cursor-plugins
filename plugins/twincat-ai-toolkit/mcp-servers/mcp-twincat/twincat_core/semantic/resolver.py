@@ -56,7 +56,7 @@ class SymbolResolver:
         if sym is not None:
             return sym
 
-        # 2. Level 2: FB Inheritance Search (Base class variables/methods if within POU/Method)
+        # 2. Level 2: FB Inheritance Search (Base class variables/methods/properties if within POU/Method)
         pou_scope = self._find_enclosing_pou_scope(current_scope)
         if pou_scope and pou_scope.owner_symbol:
             fb_type_name = pou_scope.owner_symbol.name
@@ -68,6 +68,10 @@ class SymbolResolver:
             inherited_method = self.type_index.find_method(fb_type_name, name, inherit=True, context_path=context_path)
             if inherited_method:
                 return inherited_method
+            # Check properties in base classes
+            inherited_prop = self.type_index.find_property(fb_type_name, name, inherit=True, context_path=context_path)
+            if inherited_prop:
+                return inherited_prop
 
         # 3. Level 3: GVL search (unqualified GVL variables from GVLs without {attribute 'qualified_only'})
         for gvl_candidates in self.symbol_table.gvl_scopes.values():
@@ -275,8 +279,10 @@ class SymbolResolver:
 
         return None
 
-    def infer_expression_type(self, expr: Expression, current_scope: Scope) -> Optional[str]:
+    def infer_expression_type(self, expr: Optional[Expression], current_scope: Scope) -> Optional[str]:
         """Infer the type name of an ST expression."""
+        if expr is None:
+            return None
         context_path = self._get_context_path(current_scope)
 
         if isinstance(expr, LiteralExpr):

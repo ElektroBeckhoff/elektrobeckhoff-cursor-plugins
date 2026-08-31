@@ -77,6 +77,29 @@ def extract_base_type_name(type_ref: str) -> str:
     return cleaned
 
 
+def _has_unresolved_base_class(
+    pou_name: str,
+    type_index: Any,
+    context_path: Optional[Path] = None,
+) -> bool:
+    """Check if any base class in the EXTENDS chain cannot be found in TypeIndex."""
+    visited = set()
+    curr_name: Optional[str] = pou_name
+    while curr_name:
+        clean = type_index.clean_type_name(curr_name)
+        key = clean.lower()
+        if not key or key in visited:
+            break
+        visited.add(key)
+        t_desc = type_index.get_type(clean, context_path=context_path)
+        if not t_desc:
+            return True
+        if not t_desc.extends_name:
+            break
+        curr_name = t_desc.extends_name
+    return False
+
+
 def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[SyntaxDiagnostic]:
     """Perform semantic validation (type resolution, duplicate symbols) for a file."""
     indexed = index.get_file(file_path)
@@ -151,47 +174,51 @@ def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[Syntax
             if index.symbol_table.find_gvl_scope(base_type, context_path=file_path) is not None:
                 continue
 
-            # Type not found anywhere
-            if sym.span and sym.span.start.line > 0:
-                diagnostics.append(
-                    SyntaxDiagnostic(
-                        message=f"Unknown type '{sym.type_ref}'",
-                        span=sym.span,
-                        severity=DiagnosticSeverity.ERROR,
-                        code="TC-SEM-001",
-                    )
-                )
+            # TC-SEM-001 (Unknown type) is deactivated to prevent false positives when working
+            # with custom external libraries (*.compiled-library) whose source types are not indexed.
 
     # 2. Interface Conformance Validation (TC-SEM-003)
-    if isinstance(indexed.top_level_ast, PouDecl) and indexed.top_level_ast.implements_names:
+    if (
+        isinstance(indexed.top_level_ast, PouDecl)
+        and indexed.top_level_ast.implements_names
+        and not indexed.top_level_ast.is_abstract
+    ):
         pou_name = indexed.top_level_ast.name or file_path.stem
         pou_type_desc = index.type_index.get_type(pou_name, context_path=file_path)
-        pou_methods = set(pou_type_desc.methods.keys()) if pou_type_desc else set()
-        pou_props = set(pou_type_desc.properties.keys()) if pou_type_desc else set()
+        if not (pou_type_desc and pou_type_desc.is_abstract):
+            pou_methods = index.type_index.get_all_methods(pou_name, context_path=file_path)
+            pou_props = index.type_index.get_all_properties(pou_name, context_path=file_path)
 
-        for itf_name in indexed.top_level_ast.implements_names:
-            itf_desc = index.type_index.get_type(itf_name, context_path=file_path)
-            if itf_desc and itf_desc.kind == SymbolKind.INTERFACE:
-                for m_name, m_sym in itf_desc.methods.items():
-                    if m_name.lower() not in pou_methods:
-                        diagnostics.append(
-                            SyntaxDiagnostic(
-                                message=f"FUNCTION_BLOCK '{pou_name}' does not implement interface '{itf_name}' method '{m_sym.name}'",
-                                span=indexed.top_level_ast.span,
-                                severity=DiagnosticSeverity.ERROR,
-                                code="TC-SEM-003",
+            for itf_name in indexed.top_level_ast.implements_names:
+                itf_desc = index.type_index.get_type(itf_name, context_path=file_path)
+                if itf_desc and itf_desc.kind == SymbolKind.INTERFACE:
+                    req_methods = index.type_index.get_all_methods(itf_name, context_path=file_path)
+                    req_props = index.type_index.get_all_properties(itf_name, context_path=file_path)
+
+                    for m_name, m_sym in req_methods.items():
+                        if m_name.lower() not in pou_methods:
+                            if _has_unresolved_base_class(pou_name, index.type_index, file_path):
+                                continue
+                            diagnostics.append(
+                                SyntaxDiagnostic(
+                                    message=f"FUNCTION_BLOCK '{pou_name}' does not implement interface '{itf_name}' method '{m_sym.name}'",
+                                    span=indexed.top_level_ast.span,
+                                    severity=DiagnosticSeverity.ERROR,
+                                    code="TC-SEM-003",
+                                )
                             )
-                        )
-                for p_name, p_sym in itf_desc.properties.items():
-                    if p_name.lower() not in pou_props:
-                        diagnostics.append(
-                            SyntaxDiagnostic(
-                                message=f"FUNCTION_BLOCK '{pou_name}' does not implement interface '{itf_name}' property '{p_sym.name}'",
-                                span=indexed.top_level_ast.span,
-                                severity=DiagnosticSeverity.ERROR,
-                                code="TC-SEM-003",
+                    for p_name, p_sym in req_props.items():
+                        if p_name.lower() not in pou_props:
+                            if _has_unresolved_base_class(pou_name, index.type_index, file_path):
+                                continue
+                            diagnostics.append(
+                                SyntaxDiagnostic(
+                                    message=f"FUNCTION_BLOCK '{pou_name}' does not implement interface '{itf_name}' property '{p_sym.name}'",
+                                    span=indexed.top_level_ast.span,
+                                    severity=DiagnosticSeverity.ERROR,
+                                    code="TC-SEM-003",
+                                )
                             )
-                        )
 
     # 3. Inheritance Cycle Detection (TC-SEM-004)
     if isinstance(indexed.top_level_ast, PouDecl) and indexed.top_level_ast.extends_name:
@@ -322,14 +349,8 @@ def _validate_expression_identifiers(
         if index.symbol_table.find_global_symbol(name, context_path=file_path) is not None:
             return
 
-        diagnostics.append(
-            SyntaxDiagnostic(
-                message=f"Undeclared identifier '{name}'",
-                span=_offset(expr.span),
-                severity=DiagnosticSeverity.ERROR,
-                code="TC-SEM-008",
-            )
-        )
+        # TC-SEM-008 (Undeclared identifier) is deactivated to prevent false positives when referencing
+        # external library enums, GVLs, POUs, and symbols from unindexed compiled libraries.
 
     elif isinstance(expr, MemberAccessExpr):
         _validate_expression_identifiers(expr.target, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
@@ -342,7 +363,8 @@ def _validate_expression_identifiers(
     elif isinstance(expr, CallExpr):
         _validate_expression_identifiers(expr.callee, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
         for arg in expr.args:
-            _validate_expression_identifiers(arg.value, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
+            if arg.value is not None:
+                _validate_expression_identifiers(arg.value, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
 
     elif isinstance(expr, BinaryExpr):
         _validate_expression_identifiers(expr.left, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
@@ -479,16 +501,7 @@ def _validate_statement(
             _validate_expression_identifiers(stmt.by_expr, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
 
         loop_var_sym = index.resolver.resolve_identifier(stmt.loop_var, scope)
-        if loop_var_sym is None:
-            diagnostics.append(
-                SyntaxDiagnostic(
-                    message=f"Undeclared loop variable '{stmt.loop_var}'",
-                    span=_offset(stmt.span),
-                    severity=DiagnosticSeverity.ERROR,
-                    code="TC-SEM-008",
-                )
-            )
-        elif loop_var_sym.type_ref:
+        if loop_var_sym is not None and loop_var_sym.type_ref:
             start_t = index.resolver.infer_expression_type(stmt.start_expr, scope)
             end_t = index.resolver.infer_expression_type(stmt.end_expr, scope)
             if start_t:

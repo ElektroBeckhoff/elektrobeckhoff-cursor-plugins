@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -89,9 +90,10 @@ class TypeIndex:
 
         if descriptor.file_path:
             res_path = descriptor.file_path.resolve()
+            descriptor.file_path = res_path
             self._types[key] = [
                 d for d in self._types[key]
-                if not (d.file_path and d.file_path.resolve() == res_path)
+                if not (d.file_path and d.file_path == res_path)
             ]
 
         self._types[key].append(descriptor)
@@ -102,7 +104,7 @@ class TypeIndex:
         for k in list(self._types.keys()):
             self._types[k] = [
                 d for d in self._types[k]
-                if not (d.file_path is not None and d.file_path.resolve() == res_path)
+                if not (d.file_path is not None and d.file_path == res_path)
             ]
             if not self._types[k]:
                 del self._types[k]
@@ -151,16 +153,20 @@ class TypeIndex:
     def clean_type_name(raw: str) -> str:
         """Extract the core identifier from a complex type signature."""
         s = raw.strip()
-        if s.upper().startswith("REFERENCE TO "):
-            return s[13:].strip()
-        if s.upper().startswith("POINTER TO "):
-            return s[11:].strip()
-        if " OF " in s.upper():
-            parts = s.split(" OF ")
-            return parts[-1].strip()
+        if not s:
+            return ""
+        if re.match(r"^REFERENCE\s+TO\s+", s, re.IGNORECASE):
+            s = re.sub(r"^REFERENCE\s+TO\s+", "", s, flags=re.IGNORECASE).strip()
+        if re.match(r"^POINTER\s+TO\s+", s, re.IGNORECASE):
+            s = re.sub(r"^POINTER\s+TO\s+", "", s, flags=re.IGNORECASE).strip()
+        m_arr = re.search(r"\bOF\s+(.+)$", s, re.IGNORECASE)
+        if m_arr:
+            s = m_arr.group(1).strip()
         if "(" in s:
-            return s.split("(")[0].strip()
-        return s
+            s = s.split("(")[0].strip()
+        if "[" in s:
+            s = s.split("[")[0].strip()
+        return s.strip()
 
     def is_builtin(self, name: str) -> bool:
         cleaned = self.clean_type_name(name).lower()
@@ -181,21 +187,51 @@ class TypeIndex:
             curr = self.get_type(ext, context_path=context_path)
         return chain
 
-    def find_field(self, type_name: str, field_name: str, inherit: bool = True, context_path: Optional[Path] = None) -> Optional[Symbol]:
+    def find_field(
+        self,
+        type_name: str,
+        field_name: str,
+        inherit: bool = True,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> Optional[Symbol]:
         """Look up a member/field in a struct or FB, optionally checking base classes."""
-        t_desc = self.get_type(type_name, context_path=context_path)
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return None
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
         if not t_desc:
             return None
         f_key = field_name.lower()
         if f_key in t_desc.fields:
             return t_desc.fields[f_key]
         if inherit and t_desc.extends_name:
-            return self.find_field(t_desc.extends_name, field_name, inherit=True, context_path=context_path)
+            return self.find_field(t_desc.extends_name, field_name, inherit=True, context_path=context_path, visited=visited)
         return None
 
-    def find_method(self, type_name: str, method_name: str, inherit: bool = True, context_path: Optional[Path] = None) -> Optional[Symbol]:
+    def find_method(
+        self,
+        type_name: str,
+        method_name: str,
+        inherit: bool = True,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> Optional[Symbol]:
         """Look up a method in a FB or Interface, optionally checking base classes/interfaces."""
-        t_desc = self.get_type(type_name, context_path=context_path)
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return None
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
         if not t_desc:
             return None
         m_key = method_name.lower()
@@ -203,26 +239,141 @@ class TypeIndex:
             return t_desc.methods[m_key]
         if inherit:
             if t_desc.extends_name:
-                res = self.find_method(t_desc.extends_name, method_name, inherit=True, context_path=context_path)
+                res = self.find_method(t_desc.extends_name, method_name, inherit=True, context_path=context_path, visited=visited)
                 if res:
                     return res
-            for itf in t_desc.implements_names:
-                res = self.find_method(itf, method_name, inherit=True, context_path=context_path)
-                if res:
-                    return res
+            if t_desc.kind == SymbolKind.INTERFACE:
+                for itf in t_desc.implements_names:
+                    res = self.find_method(itf, method_name, inherit=True, context_path=context_path, visited=visited)
+                    if res:
+                        return res
         return None
 
-    def find_property(self, type_name: str, prop_name: str, inherit: bool = True, context_path: Optional[Path] = None) -> Optional[Symbol]:
-        """Look up a property in a FB or Interface, optionally checking base classes."""
-        t_desc = self.get_type(type_name, context_path=context_path)
+    def find_property(
+        self,
+        type_name: str,
+        prop_name: str,
+        inherit: bool = True,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> Optional[Symbol]:
+        """Look up a property in a FB or Interface, optionally checking base classes/interfaces."""
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return None
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
         if not t_desc:
             return None
         p_key = prop_name.lower()
         if p_key in t_desc.properties:
             return t_desc.properties[p_key]
-        if inherit and t_desc.extends_name:
-            return self.find_property(t_desc.extends_name, prop_name, inherit=True, context_path=context_path)
+        if inherit:
+            if t_desc.extends_name:
+                res = self.find_property(t_desc.extends_name, prop_name, inherit=True, context_path=context_path, visited=visited)
+                if res:
+                    return res
+            if t_desc.kind == SymbolKind.INTERFACE:
+                for itf in t_desc.implements_names:
+                    res = self.find_property(itf, prop_name, inherit=True, context_path=context_path, visited=visited)
+                    if res:
+                        return res
         return None
+
+    def get_all_fields(
+        self,
+        type_name: str,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> dict[str, Symbol]:
+        """Get all fields including inherited fields from base classes/structs."""
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return {}
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
+        if not t_desc:
+            return {}
+
+        fields: dict[str, Symbol] = {}
+        if t_desc.extends_name:
+            base_fields = self.get_all_fields(t_desc.extends_name, context_path=context_path, visited=visited)
+            fields.update(base_fields)
+
+        fields.update(t_desc.fields)
+        return fields
+
+    def get_all_methods(
+        self,
+        type_name: str,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> dict[str, Symbol]:
+        """Get all methods including inherited methods from base classes or extended interfaces."""
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return {}
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
+        if not t_desc:
+            return {}
+
+        methods: dict[str, Symbol] = {}
+        if t_desc.extends_name:
+            base_methods = self.get_all_methods(t_desc.extends_name, context_path=context_path, visited=visited)
+            methods.update(base_methods)
+
+        if t_desc.kind == SymbolKind.INTERFACE:
+            for itf in t_desc.implements_names:
+                itf_methods = self.get_all_methods(itf, context_path=context_path, visited=visited)
+                methods.update(itf_methods)
+
+        methods.update(t_desc.methods)
+        return methods
+
+    def get_all_properties(
+        self,
+        type_name: str,
+        context_path: Optional[Path] = None,
+        visited: Optional[set[str]] = None,
+    ) -> dict[str, Symbol]:
+        """Get all properties including inherited properties from base classes or extended interfaces."""
+        if visited is None:
+            visited = set()
+        clean = self.clean_type_name(type_name)
+        key = clean.lower()
+        if not key or key in visited:
+            return {}
+        visited.add(key)
+
+        t_desc = self.get_type(clean, context_path=context_path)
+        if not t_desc:
+            return {}
+
+        properties: dict[str, Symbol] = {}
+        if t_desc.extends_name:
+            base_props = self.get_all_properties(t_desc.extends_name, context_path=context_path, visited=visited)
+            properties.update(base_props)
+
+        if t_desc.kind == SymbolKind.INTERFACE:
+            for itf in t_desc.implements_names:
+                itf_props = self.get_all_properties(itf, context_path=context_path, visited=visited)
+                properties.update(itf_props)
+
+        properties.update(t_desc.properties)
+        return properties
 
     def find_enum_member(self, type_name: str, member_name: str, context_path: Optional[Path] = None) -> Optional[Symbol]:
         """Look up an enum member inside an Enum type."""

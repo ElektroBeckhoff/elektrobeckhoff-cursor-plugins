@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from ..syntax.span import SourceSpan
@@ -57,11 +58,24 @@ class InfoSysTypeProvider:
             return None
 
         clean_name = name.strip()
+        if re.match(r"^REFERENCE\s+TO\s+", clean_name, re.IGNORECASE):
+            clean_name = re.sub(r"^REFERENCE\s+TO\s+", "", clean_name, flags=re.IGNORECASE).strip()
+        if re.match(r"^POINTER\s+TO\s+", clean_name, re.IGNORECASE):
+            clean_name = re.sub(r"^POINTER\s+TO\s+", "", clean_name, flags=re.IGNORECASE).strip()
+        m_arr = re.search(r"\bOF\s+(.+)$", clean_name, re.IGNORECASE)
+        if m_arr:
+            clean_name = m_arr.group(1).strip()
+        if "(" in clean_name:
+            clean_name = clean_name.split("(")[0].strip()
+        if "[" in clean_name:
+            clean_name = clean_name.split("[")[0].strip()
         # Strip library prefix if provided e.g. "Tc3_IotBase.FB_IotHttpClient" -> "FB_IotHttpClient"
         if "." in clean_name:
             clean_name = clean_name.split(".")[-1].strip()
 
         key = clean_name.lower()
+        if not key:
+            return None
         if key in self._cache:
             return self._cache[key]
 

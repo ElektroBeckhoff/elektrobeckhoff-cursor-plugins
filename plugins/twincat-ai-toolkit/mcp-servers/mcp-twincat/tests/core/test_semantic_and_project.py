@@ -17,6 +17,7 @@ from twincat_core.semantic import (
     TypeDescriptor,
     TypeIndex,
 )
+from twincat_core.semantic.diagnostics import run_semantic_analysis
 from twincat_core.syntax import (
     BinaryExpr,
     CallArg,
@@ -514,7 +515,7 @@ END_VAR
 # =========================================================================
 
 class TestSemanticDiagnostics:
-    def test_semantic_analysis_catches_unknown_type(self, tmp_path):
+    def test_semantic_analysis_unknown_type_deactivated(self, tmp_path):
         from twincat_core.semantic.diagnostics import run_semantic_analysis
 
         pou_file = tmp_path / "FB_InvalidType.TcPOU"
@@ -534,9 +535,8 @@ END_VAR
         ws.update_file(pou_file)
 
         diags = run_semantic_analysis(ws, pou_file)
-        assert len(diags) == 1
-        assert diags[0].code == "TC-SEM-001"
-        assert "NonExistentCustomType_XYZ" in diags[0].message
+        # TC-SEM-001 is deactivated so external compiled libraries do not trigger false positive errors
+        assert len(diags) == 0
 
     def test_semantic_analysis_catches_duplicate_identifier(self, tmp_path):
         from twincat_core.semantic.diagnostics import run_semantic_analysis
@@ -722,17 +722,21 @@ bFlag := 'hello';
   <POU Name="FB_Narrowing" Id="{66666666-6666-6666-6666-666666666661}">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_Narrowing
 VAR
-    nInt   : INT;
-    nDint  : DINT;
-    fReal  : REAL;
-    fLReal : LREAL;
-    nUint  : UINT;
+    nInt    : INT;
+    nDint   : DINT;
+    fReal   : REAL;
+    fLReal  : LREAL;
+    nUint   : UINT;
+    sStr    : STRING;
+    wsStr   : WSTRING;
 END_VAR
 ]]></Declaration>
     <Implementation><![CDATA[
 nInt := nDint;
 fReal := fLReal;
 nUint := nInt;
+sStr := wsStr;
+nInt := fReal;
 ]]></Implementation>
   </POU>
 </TcPlcObject>""", encoding="utf-8")
@@ -743,9 +747,9 @@ nUint := nInt;
         diags = run_semantic_analysis(ws, pou_file)
         warnings = [d for d in diags if d.code == "TC-SEM-007" and d.severity == DiagnosticSeverity.WARNING]
         assert len(warnings) == 3
-        assert any("possible loss of data" in w.message for w in warnings)
         assert any("possible loss of precision" in w.message for w in warnings)
-        assert any("possible change of sign" in w.message for w in warnings)
+        assert any("possible loss of non-ASCII characters" in w.message for w in warnings)
+        assert any("fractional part will be truncated" in w.message for w in warnings)
 
     def test_semantic_condition_must_be_boolean(self, tmp_path):
         from twincat_core.semantic.diagnostics import run_semantic_analysis
@@ -943,7 +947,7 @@ bQuerySuccess := __QUERYINTERFACE(ipBase, ipExt);
         diags = run_semantic_analysis(ws, fb_test)
         assert len(diags) == 0, f"Expected 0 diagnostics for polymorphic assignments and __QUERYINTERFACE, found: {diags}"
 
-    def test_semantic_analysis_catches_undeclared_identifier(self, tmp_path):
+    def test_semantic_analysis_undeclared_identifier_deactivated(self, tmp_path):
         from twincat_core.semantic.diagnostics import run_semantic_analysis
 
         pou_file = tmp_path / "FB_UndeclaredTest.TcPOU"
@@ -964,7 +968,274 @@ nSum := nUnknownVar + 10;
         ws = WorkspaceIndex()
         ws.update_file(pou_file)
         diags = run_semantic_analysis(ws, pou_file)
-        assert any(d.code == "TC-SEM-008" and "nUnknownVar" in d.message for d in diags)
+        # TC-SEM-008 is deactivated so external library enums/GVLs/symbols do not trigger false positive errors
+        assert len(diags) == 0
+
+    def test_multi_project_and_enum_dut_resolution(self, tmp_path):
+        """Verify indexing multiple plcproj projects and resolving DUT enums and structs across projects."""
+        lib_dir = tmp_path / "lib_project"
+        lib_dir.mkdir()
+        app_dir = tmp_path / "app_project"
+        app_dir.mkdir()
+
+        # 1. Create Enum DUT in lib_project
+        enum_file = lib_dir / "E_EB_BA_BlindType.TcDUT"
+        enum_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="E_EB_BA_BlindType" Id="{11111111-1111-1111-1111-111111111111}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_EB_BA_BlindType :
+(
+    VenetianBlind := 0,
+    RollerShutter := 1,
+    ZipScreen     := 2
+) INT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>""", encoding="utf-8")
+
+        # 2. Create Struct DUT in lib_project
+        struct_file = lib_dir / "ST_EB_BA_DeskCal_BlindTypeTransmission.TcDUT"
+        struct_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="ST_EB_BA_DeskCal_BlindTypeTransmission" Id="{22222222-2222-2222-2222-222222222222}">
+    <Declaration><![CDATA[TYPE ST_EB_BA_DeskCal_BlindTypeTransmission :
+STRUCT
+    fTransmissionFactor : LREAL := 1.0;
+    eType               : E_EB_BA_BlindType := E_EB_BA_BlindType.VenetianBlind;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>""", encoding="utf-8")
+
+        lib_plcproj = lib_dir / "Tc3_EB_BA.plcproj"
+        lib_plcproj.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Name>Tc3_EB_BA</Name>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="E_EB_BA_BlindType.TcDUT" />
+    <Compile Include="ST_EB_BA_DeskCal_BlindTypeTransmission.TcDUT" />
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        # 3. Create Function POU in app_project that references the DUTs
+        pou_file = app_dir / "F_EB_BA_DeskCal_Transmission.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="F_EB_BA_DeskCal_Transmission" Id="{33333333-3333-3333-3333-333333333333}">
+    <Declaration><![CDATA[FUNCTION F_EB_BA_DeskCal_Transmission : LREAL
+VAR_INPUT
+    eBlindType : E_EB_BA_BlindType;
+END_VAR
+VAR
+    stConfig : ST_EB_BA_DeskCal_BlindTypeTransmission;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+CASE eBlindType OF
+    E_EB_BA_BlindType.VenetianBlind:
+        F_EB_BA_DeskCal_Transmission := stConfig.fTransmissionFactor;
+    E_EB_BA_BlindType#RollerShutter:
+        F_EB_BA_DeskCal_Transmission := 0.5;
+    ELSE
+        F_EB_BA_DeskCal_Transmission := 0.0;
+END_CASE;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        app_plcproj = app_dir / "Tc3_EB_BA_Sample.plcproj"
+        app_plcproj.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Name>Tc3_EB_BA_Sample</Name>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="F_EB_BA_DeskCal_Transmission.TcPOU" />
+  </ItemGroup>
+</Project>""", encoding="utf-8")
+
+        # Test index with both projects added
+        ws = WorkspaceIndex()
+        ws.add_plcproj(lib_plcproj)
+        ws.add_plcproj(app_plcproj)
+
+        # Verify TypeIndex registered the DUTs from lib_plcproj
+        e_desc = ws.type_index.get_type("E_EB_BA_BlindType")
+        assert e_desc is not None
+        assert e_desc.kind == SymbolKind.ENUM
+        assert "venetianblind" in e_desc.enum_members
+
+        s_desc = ws.type_index.get_type("ST_EB_BA_DeskCal_BlindTypeTransmission")
+        assert s_desc is not None
+        assert s_desc.kind == SymbolKind.STRUCT
+        assert "ftransmissionfactor" in s_desc.fields
+
+        # Verify semantic resolution of the POU that references both DUTs
+        scope = ws.symbol_table.find_pou_scope("F_EB_BA_DeskCal_Transmission")
+        assert scope is not None
+
+        # Resolve enum member access on type
+        enum_member_sym = ws.resolver.resolve_member_access("E_EB_BA_BlindType", "VenetianBlind", scope)
+        assert enum_member_sym is not None
+        assert enum_member_sym.name == "VenetianBlind"
+
+        # Resolve struct field access
+        field_sym = ws.resolver.resolve_chain("stConfig.fTransmissionFactor", scope)
+        assert field_sym is not None
+        assert field_sym.name == "fTransmissionFactor"
+
+    def test_interface_and_this_assignment_compatibility(self, tmp_path: Path) -> None:
+        """Verify polymorphic assignment of FB instances, THIS^ references, and 0/NULL to INTERFACE variables."""
+        itf_file = tmp_path / "I_Widget.TcIO"
+        itf_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Widget" Id="{11111111-1111-1111-1111-111111111111}">
+    <Declaration><![CDATA[INTERFACE I_Widget
+]]></Declaration>
+  </Itf>
+</TcPlcObject>""", encoding="utf-8")
+
+        pou_file = tmp_path / "FB_Main.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Main" Id="{22222222-2222-2222-2222-222222222222}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Main
+VAR
+    _ipWidget : I_Widget;
+    _fbLight  : FB_Light;
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[
+THIS^._ipWidget := THIS^._fbLight;
+_ipWidget := 0;
+_ipWidget := NULL;
+]]></ST></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(itf_file)
+        ws.update_file(pou_file, declaration_only=False)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        # Should not report any TC-SEM-006 type mismatch errors for interface assignments
+        type_mismatch_diags = [d for d in diags if d.code == "TC-SEM-006"]
+        assert len(type_mismatch_diags) == 0
+
+    def test_abstract_fb_and_inherited_interface_methods(self, tmp_path: Path) -> None:
+        """Verify ABSTRACT FBs and FBs inheriting interface methods from base classes do not trigger TC-SEM-003."""
+        parent_file = tmp_path / "FB_Parent.TcPOU"
+        parent_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Parent" Id="{11111111-1111-1111-1111-111111111111}">
+    <Declaration><![CDATA[FUNCTION_BLOCK ABSTRACT FB_Parent
+VAR_INPUT
+    bParentInput : BOOL;
+END_VAR
+VAR
+    _nParentCounter : INT;
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[]]></ST></Implementation>
+    <Method Name="InitParentNode" Id="{11111111-1111-1111-1111-111111111112}">
+      <Declaration><![CDATA[METHOD PUBLIC InitParentNode : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR]]></Declaration>
+      <Implementation><ST><![CDATA[]]></ST></Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        itf_file = tmp_path / "I_Widget.TcIO"
+        itf_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <Itf Name="I_Widget" Id="{22222222-2222-2222-2222-222222222222}">
+    <Declaration><![CDATA[INTERFACE I_Widget
+]]></Declaration>
+    <Method Name="InitParentNode" Id="{22222222-2222-2222-2222-222222222223}">
+      <Declaration><![CDATA[METHOD InitParentNode : BOOL
+VAR_INPUT
+    bForce : BOOL;
+END_VAR]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>""", encoding="utf-8")
+
+        abstract_child_file = tmp_path / "FB_AbstractChild.TcPOU"
+        abstract_child_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_AbstractChild" Id="{33333333-3333-3333-3333-333333333333}">
+    <Declaration><![CDATA[FUNCTION_BLOCK ABSTRACT FB_AbstractChild EXTENDS FB_Parent IMPLEMENTS I_Widget
+VAR_INPUT
+    bEnable : BOOL := TRUE;
+END_VAR
+VAR
+    _ipWidget : I_Widget;
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[
+_nParentCounter := _nParentCounter + 1;
+THIS^._nParentCounter := 10;
+SUPER^.InitParentNode(bForce := TRUE);
+InitParentNode(bForce := FALSE);
+_ipWidget := THIS^;
+]]></ST></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        concrete_child_file = tmp_path / "FB_ConcreteChild.TcPOU"
+        concrete_child_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_ConcreteChild" Id="{44444444-4444-4444-4444-444444444444}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ConcreteChild EXTENDS FB_Parent IMPLEMENTS I_Widget
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[]]></ST></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        unimplemented_file = tmp_path / "FB_Unimplemented.TcPOU"
+        unimplemented_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Unimplemented" Id="{55555555-5555-5555-5555-555555555555}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Unimplemented IMPLEMENTS I_Widget
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    <Implementation><ST><![CDATA[]]></ST></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(parent_file)
+        ws.update_file(itf_file)
+        ws.update_file(abstract_child_file, declaration_only=False)
+        ws.update_file(concrete_child_file, declaration_only=False)
+        ws.update_file(unimplemented_file, declaration_only=False)
+
+        # 1. Abstract child FB should have 0 TC-SEM-003 errors
+        diags_abstract = run_semantic_analysis(ws, abstract_child_file)
+        sem_003_abstract = [d for d in diags_abstract if d.code == "TC-SEM-003"]
+        assert len(sem_003_abstract) == 0
+
+        # 2. Concrete child inheriting InitParentNode from FB_Parent should have 0 TC-SEM-003 errors
+        diags_concrete = run_semantic_analysis(ws, concrete_child_file)
+        sem_003_concrete = [d for d in diags_concrete if d.code == "TC-SEM-003"]
+        assert len(sem_003_concrete) == 0
+
+        # 3. Unimplemented concrete FB should report TC-SEM-003
+        diags_unimpl = run_semantic_analysis(ws, unimplemented_file)
+        sem_003_unimpl = [d for d in diags_unimpl if d.code == "TC-SEM-003"]
+        assert len(sem_003_unimpl) == 1
+        assert "InitParentNode" in sem_003_unimpl[0].message
 
 
 

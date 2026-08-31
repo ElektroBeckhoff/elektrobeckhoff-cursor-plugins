@@ -57,11 +57,12 @@ class SymbolTable:
 
         if symbol.file_path:
             res_path = symbol.file_path.resolve()
+            symbol.file_path = res_path
             self.global_symbols[key] = [
                 s for s in self.global_symbols[key]
-                if not (s.file_path and s.file_path.resolve() == res_path)
+                if not (s.file_path and s.file_path == res_path)
             ]
-            self._track_file_scope(symbol.file_path, self.global_scope)
+            self._track_file_scope(res_path, self.global_scope)
 
         self.global_symbols[key].append(symbol)
 
@@ -77,15 +78,15 @@ class SymbolTable:
         if key not in self.pou_scopes:
             self.pou_scopes[key] = []
 
-        if file_path:
-            res_path = file_path.resolve()
+        res_path = file_path.resolve() if file_path else None
+        if res_path:
             self.pou_scopes[key] = [
                 item for item in self.pou_scopes[key]
-                if not (item[0] and item[0].resolve() == res_path)
+                if not (item[0] and item[0] == res_path)
             ]
-            self._track_file_scope(file_path, scope)
+            self._track_file_scope(res_path, scope)
 
-        self.pou_scopes[key].append((file_path, scope))
+        self.pou_scopes[key].append((res_path, scope))
         return scope
 
     def create_gvl_scope(self, gvl_symbol: Symbol, file_path: Optional[Path] = None) -> Scope:
@@ -100,15 +101,15 @@ class SymbolTable:
         if key not in self.gvl_scopes:
             self.gvl_scopes[key] = []
 
-        if file_path:
-            res_path = file_path.resolve()
+        res_path = file_path.resolve() if file_path else None
+        if res_path:
             self.gvl_scopes[key] = [
                 item for item in self.gvl_scopes[key]
-                if not (item[0] and item[0].resolve() == res_path)
+                if not (item[0] and item[0] == res_path)
             ]
-            self._track_file_scope(file_path, scope)
+            self._track_file_scope(res_path, scope)
 
-        self.gvl_scopes[key].append((file_path, scope))
+        self.gvl_scopes[key].append((res_path, scope))
         return scope
 
     def create_method_scope(self, method_symbol: Symbol, parent_scope: Scope, file_path: Optional[Path] = None) -> Scope:
@@ -120,31 +121,27 @@ class SymbolTable:
             owner_symbol=method_symbol,
         )
         if file_path:
-            self._track_file_scope(file_path, scope)
+            self._track_file_scope(file_path.resolve(), scope)
         return scope
 
     def remove_file(self, file_path: Path) -> None:
         """Remove all symbols, POU scopes, and GVL scopes originating from the specified file."""
         res_path = file_path.resolve()
 
-        # Remove from file_scopes
-        matched_paths = [p for p in self.file_scopes if p.resolve() == res_path]
-        for p in matched_paths:
-            scopes = self.file_scopes.pop(p, [])
-            for sc in scopes:
-                if sc.owner_symbol:
-                    name_key = sc.owner_symbol.name.lower()
-                    self.global_scope.remove(sc.owner_symbol.name)
-                for sym in sc.get_all_symbols():
-                    if sym.file_path and sym.file_path.resolve() == res_path:
-                        sc.remove(sym.name)
-                        self.global_scope.remove(sym.name)
+        scopes = self.file_scopes.pop(res_path, [])
+        for sc in scopes:
+            if sc.owner_symbol:
+                self.global_scope.remove(sc.owner_symbol.name)
+            for sym in list(sc.symbols.values()):
+                if sym.file_path and sym.file_path == res_path:
+                    sc.remove(sym.name)
+                    self.global_scope.remove(sym.name)
 
         # Remove from pou_scopes
         for k in list(self.pou_scopes.keys()):
             self.pou_scopes[k] = [
                 item for item in self.pou_scopes[k]
-                if not (item[0] and item[0].resolve() == res_path)
+                if not (item[0] and item[0] == res_path)
             ]
             if not self.pou_scopes[k]:
                 del self.pou_scopes[k]
@@ -153,7 +150,7 @@ class SymbolTable:
         for k in list(self.gvl_scopes.keys()):
             self.gvl_scopes[k] = [
                 item for item in self.gvl_scopes[k]
-                if not (item[0] and item[0].resolve() == res_path)
+                if not (item[0] and item[0] == res_path)
             ]
             if not self.gvl_scopes[k]:
                 del self.gvl_scopes[k]
@@ -162,27 +159,22 @@ class SymbolTable:
         for k in list(self.global_symbols.keys()):
             self.global_symbols[k] = [
                 s for s in self.global_symbols[k]
-                if not (s.file_path and s.file_path.resolve() == res_path)
+                if not (s.file_path and s.file_path == res_path)
             ]
             if not self.global_symbols[k]:
                 del self.global_symbols[k]
 
     def _track_file_scope(self, file_path: Path, scope: Scope) -> None:
         res = file_path.resolve()
-        for p, scopes in self.file_scopes.items():
-            if p.resolve() == res:
-                if scope not in scopes:
-                    scopes.append(scope)
-                return
-        self.file_scopes[file_path] = [scope]
+        if res not in self.file_scopes:
+            self.file_scopes[res] = []
+        if scope not in self.file_scopes[res]:
+            self.file_scopes[res].append(scope)
 
     def get_file_scopes(self, file_path: Path) -> list[Scope]:
         """Retrieve all scopes registered specifically for a given file."""
         res = file_path.resolve()
-        for p, scopes in self.file_scopes.items():
-            if p.resolve() == res:
-                return scopes
-        return []
+        return self.file_scopes.get(res, [])
 
     def get_file_pou_scope(self, file_path: Path) -> Optional[Scope]:
         """Retrieve top-level POU or GVL scope declared in the given file."""
