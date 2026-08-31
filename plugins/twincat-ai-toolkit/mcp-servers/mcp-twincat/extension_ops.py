@@ -155,18 +155,19 @@ def build_vsix(force_rebuild_js: bool = True) -> Dict[str, Any]:
             if theme_file.is_file():
                 files_to_pack.append((f"themes/{theme_file.name}", theme_file))
 
-    # Bundle twincat_core Python package directly into extension/server/
+    # Bundle server Python packages (twincat_core, formatter, infosys_mshc) directly into extension/server/
     mcp_dir = Path(__file__).resolve().parent
-    core_dir = mcp_dir / "twincat_core"
-    if core_dir.is_dir():
-        for py_file in core_dir.rglob("*"):
-            if (
-                py_file.is_file()
-                and not py_file.name.endswith((".pyc", ".pyo"))
-                and "__pycache__" not in py_file.parts
-            ):
-                rel = py_file.relative_to(mcp_dir)
-                files_to_pack.append((f"server/{rel.as_posix()}", py_file))
+    for pkg_name in ["twincat_core", "formatter", "infosys_mshc"]:
+        pkg_dir = mcp_dir / pkg_name
+        if pkg_dir.is_dir():
+            for py_file in pkg_dir.rglob("*"):
+                if (
+                    py_file.is_file()
+                    and not py_file.name.endswith((".pyc", ".pyo"))
+                    and "__pycache__" not in py_file.parts
+                ):
+                    rel = py_file.relative_to(mcp_dir)
+                    files_to_pack.append((f"server/{rel.as_posix()}", py_file))
 
     try:
         with zipfile.ZipFile(vsix_path, "w", zipfile.ZIP_DEFLATED) as zf:

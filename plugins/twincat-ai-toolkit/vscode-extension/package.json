@@ -86,6 +86,11 @@
     ],
     "commands": [
       {
+        "command": "twincat.formatSection",
+        "title": "TwinCAT: Format Current Section / Member",
+        "category": "TwinCAT"
+      },
+      {
         "command": "twincat.restartServer",
         "title": "TwinCAT: Restart Language Server",
         "category": "TwinCAT"
@@ -108,6 +113,10 @@
     ],
     "submenus": [
       {
+        "id": "twincat.submenu",
+        "label": "TwinCAT"
+      },
+      {
         "id": "twincat.ai.submenu",
         "label": "TwinCAT AI"
       }
@@ -115,16 +124,37 @@
     "menus": {
       "editor/context": [
         {
+          "submenu": "twincat.submenu",
+          "when": "resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || editorLangId == iecst",
+          "group": "1_twincat@1"
+        },
+        {
           "submenu": "twincat.ai.submenu",
           "when": "resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || editorLangId == iecst",
-          "group": "1_modification@2"
+          "group": "1_twincat@2"
         }
       ],
       "explorer/context": [
         {
+          "submenu": "twincat.submenu",
+          "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i",
+          "group": "7_twincat@1"
+        },
+        {
           "submenu": "twincat.ai.submenu",
           "when": "explorerResourceIsFolder || resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst|plcproj)$/i",
-          "group": "7_modification"
+          "group": "7_twincat@2"
+        }
+      ],
+      "twincat.submenu": [
+        {
+          "command": "twincat.formatSection",
+          "when": "editorTextFocus",
+          "group": "1_format@1"
+        },
+        {
+          "command": "twincat.restartServer",
+          "group": "2_server@1"
         }
       ],
       "twincat.ai.submenu": [
@@ -146,6 +176,10 @@
           "command": "twincat.restartServer"
         },
         {
+          "command": "twincat.formatSection",
+          "when": "editorIsOpen"
+        },
+        {
           "command": "twincat.ai.checkSyntax",
           "when": "editorIsOpen"
         },
@@ -159,9 +193,17 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "twincat.formatSection",
+        "key": "ctrl+k ctrl+s",
+        "mac": "cmd+k cmd+s",
+        "when": "editorTextFocus && (resourceExtname =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceFilename =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || resourceExt =~ /\\.(TcPOU|TcDUT|TcGVL|TcIO|TcTTO|st|iecst)$/i || editorLangId == iecst)"
+      }
+    ],
     "configuration": {
       "type": "object",
-      "title": "TwinCAT 3 Language Server",
+      "title": "TwinCAT Language Server",
       "properties": {
         "twincat.server.pythonPath": {
           "type": "string",

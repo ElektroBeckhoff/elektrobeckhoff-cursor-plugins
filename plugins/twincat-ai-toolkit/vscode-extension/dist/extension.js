@@ -3105,7 +3105,7 @@ var require_main = __commonJS({
     var ril_1 = require_ril();
     ril_1.default.install();
     var path3 = require("path");
-    var os2 = require("os");
+    var os = require("os");
     var crypto_1 = require("crypto");
     var net_1 = require("net");
     var api_1 = require_api();
@@ -3242,7 +3242,7 @@ var require_main = __commonJS({
       if (XDG_RUNTIME_DIR) {
         result = path3.join(XDG_RUNTIME_DIR, `vscode-ipc-${randomSuffix}.sock`);
       } else {
-        result = path3.join(os2.tmpdir(), `vscode-${randomSuffix}.sock`);
+        result = path3.join(os.tmpdir(), `vscode-${randomSuffix}.sock`);
       }
       const limit = safeIpcPathLengths.get(process.platform);
       if (limit !== void 0 && result.length > limit) {
@@ -3395,8 +3395,8 @@ var require_main2 = __commonJS({
         }
         uinteger2.is = is;
       })(uinteger || (exports3.uinteger = uinteger = {}));
-      var Position;
-      (function(Position2) {
+      var Position2;
+      (function(Position3) {
         function create(line, character) {
           if (line === Number.MAX_VALUE) {
             line = uinteger.MAX_VALUE;
@@ -3406,31 +3406,31 @@ var require_main2 = __commonJS({
           }
           return { line, character };
         }
-        Position2.create = create;
+        Position3.create = create;
         function is(value) {
           var candidate = value;
           return Is.objectLiteral(candidate) && Is.uinteger(candidate.line) && Is.uinteger(candidate.character);
         }
-        Position2.is = is;
-      })(Position || (exports3.Position = Position = {}));
-      var Range;
-      (function(Range2) {
+        Position3.is = is;
+      })(Position2 || (exports3.Position = Position2 = {}));
+      var Range2;
+      (function(Range3) {
         function create(one, two, three, four) {
           if (Is.uinteger(one) && Is.uinteger(two) && Is.uinteger(three) && Is.uinteger(four)) {
-            return { start: Position.create(one, two), end: Position.create(three, four) };
-          } else if (Position.is(one) && Position.is(two)) {
+            return { start: Position2.create(one, two), end: Position2.create(three, four) };
+          } else if (Position2.is(one) && Position2.is(two)) {
             return { start: one, end: two };
           } else {
             throw new Error("Range#create called with invalid arguments[".concat(one, ", ").concat(two, ", ").concat(three, ", ").concat(four, "]"));
           }
         }
-        Range2.create = create;
+        Range3.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Position.is(candidate.start) && Position.is(candidate.end);
+          return Is.objectLiteral(candidate) && Position2.is(candidate.start) && Position2.is(candidate.end);
         }
-        Range2.is = is;
-      })(Range || (exports3.Range = Range = {}));
+        Range3.is = is;
+      })(Range2 || (exports3.Range = Range2 = {}));
       var Location;
       (function(Location2) {
         function create(uri, range) {
@@ -3439,7 +3439,7 @@ var require_main2 = __commonJS({
         Location2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Range.is(candidate.range) && (Is.string(candidate.uri) || Is.undefined(candidate.uri));
+          return Is.objectLiteral(candidate) && Range2.is(candidate.range) && (Is.string(candidate.uri) || Is.undefined(candidate.uri));
         }
         Location2.is = is;
       })(Location || (exports3.Location = Location = {}));
@@ -3451,7 +3451,7 @@ var require_main2 = __commonJS({
         LocationLink2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Range.is(candidate.targetRange) && Is.string(candidate.targetUri) && Range.is(candidate.targetSelectionRange) && (Range.is(candidate.originSelectionRange) || Is.undefined(candidate.originSelectionRange));
+          return Is.objectLiteral(candidate) && Range2.is(candidate.targetRange) && Is.string(candidate.targetUri) && Range2.is(candidate.targetSelectionRange) && (Range2.is(candidate.originSelectionRange) || Is.undefined(candidate.originSelectionRange));
         }
         LocationLink2.is = is;
       })(LocationLink || (exports3.LocationLink = LocationLink = {}));
@@ -3483,7 +3483,7 @@ var require_main2 = __commonJS({
         ColorInformation2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Range.is(candidate.range) && Color.is(candidate.color);
+          return Is.objectLiteral(candidate) && Range2.is(candidate.range) && Color.is(candidate.color);
         }
         ColorInformation2.is = is;
       })(ColorInformation || (exports3.ColorInformation = ColorInformation = {}));
@@ -3594,7 +3594,7 @@ var require_main2 = __commonJS({
         function is(value) {
           var _a;
           var candidate = value;
-          return Is.defined(candidate) && Range.is(candidate.range) && Is.string(candidate.message) && (Is.number(candidate.severity) || Is.undefined(candidate.severity)) && (Is.integer(candidate.code) || Is.string(candidate.code) || Is.undefined(candidate.code)) && (Is.undefined(candidate.codeDescription) || Is.string((_a = candidate.codeDescription) === null || _a === void 0 ? void 0 : _a.href)) && (Is.string(candidate.source) || Is.undefined(candidate.source)) && (Is.undefined(candidate.relatedInformation) || Is.typedArray(candidate.relatedInformation, DiagnosticRelatedInformation.is));
+          return Is.defined(candidate) && Range2.is(candidate.range) && Is.string(candidate.message) && (Is.number(candidate.severity) || Is.undefined(candidate.severity)) && (Is.integer(candidate.code) || Is.string(candidate.code) || Is.undefined(candidate.code)) && (Is.undefined(candidate.codeDescription) || Is.string((_a = candidate.codeDescription) === null || _a === void 0 ? void 0 : _a.href)) && (Is.string(candidate.source) || Is.undefined(candidate.source)) && (Is.undefined(candidate.relatedInformation) || Is.typedArray(candidate.relatedInformation, DiagnosticRelatedInformation.is));
         }
         Diagnostic2.is = is;
       })(Diagnostic || (exports3.Diagnostic = Diagnostic = {}));
@@ -3634,7 +3634,7 @@ var require_main2 = __commonJS({
         TextEdit2.del = del;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Is.string(candidate.newText) && Range.is(candidate.range);
+          return Is.objectLiteral(candidate) && Is.string(candidate.newText) && Range2.is(candidate.range);
         }
         TextEdit2.is = is;
       })(TextEdit || (exports3.TextEdit = TextEdit = {}));
@@ -3764,8 +3764,8 @@ var require_main2 = __commonJS({
         }
         DeleteFile2.is = is;
       })(DeleteFile || (exports3.DeleteFile = DeleteFile = {}));
-      var WorkspaceEdit;
-      (function(WorkspaceEdit2) {
+      var WorkspaceEdit2;
+      (function(WorkspaceEdit3) {
         function is(value) {
           var candidate = value;
           return candidate && (candidate.changes !== void 0 || candidate.documentChanges !== void 0) && (candidate.documentChanges === void 0 || candidate.documentChanges.every(function(change) {
@@ -3776,8 +3776,8 @@ var require_main2 = __commonJS({
             }
           }));
         }
-        WorkspaceEdit2.is = is;
-      })(WorkspaceEdit || (exports3.WorkspaceEdit = WorkspaceEdit = {}));
+        WorkspaceEdit3.is = is;
+      })(WorkspaceEdit2 || (exports3.WorkspaceEdit = WorkspaceEdit2 = {}));
       var TextEditChangeImpl = (
         /** @class */
         function() {
@@ -4178,7 +4178,7 @@ var require_main2 = __commonJS({
         InsertReplaceEdit2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate && Is.string(candidate.newText) && Range.is(candidate.insert) && Range.is(candidate.replace);
+          return candidate && Is.string(candidate.newText) && Range2.is(candidate.insert) && Range2.is(candidate.replace);
         }
         InsertReplaceEdit2.is = is;
       })(InsertReplaceEdit || (exports3.InsertReplaceEdit = InsertReplaceEdit = {}));
@@ -4225,7 +4225,7 @@ var require_main2 = __commonJS({
       (function(Hover2) {
         function is(value) {
           var candidate = value;
-          return !!candidate && Is.objectLiteral(candidate) && (MarkupContent.is(candidate.contents) || MarkedString.is(candidate.contents) || Is.typedArray(candidate.contents, MarkedString.is)) && (value.range === void 0 || Range.is(value.range));
+          return !!candidate && Is.objectLiteral(candidate) && (MarkupContent.is(candidate.contents) || MarkedString.is(candidate.contents) || Is.typedArray(candidate.contents, MarkedString.is)) && (value.range === void 0 || Range2.is(value.range));
         }
         Hover2.is = is;
       })(Hover || (exports3.Hover = Hover = {}));
@@ -4346,7 +4346,7 @@ var require_main2 = __commonJS({
         DocumentSymbol2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate && Is.string(candidate.name) && Is.number(candidate.kind) && Range.is(candidate.range) && Range.is(candidate.selectionRange) && (candidate.detail === void 0 || Is.string(candidate.detail)) && (candidate.deprecated === void 0 || Is.boolean(candidate.deprecated)) && (candidate.children === void 0 || Array.isArray(candidate.children)) && (candidate.tags === void 0 || Array.isArray(candidate.tags));
+          return candidate && Is.string(candidate.name) && Is.number(candidate.kind) && Range2.is(candidate.range) && Range2.is(candidate.selectionRange) && (candidate.detail === void 0 || Is.string(candidate.detail)) && (candidate.deprecated === void 0 || Is.boolean(candidate.deprecated)) && (candidate.children === void 0 || Array.isArray(candidate.children)) && (candidate.tags === void 0 || Array.isArray(candidate.tags));
         }
         DocumentSymbol2.is = is;
       })(DocumentSymbol || (exports3.DocumentSymbol = DocumentSymbol = {}));
@@ -4407,7 +4407,7 @@ var require_main2 = __commonJS({
         CodeAction2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate && Is.string(candidate.title) && (candidate.diagnostics === void 0 || Is.typedArray(candidate.diagnostics, Diagnostic.is)) && (candidate.kind === void 0 || Is.string(candidate.kind)) && (candidate.edit !== void 0 || candidate.command !== void 0) && (candidate.command === void 0 || Command.is(candidate.command)) && (candidate.isPreferred === void 0 || Is.boolean(candidate.isPreferred)) && (candidate.edit === void 0 || WorkspaceEdit.is(candidate.edit));
+          return candidate && Is.string(candidate.title) && (candidate.diagnostics === void 0 || Is.typedArray(candidate.diagnostics, Diagnostic.is)) && (candidate.kind === void 0 || Is.string(candidate.kind)) && (candidate.edit !== void 0 || candidate.command !== void 0) && (candidate.command === void 0 || Command.is(candidate.command)) && (candidate.isPreferred === void 0 || Is.boolean(candidate.isPreferred)) && (candidate.edit === void 0 || WorkspaceEdit2.is(candidate.edit));
         }
         CodeAction2.is = is;
       })(CodeAction || (exports3.CodeAction = CodeAction = {}));
@@ -4423,7 +4423,7 @@ var require_main2 = __commonJS({
         CodeLens2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.defined(candidate) && Range.is(candidate.range) && (Is.undefined(candidate.command) || Command.is(candidate.command));
+          return Is.defined(candidate) && Range2.is(candidate.range) && (Is.undefined(candidate.command) || Command.is(candidate.command));
         }
         CodeLens2.is = is;
       })(CodeLens || (exports3.CodeLens = CodeLens = {}));
@@ -4447,7 +4447,7 @@ var require_main2 = __commonJS({
         DocumentLink2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.defined(candidate) && Range.is(candidate.range) && (Is.undefined(candidate.target) || Is.string(candidate.target));
+          return Is.defined(candidate) && Range2.is(candidate.range) && (Is.undefined(candidate.target) || Is.string(candidate.target));
         }
         DocumentLink2.is = is;
       })(DocumentLink || (exports3.DocumentLink = DocumentLink = {}));
@@ -4459,7 +4459,7 @@ var require_main2 = __commonJS({
         SelectionRange2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Range.is(candidate.range) && (candidate.parent === void 0 || SelectionRange2.is(candidate.parent));
+          return Is.objectLiteral(candidate) && Range2.is(candidate.range) && (candidate.parent === void 0 || SelectionRange2.is(candidate.parent));
         }
         SelectionRange2.is = is;
       })(SelectionRange || (exports3.SelectionRange = SelectionRange = {}));
@@ -4518,7 +4518,7 @@ var require_main2 = __commonJS({
         InlineValueText2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate !== void 0 && candidate !== null && Range.is(candidate.range) && Is.string(candidate.text);
+          return candidate !== void 0 && candidate !== null && Range2.is(candidate.range) && Is.string(candidate.text);
         }
         InlineValueText2.is = is;
       })(InlineValueText || (exports3.InlineValueText = InlineValueText = {}));
@@ -4530,7 +4530,7 @@ var require_main2 = __commonJS({
         InlineValueVariableLookup2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate !== void 0 && candidate !== null && Range.is(candidate.range) && Is.boolean(candidate.caseSensitiveLookup) && (Is.string(candidate.variableName) || candidate.variableName === void 0);
+          return candidate !== void 0 && candidate !== null && Range2.is(candidate.range) && Is.boolean(candidate.caseSensitiveLookup) && (Is.string(candidate.variableName) || candidate.variableName === void 0);
         }
         InlineValueVariableLookup2.is = is;
       })(InlineValueVariableLookup || (exports3.InlineValueVariableLookup = InlineValueVariableLookup = {}));
@@ -4542,7 +4542,7 @@ var require_main2 = __commonJS({
         InlineValueEvaluatableExpression2.create = create;
         function is(value) {
           var candidate = value;
-          return candidate !== void 0 && candidate !== null && Range.is(candidate.range) && (Is.string(candidate.expression) || candidate.expression === void 0);
+          return candidate !== void 0 && candidate !== null && Range2.is(candidate.range) && (Is.string(candidate.expression) || candidate.expression === void 0);
         }
         InlineValueEvaluatableExpression2.is = is;
       })(InlineValueEvaluatableExpression || (exports3.InlineValueEvaluatableExpression = InlineValueEvaluatableExpression = {}));
@@ -4554,7 +4554,7 @@ var require_main2 = __commonJS({
         InlineValueContext2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.defined(candidate) && Range.is(value.stoppedLocation);
+          return Is.defined(candidate) && Range2.is(value.stoppedLocation);
         }
         InlineValueContext2.is = is;
       })(InlineValueContext || (exports3.InlineValueContext = InlineValueContext = {}));
@@ -4591,7 +4591,7 @@ var require_main2 = __commonJS({
         InlayHint2.create = create;
         function is(value) {
           var candidate = value;
-          return Is.objectLiteral(candidate) && Position.is(candidate.position) && (Is.string(candidate.label) || Is.typedArray(candidate.label, InlayHintLabelPart.is)) && (candidate.kind === void 0 || InlayHintKind.is(candidate.kind)) && candidate.textEdits === void 0 || Is.typedArray(candidate.textEdits, TextEdit.is) && (candidate.tooltip === void 0 || Is.string(candidate.tooltip) || MarkupContent.is(candidate.tooltip)) && (candidate.paddingLeft === void 0 || Is.boolean(candidate.paddingLeft)) && (candidate.paddingRight === void 0 || Is.boolean(candidate.paddingRight));
+          return Is.objectLiteral(candidate) && Position2.is(candidate.position) && (Is.string(candidate.label) || Is.typedArray(candidate.label, InlayHintLabelPart.is)) && (candidate.kind === void 0 || InlayHintKind.is(candidate.kind)) && candidate.textEdits === void 0 || Is.typedArray(candidate.textEdits, TextEdit.is) && (candidate.tooltip === void 0 || Is.string(candidate.tooltip) || MarkupContent.is(candidate.tooltip)) && (candidate.paddingLeft === void 0 || Is.boolean(candidate.paddingLeft)) && (candidate.paddingRight === void 0 || Is.boolean(candidate.paddingRight));
         }
         InlayHint2.is = is;
       })(InlayHint || (exports3.InlayHint = InlayHint = {}));
@@ -4780,7 +4780,7 @@ var require_main2 = __commonJS({
             var lineOffsets = this.getLineOffsets();
             var low = 0, high = lineOffsets.length;
             if (high === 0) {
-              return Position.create(0, offset);
+              return Position2.create(0, offset);
             }
             while (low < high) {
               var mid = Math.floor((low + high) / 2);
@@ -4791,7 +4791,7 @@ var require_main2 = __commonJS({
               }
             }
             var line = low - 1;
-            return Position.create(line, offset - lineOffsets[line]);
+            return Position2.create(line, offset - lineOffsets[line]);
           };
           FullTextDocument2.prototype.offsetAt = function(position) {
             var lineOffsets = this.getLineOffsets();
@@ -17216,12 +17216,12 @@ var require_comparator = __commonJS({
           if (this.value === "") {
             return true;
           }
-          return new Range(comp.value, options).test(this.value);
+          return new Range2(comp.value, options).test(this.value);
         } else if (comp.operator === "") {
           if (comp.value === "") {
             return true;
           }
-          return new Range(this.value, options).test(comp.semver);
+          return new Range2(this.value, options).test(comp.semver);
         }
         options = parseOptions(options);
         if (options.includePrerelease && (this.value === "<0.0.0-0" || comp.value === "<0.0.0-0")) {
@@ -17254,7 +17254,7 @@ var require_comparator = __commonJS({
     var cmp = require_cmp();
     var debug = require_debug();
     var SemVer = require_semver();
-    var Range = require_range();
+    var Range2 = require_range();
   }
 });
 
@@ -17263,7 +17263,7 @@ var require_range = __commonJS({
   "node_modules/semver/classes/range.js"(exports2, module2) {
     "use strict";
     var SPACE_CHARACTERS = /\s+/g;
-    var Range = class _Range {
+    var Range2 = class _Range {
       constructor(range, options) {
         options = parseOptions(options);
         if (range instanceof _Range) {
@@ -17402,7 +17402,7 @@ var require_range = __commonJS({
         return false;
       }
     };
-    module2.exports = Range;
+    module2.exports = Range2;
     var LRU = require_lrucache();
     var cache = new LRU();
     var parseOptions = require_parse_options();
@@ -17647,10 +17647,10 @@ var require_range = __commonJS({
 var require_satisfies = __commonJS({
   "node_modules/semver/functions/satisfies.js"(exports2, module2) {
     "use strict";
-    var Range = require_range();
+    var Range2 = require_range();
     var satisfies = (version, range, options) => {
       try {
-        range = new Range(range, options);
+        range = new Range2(range, options);
       } catch (er) {
         return false;
       }
@@ -18248,7 +18248,6 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var fs2 = __toESM(require("fs"));
-var os = __toESM(require("os"));
 var path2 = __toESM(require("path"));
 var vscode2 = __toESM(require("vscode"));
 var import_node = __toESM(require_node3());
@@ -18518,81 +18517,38 @@ function registerAiCommands(context) {
 // src/extension.ts
 var client;
 function resolvePythonPathEnv(context, userExtraPaths) {
-  const candidateDirs = [];
-  candidateDirs.push(path2.join(context.extensionPath, "server"));
-  candidateDirs.push(context.extensionPath);
-  candidateDirs.push(path2.resolve(context.extensionPath, "..", "mcp-servers", "mcp-twincat"));
-  candidateDirs.push(
-    path2.resolve(context.extensionPath, "..", "..", "plugins", "twincat-ai-toolkit", "mcp-servers", "mcp-twincat")
+  const validPaths = [];
+  const bundledServerDir = path2.join(context.extensionPath, "server");
+  if (fs2.existsSync(path2.join(bundledServerDir, "twincat_core"))) {
+    validPaths.push(bundledServerDir);
+  }
+  const devServerDir = path2.resolve(context.extensionPath, "..", "mcp-servers", "mcp-twincat");
+  if (fs2.existsSync(path2.join(devServerDir, "twincat_core")) && !validPaths.includes(devServerDir)) {
+    validPaths.push(devServerDir);
+  }
+  const monorepoServerDir = path2.resolve(
+    context.extensionPath,
+    "..",
+    "..",
+    "plugins",
+    "twincat-ai-toolkit",
+    "mcp-servers",
+    "mcp-twincat"
   );
+  if (fs2.existsSync(path2.join(monorepoServerDir, "twincat_core")) && !validPaths.includes(monorepoServerDir)) {
+    validPaths.push(monorepoServerDir);
+  }
   if (vscode2.workspace.workspaceFolders) {
     for (const wf of vscode2.workspace.workspaceFolders) {
-      candidateDirs.push(path2.join(wf.uri.fsPath, "plugins", "twincat-ai-toolkit", "mcp-servers", "mcp-twincat"));
-      candidateDirs.push(path2.join(wf.uri.fsPath, "mcp-servers", "mcp-twincat"));
-      candidateDirs.push(wf.uri.fsPath);
-    }
-  }
-  const homeDir = os.homedir();
-  const cursorPluginCacheBase = path2.join(
-    homeDir,
-    ".cursor",
-    "plugins",
-    "cache",
-    "elektrobeckhoff-cursor-plugins",
-    "twincat-ai-toolkit"
-  );
-  if (fs2.existsSync(cursorPluginCacheBase)) {
-    try {
-      const entries = fs2.readdirSync(cursorPluginCacheBase, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          candidateDirs.push(path2.join(cursorPluginCacheBase, entry.name, "mcp-servers", "mcp-twincat"));
-        }
+      const wsCoreDir = path2.join(wf.uri.fsPath, "plugins", "twincat-ai-toolkit", "mcp-servers", "mcp-twincat");
+      if (fs2.existsSync(path2.join(wsCoreDir, "twincat_core")) && !validPaths.includes(wsCoreDir)) {
+        validPaths.push(wsCoreDir);
       }
-    } catch {
-    }
-  }
-  const cursorMarketplacesBase = path2.join(homeDir, ".cursor", "plugins", "marketplaces");
-  if (fs2.existsSync(cursorMarketplacesBase)) {
-    try {
-      const findMcpDirs = (dir, depth = 0) => {
-        if (depth > 5)
-          return;
-        const entries = fs2.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            const sub = path2.join(dir, entry.name);
-            if (entry.name === "twincat-ai-toolkit") {
-              candidateDirs.push(path2.join(sub, "mcp-servers", "mcp-twincat"));
-            } else if (!entry.name.startsWith(".") && entry.name !== "node_modules") {
-              findMcpDirs(sub, depth + 1);
-            }
-          }
-        }
-      };
-      findMcpDirs(cursorMarketplacesBase);
-    } catch {
     }
   }
   for (const p of userExtraPaths) {
-    if (p && !candidateDirs.includes(p)) {
-      candidateDirs.push(p);
-    }
-  }
-  const validPaths = [];
-  for (const dir of candidateDirs) {
-    if (fs2.existsSync(dir)) {
-      const hasCore = fs2.existsSync(path2.join(dir, "twincat_core")) || fs2.existsSync(path2.join(dir, "__init__.py"));
-      if (hasCore && !validPaths.includes(dir)) {
-        validPaths.push(dir);
-      }
-    }
-  }
-  if (validPaths.length === 0) {
-    for (const dir of candidateDirs) {
-      if (fs2.existsSync(dir) && !validPaths.includes(dir)) {
-        validPaths.push(dir);
-      }
+    if (p && fs2.existsSync(p) && !validPaths.includes(p)) {
+      validPaths.push(p);
     }
   }
   if (process.env.PYTHONPATH) {
@@ -18618,18 +18574,21 @@ function activate(context) {
   const clientOptions = {
     documentSelector: [
       { scheme: "file", language: "iecst" },
-      { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,st,iecst}" }
+      { scheme: "file", language: "xml" },
+      { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,tcpou,tcdut,tcgvl,tcio,tctto,st,iecst,TcPou,TcDut,TcGvl,TcIo,TcTto,TCPOU,TCDUT,TCGVL,TCIO,TCTTO,ST,IECST}" },
+      { scheme: "untitled", language: "iecst" },
+      { scheme: "untitled", language: "xml" }
     ],
     synchronize: {
       fileEvents: [
-        vscode2.workspace.createFileSystemWatcher("**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,plcproj}")
+        vscode2.workspace.createFileSystemWatcher("**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,tcpou,tcdut,tcgvl,tcio,tctto,plcproj,TcPou,TcDut,TcGvl,TcIo,TCPOU,TCDUT,TCGVL,TCIO,PLCPROJ}")
       ]
     },
     traceOutputChannel: vscode2.window.createOutputChannel("TwinCAT Language Server Trace")
   };
   client = new import_node.LanguageClient(
     "twincat-lsp",
-    "TwinCAT 3 Language Server",
+    "TwinCAT Language Server",
     serverOptions,
     clientOptions
   );
@@ -18645,10 +18604,55 @@ function activate(context) {
       }
     }
   );
+  const formatSectionCmd = vscode2.commands.registerCommand(
+    "twincat.formatSection",
+    async () => {
+      const editor = vscode2.window.activeTextEditor;
+      if (!editor || !client) {
+        return;
+      }
+      try {
+        const position = editor.selection.active;
+        const response = await client.sendRequest("twincat/formatSection", {
+          textDocument: { uri: editor.document.uri.toString() },
+          position: { line: position.line, character: position.character }
+        });
+        if (!response || !response.success) {
+          vscode2.window.showWarningMessage("Could not format current section.");
+          return;
+        }
+        if (!response.edits || response.edits.length === 0) {
+          vscode2.window.setStatusBarMessage(
+            `TwinCAT: ${response.sectionName || "Section"} is already formatted.`,
+            3e3
+          );
+          return;
+        }
+        const workspaceEdit = new vscode2.WorkspaceEdit();
+        for (const edit of response.edits) {
+          const range = new vscode2.Range(
+            new vscode2.Position(edit.range.start.line, edit.range.start.character),
+            new vscode2.Position(edit.range.end.line, edit.range.end.character)
+          );
+          workspaceEdit.replace(editor.document.uri, range, edit.newText);
+        }
+        const applied = await vscode2.workspace.applyEdit(workspaceEdit);
+        if (applied) {
+          vscode2.window.setStatusBarMessage(
+            `TwinCAT: Formatted ${response.sectionName}`,
+            3e3
+          );
+        }
+      } catch (err) {
+        vscode2.window.showErrorMessage(`Format Section error: ${err?.message || err}`);
+      }
+    }
+  );
   registerAiCommands(context);
   context.subscriptions.push(
     client,
-    restartServerCmd
+    restartServerCmd,
+    formatSectionCmd
   );
 }
 function deactivate() {

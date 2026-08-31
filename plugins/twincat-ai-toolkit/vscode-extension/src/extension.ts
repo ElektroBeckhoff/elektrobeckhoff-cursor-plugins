@@ -13,106 +13,54 @@ let client: LanguageClient | undefined;
 
 /**
  * Locate directories containing the `twincat_core` Python package across bundled extension,
- * workspace, monorepo, and Cursor plugin cache locations.
+ * workspace, monorepo, and user extra paths.
  */
 function resolvePythonPathEnv(context: vscode.ExtensionContext, userExtraPaths: string[]): string {
-  const candidateDirs: string[] = [];
+  const validPaths: string[] = [];
 
-  // 1. Bundled inside extension (e.g. extension/server containing twincat_core)
-  candidateDirs.push(path.join(context.extensionPath, 'server'));
-  candidateDirs.push(context.extensionPath);
+  // 1. First priority: Bundled inside extension (e.g. extension/server containing twincat_core)
+  const bundledServerDir = path.join(context.extensionPath, 'server');
+  if (fs.existsSync(path.join(bundledServerDir, 'twincat_core'))) {
+    validPaths.push(bundledServerDir);
+  }
 
-  // 2. Relative to extension in plugin repository
-  candidateDirs.push(path.resolve(context.extensionPath, '..', 'mcp-servers', 'mcp-twincat'));
-  candidateDirs.push(
-    path.resolve(context.extensionPath, '..', '..', 'plugins', 'twincat-ai-toolkit', 'mcp-servers', 'mcp-twincat')
+  // 2. Relative to extension in development / plugin repository
+  const devServerDir = path.resolve(context.extensionPath, '..', 'mcp-servers', 'mcp-twincat');
+  if (fs.existsSync(path.join(devServerDir, 'twincat_core')) && !validPaths.includes(devServerDir)) {
+    validPaths.push(devServerDir);
+  }
+
+  const monorepoServerDir = path.resolve(
+    context.extensionPath,
+    '..',
+    '..',
+    'plugins',
+    'twincat-ai-toolkit',
+    'mcp-servers',
+    'mcp-twincat'
   );
+  if (fs.existsSync(path.join(monorepoServerDir, 'twincat_core')) && !validPaths.includes(monorepoServerDir)) {
+    validPaths.push(monorepoServerDir);
+  }
 
-  // 3. Workspace folders
+  // 3. Workspace folders (direct paths only, non-blocking)
   if (vscode.workspace.workspaceFolders) {
     for (const wf of vscode.workspace.workspaceFolders) {
-      candidateDirs.push(path.join(wf.uri.fsPath, 'plugins', 'twincat-ai-toolkit', 'mcp-servers', 'mcp-twincat'));
-      candidateDirs.push(path.join(wf.uri.fsPath, 'mcp-servers', 'mcp-twincat'));
-      candidateDirs.push(wf.uri.fsPath);
-    }
-  }
-
-  // 4. Cursor plugin cache directories
-  const homeDir = os.homedir();
-  const cursorPluginCacheBase = path.join(
-    homeDir,
-    '.cursor',
-    'plugins',
-    'cache',
-    'elektrobeckhoff-cursor-plugins',
-    'twincat-ai-toolkit'
-  );
-  if (fs.existsSync(cursorPluginCacheBase)) {
-    try {
-      const entries = fs.readdirSync(cursorPluginCacheBase, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          candidateDirs.push(path.join(cursorPluginCacheBase, entry.name, 'mcp-servers', 'mcp-twincat'));
-        }
+      const wsCoreDir = path.join(wf.uri.fsPath, 'plugins', 'twincat-ai-toolkit', 'mcp-servers', 'mcp-twincat');
+      if (fs.existsSync(path.join(wsCoreDir, 'twincat_core')) && !validPaths.includes(wsCoreDir)) {
+        validPaths.push(wsCoreDir);
       }
-    } catch {
-      // ignore
     }
   }
 
-  const cursorMarketplacesBase = path.join(homeDir, '.cursor', 'plugins', 'marketplaces');
-  if (fs.existsSync(cursorMarketplacesBase)) {
-    try {
-      const findMcpDirs = (dir: string, depth = 0) => {
-        if (depth > 5) return;
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            const sub = path.join(dir, entry.name);
-            if (entry.name === 'twincat-ai-toolkit') {
-              candidateDirs.push(path.join(sub, 'mcp-servers', 'mcp-twincat'));
-            } else if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
-              findMcpDirs(sub, depth + 1);
-            }
-          }
-        }
-      };
-      findMcpDirs(cursorMarketplacesBase);
-    } catch {
-      // ignore
-    }
-  }
-
-  // 5. User configured extraPaths
+  // 4. User configured extraPaths
   for (const p of userExtraPaths) {
-    if (p && !candidateDirs.includes(p)) {
-      candidateDirs.push(p);
+    if (p && fs.existsSync(p) && !validPaths.includes(p)) {
+      validPaths.push(p);
     }
   }
 
-  // Filter paths that actually contain twincat_core
-  const validPaths: string[] = [];
-  for (const dir of candidateDirs) {
-    if (fs.existsSync(dir)) {
-      const hasCore =
-        fs.existsSync(path.join(dir, 'twincat_core')) ||
-        fs.existsSync(path.join(dir, '__init__.py'));
-      if (hasCore && !validPaths.includes(dir)) {
-        validPaths.push(dir);
-      }
-    }
-  }
-
-  // If no directory specifically containing twincat_core was detected, include existing candidates
-  if (validPaths.length === 0) {
-    for (const dir of candidateDirs) {
-      if (fs.existsSync(dir) && !validPaths.includes(dir)) {
-        validPaths.push(dir);
-      }
-    }
-  }
-
-  // Preserve existing process.env.PYTHONPATH if set
+  // 5. Preserve existing process.env.PYTHONPATH if set
   if (process.env.PYTHONPATH) {
     validPaths.push(process.env.PYTHONPATH);
   }
@@ -142,11 +90,14 @@ export function activate(context: vscode.ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: 'file', language: 'iecst' },
-      { scheme: 'file', pattern: '**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,st,iecst}' },
+      { scheme: 'file', language: 'xml' },
+      { scheme: 'file', pattern: '**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,tcpou,tcdut,tcgvl,tcio,tctto,st,iecst,TcPou,TcDut,TcGvl,TcIo,TcTto,TCPOU,TCDUT,TCGVL,TCIO,TCTTO,ST,IECST}' },
+      { scheme: 'untitled', language: 'iecst' },
+      { scheme: 'untitled', language: 'xml' },
     ],
     synchronize: {
       fileEvents: [
-        vscode.workspace.createFileSystemWatcher('**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,plcproj}'),
+        vscode.workspace.createFileSystemWatcher('**/*.{TcPOU,TcDUT,TcGVL,TcIO,TcTTO,tcpou,tcdut,tcgvl,tcio,tctto,plcproj,TcPou,TcDut,TcGvl,TcIo,TCPOU,TCDUT,TCGVL,TCIO,PLCPROJ}'),
       ],
     },
     traceOutputChannel: vscode.window.createOutputChannel('TwinCAT Language Server Trace'),
@@ -155,7 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Create LanguageClient
   client = new LanguageClient(
     'twincat-lsp',
-    'TwinCAT 3 Language Server',
+    'TwinCAT Language Server',
     serverOptions,
     clientOptions
   );
@@ -176,12 +127,74 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Command: Format Current Section / Member
+  const formatSectionCmd = vscode.commands.registerCommand(
+    'twincat.formatSection',
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !client) {
+        return;
+      }
+
+      try {
+        const position = editor.selection.active;
+        const response = await client.sendRequest<{
+          edits: Array<{
+            range: {
+              start: { line: number; character: number };
+              end: { line: number; character: number };
+            };
+            newText: string;
+          }>;
+          sectionName: string;
+          success: boolean;
+        }>('twincat/formatSection', {
+          textDocument: { uri: editor.document.uri.toString() },
+          position: { line: position.line, character: position.character },
+        });
+
+        if (!response || !response.success) {
+          vscode.window.showWarningMessage('Could not format current section.');
+          return;
+        }
+
+        if (!response.edits || response.edits.length === 0) {
+          vscode.window.setStatusBarMessage(
+            `TwinCAT: ${response.sectionName || 'Section'} is already formatted.`,
+            3000
+          );
+          return;
+        }
+
+        const workspaceEdit = new vscode.WorkspaceEdit();
+        for (const edit of response.edits) {
+          const range = new vscode.Range(
+            new vscode.Position(edit.range.start.line, edit.range.start.character),
+            new vscode.Position(edit.range.end.line, edit.range.end.character)
+          );
+          workspaceEdit.replace(editor.document.uri, range, edit.newText);
+        }
+
+        const applied = await vscode.workspace.applyEdit(workspaceEdit);
+        if (applied) {
+          vscode.window.setStatusBarMessage(
+            `TwinCAT: Formatted ${response.sectionName}`,
+            3000
+          );
+        }
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Format Section error: ${err?.message || err}`);
+      }
+    }
+  );
+
   // Register AI Commands for Cursor Chat/Composer
   registerAiCommands(context);
 
   context.subscriptions.push(
     client,
-    restartServerCmd
+    restartServerCmd,
+    formatSectionCmd
   );
 }
 
