@@ -19,14 +19,14 @@ _RE_COMPOUND_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
-# Typed Literals (e.g. T#5s, TIME#100ms, DT#2026-08-30-11:00:00, INT#42, 16#FF, 2#1010)
+# Typed Literals (e.g. T#5s, TIME#100ms, DT#2026-08-30-11:00:00, INT#42, 16#FF, 2#1010, E_Enum#Member)
 _RE_TYPED_OR_BASED_LITERAL = re.compile(
     r"\b(?:"
     r"(?:16#[0-9A-Fa-f_]+)"
     r"|(?:8#[0-7_]+)"
     r"|(?:2#[01_]+)"
-    r"|(?:(?:T|TIME|LT|LTIME|D|DATE|LD|LDATE|TOD|TIME_OF_DAY|LTOD|LTIME_OF_DAY|DT|DATE_AND_TIME|LDT|BOOL|BYTE|WORD|DWORD|LWORD|SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|REAL|LREAL|STRING|WSTRING)#[^\s;,)=}\]]+)"
-    r")\b",
+    r"|(?:[A-Za-z_][A-Za-z0-9_]*#[^\s;,)=}\]]+)"
+    r")",
     re.IGNORECASE,
 )
 

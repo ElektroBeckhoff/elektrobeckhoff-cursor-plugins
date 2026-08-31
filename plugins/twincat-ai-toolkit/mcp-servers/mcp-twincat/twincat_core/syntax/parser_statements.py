@@ -930,16 +930,23 @@ class StatementParser:
 
     def _parse_call_arg(self) -> Optional[CallArg]:
         start_tok = self.peek()
-        # Check if named argument: name := val or out => val
+        if start_tok.type in (TokenType.COMMA, TokenType.PAREN_CLOSE):
+            return None
+
+        # Check if named argument: name := val or out => val or ref REF= val
         if (
-            start_tok.type == TokenType.IDENTIFIER
+            (start_tok.type == TokenType.IDENTIFIER or (start_tok.value and start_tok.value.isidentifier()))
             and self.peek(1).type in (TokenType.ASSIGN, TokenType.OUTPUT_ASSIGN, TokenType.REF_ASSIGN)
         ):
             name_tok = self.advance()
             op_tok = self.advance()
+            # If value is omitted (e.g. `nColorTempKelvin => ,` or `bIn := ,` or `out => )`):
+            if self.peek().type in (TokenType.COMMA, TokenType.PAREN_CLOSE):
+                span = SourceSpan.merge(name_tok.span, op_tok.span)
+                return CallArg(span=span, name=name_tok.value, assign_op=op_tok.value, value=None)
             val_expr = self.parse_expression()
-            span = SourceSpan.merge(name_tok.span, val_expr.span)
+            span = SourceSpan.merge(name_tok.span, val_expr.span if val_expr else op_tok.span)
             return CallArg(span=span, name=name_tok.value, assign_op=op_tok.value, value=val_expr)
         else:
             val_expr = self.parse_expression()
-            return CallArg(span=val_expr.span, name=None, assign_op=":=", value=val_expr)
+            return CallArg(span=val_expr.span if val_expr else start_tok.span, name=None, assign_op=":=", value=val_expr)

@@ -112,7 +112,7 @@ class DerefExpr(Expression):
 @dataclass(slots=True)
 class CallArg(AstNode):
     name: Optional[str] = None  # None for positional, e.g. "IN" for named "IN := TRUE"
-    value: Expression = field(default_factory=lambda: Expression(span=SourceSpan.from_bounds(0, 0, 0, 0, 0, 0)))
+    value: Optional[Expression] = None
     assign_op: str = ":="       # ":=", "=>", "?="
 
 

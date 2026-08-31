@@ -286,6 +286,36 @@ class TestStatementParsing:
         # 4. Array indexing and pointer deref
         assert isinstance(stmts[3], AssignStmt)
 
+    def test_parse_fb_call_omitted_and_empty_arguments(self):
+        source = """
+        fbDaliControl(
+            bEnable := TRUE,
+            nColorTempKelvin => ,
+            stDeviceControl =>
+        );
+        fbTimer(IN := , PT := T#5S, Q => bDone, );
+        _fbDaliSetMinLevel(
+            bStart           := TRUE,
+            nAddress         := _nAddr,
+            eAddressType     := _eAddrType,
+            eCommandPriority := E_DALICommandPriority.MiddleHigh,
+            nMinLevel        :=);
+        """
+        stmts, cst_nodes, diags = parse_implementation(source)
+        assert len(diags) == 0
+        assert len(stmts) == 3
+        assert isinstance(stmts[0], CallStmt)
+        assert len(stmts[0].call.args) == 3
+        assert stmts[0].call.args[1].name == "nColorTempKelvin"
+        assert stmts[0].call.args[1].value is None
+        assert stmts[0].call.args[2].name == "stDeviceControl"
+        assert stmts[0].call.args[2].value is None
+
+        assert isinstance(stmts[2], CallStmt)
+        assert len(stmts[2].call.args) == 5
+        assert stmts[2].call.args[4].name == "nMinLevel"
+        assert stmts[2].call.args[4].value is None
+
     def test_parse_if_elsif_else(self):
         source = """
         IF nVal > 100 THEN
