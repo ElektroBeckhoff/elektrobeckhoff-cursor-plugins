@@ -46,6 +46,7 @@ class IndexedFile:
     diagnostics: list[SyntaxDiagnostic] = field(default_factory=list)
     declared_symbols: list[Symbol] = field(default_factory=list)
     implementation_statements: list[tuple[CdataSpan, Scope, list[Statement]]] = field(default_factory=list)
+    has_full_implementation: bool = False
 
 
 class WorkspaceIndex:
@@ -53,21 +54,65 @@ class WorkspaceIndex:
 
     def __init__(self, project: Optional[PlcProject] = None) -> None:
         self.project: Optional[PlcProject] = project
+        self.projects: list[PlcProject] = [project] if project else []
+        self._indexed_plcprojs: set[Path] = set()
         self.type_index = TypeIndex()
         self.symbol_table = SymbolTable()
         self.resolver = SymbolResolver(self.symbol_table, self.type_index)
         self.indexed_files: dict[Path, IndexedFile] = {}
         if self.project:
-            self._register_project_libraries()
+            self._register_project_libraries(self.project)
+            if self.project.project_path:
+                self._indexed_plcprojs.add(self.project.project_path.resolve())
 
-    def _register_project_libraries(self) -> None:
-        if not self.project:
+    def _register_project_libraries(self, project: Optional[PlcProject] = None) -> None:
+        proj = project or self.project
+        if not proj:
             return
-        for lib in self.project.library_references:
+        for lib in proj.library_references:
             lib_name = lib.name.split(",")[0].strip()
             if lib.namespace:
                 self.type_index.register_library_type(lib.namespace, lib_name)
             self.type_index.register_library_type(lib_name, lib_name)
+
+    def add_plcproj(self, plcproj_path: Path) -> None:
+        """Parse a .plcproj and index all its compile items and library references."""
+        p = plcproj_path.resolve()
+        if p in self._indexed_plcprojs:
+            return
+        self._indexed_plcprojs.add(p)
+        try:
+            proj = parse_plcproj_file(p)
+            if not self.project:
+                self.project = proj
+            self.projects.append(proj)
+            self._register_project_libraries(proj)
+
+            # Prioritize DUTs and GVLs first so all types and globals are registered
+            duts_gvls = []
+            pous_itfs = []
+            for item in proj.compile_items.values():
+                if item.exclude_from_build or not item.abs_path.is_file():
+                    continue
+                itype = item.item_type.lower()
+                if itype in ("tcdut", "tcgvl"):
+                    duts_gvls.append(item)
+                elif itype in ("tcpou", "tcio"):
+                    pous_itfs.append(item)
+
+            for item in duts_gvls:
+                try:
+                    self.update_file(item.abs_path, declaration_only=True)
+                except Exception:
+                    continue
+
+            for item in pous_itfs:
+                try:
+                    self.update_file(item.abs_path, declaration_only=True)
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
     @classmethod
     def from_plcproj(cls, plcproj_path: Path) -> "WorkspaceIndex":
@@ -87,12 +132,17 @@ class WorkspaceIndex:
                 continue
             if item.abs_path.is_file() and item.item_type.lower() in ("tcpou", "tcdut", "tcgvl", "tcio"):
                 try:
-                    self.update_file(item.abs_path)
+                    self.update_file(item.abs_path, declaration_only=True)
                 except Exception as ex:
                     # Log or record diagnostic, don't crash entire indexing
                     continue
 
-    def update_file(self, file_path: Path, text: Optional[str] = None) -> IndexedFile:
+    def update_file(
+        self,
+        file_path: Path,
+        text: Optional[str] = None,
+        declaration_only: bool = False,
+    ) -> IndexedFile:
         """Incrementally index or re-index a single TwinCAT file."""
         path = file_path.resolve()
 
@@ -106,8 +156,11 @@ class WorkspaceIndex:
         chash = hashlib.sha256(content_bytes).hexdigest()
 
         # Check cache
-        if path in self.indexed_files and self.indexed_files[path].content_hash == chash:
-            return self.indexed_files[path]
+        if path in self.indexed_files:
+            existing = self.indexed_files[path]
+            if existing.content_hash == chash:
+                if declaration_only or existing.has_full_implementation:
+                    return existing
 
         # Remove old symbols and types associated with this file
         self.remove_file(path)
@@ -476,24 +529,25 @@ class WorkspaceIndex:
 
             # 4. Implementation Bodies (POU, Method, Action, Property)
             elif span.is_implementation:
-                stmts, cst_nodes, diags = parse_implementation(span.content)
-                all_cst_nodes.extend(cst_nodes)
-                all_diags.extend(
-                    SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
-                    for d in diags
-                )
+                if not declaration_only:
+                    stmts, cst_nodes, diags = parse_implementation(span.content)
+                    all_cst_nodes.extend(cst_nodes)
+                    all_diags.extend(
+                        SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
+                        for d in diags
+                    )
 
-                impl_scope = active_pou_scope or self.symbol_table.global_scope
-                if span.kind == CdataKind.METHOD_IMPLEMENTATION and span.parent_name:
-                    m_scope = method_scopes.get(span.parent_name.lower())
-                    if m_scope:
-                        impl_scope = m_scope
-                elif span.kind in (CdataKind.PROPERTY_GET_IMPLEMENTATION, CdataKind.PROPERTY_SET_IMPLEMENTATION) and span.parent_name:
-                    p_scope = property_scopes.get(span.parent_name.lower())
-                    if p_scope:
-                        impl_scope = p_scope
+                    impl_scope = active_pou_scope or self.symbol_table.global_scope
+                    if span.kind == CdataKind.METHOD_IMPLEMENTATION and span.parent_name:
+                        m_scope = method_scopes.get(span.parent_name.lower())
+                        if m_scope:
+                            impl_scope = m_scope
+                    elif span.kind in (CdataKind.PROPERTY_GET_IMPLEMENTATION, CdataKind.PROPERTY_SET_IMPLEMENTATION) and span.parent_name:
+                        p_scope = property_scopes.get(span.parent_name.lower())
+                        if p_scope:
+                            impl_scope = p_scope
 
-                implementation_statements.append((span, impl_scope, stmts))
+                    implementation_statements.append((span, impl_scope, stmts))
 
                 if span.kind == CdataKind.ACTION_IMPLEMENTATION and active_pou_scope and span.parent_name:
                     start_line, start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
@@ -527,6 +581,7 @@ class WorkspaceIndex:
             diagnostics=all_diags,
             declared_symbols=declared_symbols,
             implementation_statements=implementation_statements,
+            has_full_implementation=not declaration_only,
         )
         self.indexed_files[path] = indexed
         return indexed
