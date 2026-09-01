@@ -292,13 +292,12 @@ def twincat_plcproj_info(plcproj_path: str = "") -> str:
     Does NOT require a running TcXaeShell instance.
     Leave plcproj_path empty for auto-detection."""
 
-    if not plcproj_path:
-        plcproj_path = _auto_detect_plcproj()
-        if not plcproj_path:
-            return _json({"error": "No .plcproj found. Provide plcproj_path."})
+    resolved = _resolve_plcproj_path(plcproj_path)
+    if not resolved:
+        return _json({"error": "No .plcproj found. Provide plcproj_path."})
 
     try:
-        return _json(read_project_info(plcproj_path))
+        return _json(read_project_info(resolved))
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -321,7 +320,7 @@ def twincat_workspace_symbols(
     try:
         from twincat_core.project import get_shared_workspace
 
-        p_path = plcproj_path or _auto_detect_plcproj()
+        p_path = _resolve_plcproj_path(plcproj_path)
         workspace = get_shared_workspace(p_path if p_path else None)
         symbols = workspace.find_symbols(query=query, limit=limit)
 
@@ -354,7 +353,7 @@ def twincat_symbol_lookup(
     try:
         from twincat_core.project import get_shared_workspace
 
-        p_path = plcproj_path or _auto_detect_plcproj()
+        p_path = _resolve_plcproj_path(plcproj_path)
         workspace = get_shared_workspace(p_path if p_path else None)
         sym = workspace.lookup_symbol(symbol_name, scope_pou=scope_pou or None)
         if not sym:
@@ -416,7 +415,7 @@ def twincat_check_syntax(
                 return _json({"success": False, "error": f"Path does not exist: {path}"})
             target_path = p
         else:
-            auto_p = _auto_detect_plcproj()
+            auto_p = _resolve_plcproj_path()
             if auto_p:
                 target_path = Path(auto_p).resolve()
             else:
@@ -1048,8 +1047,12 @@ def twincat_export_library(
     ) or ""
 
     plcproj_explicit = bool(plcproj_path and str(plcproj_path).strip())
-    if not plcproj_path:
-        plcproj_path = plcproj_from_bridge or _auto_detect_plcproj(sln_path)
+    resolved_plcproj = _resolve_plcproj_path(
+        plcproj_path=plcproj_path,
+        sln_path=sln_path,
+        plcproj_from_bridge=plcproj_from_bridge,
+    )
+    plcproj_path = resolved_plcproj
 
     if not plcproj_path or not os.path.isfile(plcproj_path):
         return _json({
@@ -1765,7 +1768,7 @@ def twincat_verify_library_on_target(
 @mcp.tool()
 def twincat_umrt_e2e(
     sln_path: str,
-    xae_version: str = "4026",
+    xae_version: str = "",
     window_mode: str = "hidden",
     plc_port: int = 851,
     symbol_prefix: str = "",
@@ -1778,7 +1781,8 @@ def twincat_umrt_e2e(
 ) -> str:
     """Run the full UmRT systemtest chain (same steps as twincat3-umrt-systemtest).
 
-    Requires confirm=true. Orchestrates: UmRT start → open → I/O disable →
+    Requires confirm=true. Orchestrates: UmRT start → license pre-flight check →
+    open (auto-detects open TcXaeShell/VS instances) → I/O disable →
     set target → activate → start → runtime_messages → sys/PLC RUN →
     ADS symbols + read_list (+ optional write). Prefer this over 12 separate
     tool calls when running an online test. Uses live TwinCAT on this host."""
@@ -1789,7 +1793,7 @@ def twincat_umrt_e2e(
             "twincat_umrt_e2e",
             example_args={
                 "sln_path": sln_path,
-                "xae_version": xae_version or "4026",
+                "xae_version": xae_version or "",
                 "confirm": True,
             },
         ))
@@ -1827,7 +1831,7 @@ def twincat_umrt_e2e(
 
     config = SystemtestConfig(
         sln_path=sln_path,
-        xae_version=xae_version or "4026",
+        xae_version=xae_version or "",
         window_mode=window_mode or "hidden",
         plc_port=int(plc_port or 851),
         symbol_prefix=symbol_prefix or "",
@@ -3057,15 +3061,30 @@ def _scan_plcproj_in_dir(dir_path: str, max_depth: int = 5) -> List[str]:
 
 def _auto_detect_plcproj(sln_path: str = "") -> str:
     """Find the first .plcproj file near the solution or git repo root."""
-    excludes = {"samples", "versions", "_libraries", ".git", "node_modules"}
+    excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
 
     search_roots: list[str] = []
     if sln_path:
         sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
-        search_roots.append(sln_dir)
+        if os.path.isdir(sln_dir):
+            search_roots.append(sln_dir)
         repo = _find_repo_root(sln_path)
-        if repo and repo != sln_dir:
+        if repo and repo != sln_dir and os.path.isdir(repo):
             search_roots.append(repo)
+    if not search_roots:
+        try:
+            bridge = _get_bridge()
+            b_sln = bridge._call_sta(lambda: bridge._sln_path, timeout=2) or ""
+            if b_sln and os.path.isfile(b_sln):
+                b_dir = os.path.dirname(b_sln)
+                if os.path.isdir(b_dir):
+                    search_roots.append(b_dir)
+                b_repo = _find_repo_root(b_sln)
+                if b_repo and b_repo != b_dir and os.path.isdir(b_repo):
+                    search_roots.append(b_repo)
+        except Exception:
+            pass
+
     if not search_roots:
         search_roots.append(os.getcwd())
 
@@ -3073,18 +3092,76 @@ def _auto_detect_plcproj(sln_path: str = "") -> str:
         if not os.path.isdir(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
-            parts = set(p.lower() for p in dirpath.split(os.sep))
-            if parts & excludes:
-                dirnames.clear()
-                continue
-            depth = dirpath.replace(root_dir, "").count(os.sep)
-            if depth > 5:
-                dirnames.clear()
-                continue
+            dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
             for f in filenames:
-                if f.endswith(".plcproj"):
-                    return os.path.join(dirpath, f)
+                if f.lower().endswith(".plcproj"):
+                    return os.path.abspath(os.path.join(dirpath, f))
     return ""
+
+
+def _resolve_plcproj_path(
+    plcproj_path: str = "",
+    sln_path: str = "",
+    plcproj_from_bridge: str = "",
+) -> str:
+    """Resolve .plcproj path with strict priority:
+    1. Explicit non-empty parameter (absolute, relative, or basename).
+    2. Active XAE session (plcproj_from_bridge or search in active solution dir).
+    3. Auto-detection near sln_path or cwd.
+    """
+    if plcproj_path and str(plcproj_path).strip():
+        raw = str(plcproj_path).strip().strip('"').strip("'")
+        if os.path.isabs(raw) and os.path.isfile(raw):
+            return os.path.abspath(os.path.normpath(raw))
+
+        # Check relative paths
+        candidates = []
+        if sln_path:
+            sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
+            candidates.append(os.path.join(sln_dir, raw))
+            repo = _find_repo_root(sln_path)
+            if repo and repo != sln_dir:
+                candidates.append(os.path.join(repo, raw))
+        candidates.append(os.path.join(os.getcwd(), raw))
+        candidates.append(os.path.abspath(raw))
+        for c in candidates:
+            if os.path.isfile(c):
+                return os.path.abspath(os.path.normpath(c))
+
+        # Check basename match
+        base_name = raw if raw.lower().endswith(".plcproj") else f"{raw}.plcproj"
+        search_dirs = []
+        if sln_path:
+            sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
+            if os.path.isdir(sln_dir):
+                search_dirs.append(sln_dir)
+            repo = _find_repo_root(sln_path)
+            if repo and repo not in search_dirs and os.path.isdir(repo):
+                search_dirs.append(repo)
+        if not search_dirs:
+            search_dirs.append(os.getcwd())
+
+        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
+        for sdir in search_dirs:
+            if not os.path.isdir(sdir):
+                continue
+            for dirpath, dirnames, files in os.walk(sdir):
+                dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
+                for f in files:
+                    if f.lower() == base_name.lower():
+                        return os.path.abspath(os.path.join(dirpath, f))
+
+    # Priority 2: Active bridge session
+    if plcproj_from_bridge and os.path.isfile(plcproj_from_bridge):
+        return os.path.abspath(os.path.normpath(plcproj_from_bridge))
+
+    # Priority 3: Auto-detect from sln_path or bridge
+    if sln_path:
+        found = _auto_detect_plcproj(sln_path)
+        if found:
+            return found
+
+    return _auto_detect_plcproj("")
 
 
 def _read_proj_name(plcproj_path: str) -> str:

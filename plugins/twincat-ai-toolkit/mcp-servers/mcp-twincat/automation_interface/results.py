@@ -144,6 +144,11 @@ class ExportProgressResult:
     message: str = ""
     # Final ExportResult as dict when phase is done/error (async jobs).
     result: Optional[dict] = None
+    # Artifact fields mirrored for direct access without extra check_artifacts call
+    artifacts_on_disk: bool = False
+    artifacts: list = field(default_factory=list)
+    library_path: str = ""
+    compiled_library_path: str = ""
 
 
 @dataclass

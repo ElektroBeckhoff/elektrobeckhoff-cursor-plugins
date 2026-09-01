@@ -150,6 +150,31 @@ class BuildOpsMixin:
         if started > 0:
             end = updated if not p.get("running") and updated > 0 else time.time()
             elapsed = max(0.0, round(end - started, 1))
+
+        res_dict = p.get("result") or {}
+        artifacts_on_disk = bool(res_dict.get("artifacts_on_disk"))
+        artifacts = list(res_dict.get("artifacts") or [])
+        lib_path = str(res_dict.get("library_path") or "")
+        comp_path = str(res_dict.get("compiled_library_path") or "")
+
+        # If phase is done and not already checked, verify artifacts on disk
+        if not p.get("running") and p.get("phase") == "done" and not artifacts:
+            out_dir = str(p.get("output_dir") or "")
+            title = str(p.get("project_title") or "")
+            ver = str(p.get("project_version") or "")
+            if out_dir and title and ver:
+                try:
+                    check = self.check_export_artifacts(out_dir, title, ver)
+                    artifacts_on_disk = check.all_present
+                    artifacts = check.artifacts
+                    for a in artifacts:
+                        if a.get("kind") == "library" and a.get("exists"):
+                            lib_path = a.get("path", "")
+                        elif a.get("kind") == "compiled_library" and a.get("exists"):
+                            comp_path = a.get("path", "")
+                except Exception:
+                    pass
+
         return ExportProgressResult(
             success=True,
             running=bool(p.get("running")),
@@ -163,6 +188,10 @@ class BuildOpsMixin:
             elapsed_s=elapsed,
             message=str(p.get("message") or ""),
             result=p.get("result"),
+            artifacts_on_disk=artifacts_on_disk,
+            artifacts=artifacts,
+            library_path=lib_path,
+            compiled_library_path=comp_path,
         )
 
     def _ensure_export_progress_state(self) -> None:
@@ -727,6 +756,8 @@ class BuildOpsMixin:
             os.environ.get("TMP", ""),
             os.path.dirname(self._sln_path) if self._sln_path else "",
             self._find_git_root(self._sln_path) if self._sln_path else "",
+            os.path.dirname(self._plcproj_file_path) if getattr(self, "_plcproj_file_path", None) else "",
+            self._find_git_root(self._plcproj_file_path) if getattr(self, "_plcproj_file_path", None) else "",
         ] if d]
         if not any(norm_out.startswith(r) for r in allowed_roots):
             return ExportResult(
