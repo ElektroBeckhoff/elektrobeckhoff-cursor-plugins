@@ -26,8 +26,18 @@ def _tai():
 
 
 class SessionOpsMixin:
-    def get_status(self) -> StatusResult:
-        return self._call_sta(self._impl_get_status)
+    def get_status(self, timeout_s: int = 5) -> StatusResult:
+        try:
+            return self._call_sta(self._impl_get_status, timeout=timeout_s)
+        except Exception as exc:
+            log.warning(
+                "get_status timed out or failed (%s) -- returning degraded status", exc
+            )
+            return StatusResult(
+                xae_available=True,
+                running_instance=False,
+                message=f"Status check timed out after {timeout_s}s: {exc}",
+            )
 
     def open_solution(
         self,
@@ -50,8 +60,21 @@ class SessionOpsMixin:
     def close(self, force_quit: bool = False) -> CloseResult:
         return self._call_sta(self._impl_close, force_quit, timeout=30)
     @staticmethod
-    def _get_dte_pid(dte) -> Optional[int]:
-        """Get the OS process ID of a DTE instance via its main window handle."""
+    def _extract_pid_from_moniker(moniker_name: str) -> Optional[int]:
+        """Extract PID from moniker like '!TcXaeShell.DTE.17.0:23572'."""
+        if ":" in moniker_name:
+            suffix = moniker_name.rsplit(":", 1)[-1]
+            if suffix.isdigit():
+                return int(suffix)
+        return None
+
+    @classmethod
+    def _get_dte_pid(cls, dte, moniker: str = "") -> Optional[int]:
+        """Get the OS process ID of a DTE instance via moniker or main window handle."""
+        if moniker:
+            from_mon = cls._extract_pid_from_moniker(moniker)
+            if from_mon is not None:
+                return from_mon
         try:
             import ctypes
             hwnd = int(dte.MainWindow.HWnd)
@@ -309,7 +332,9 @@ class SessionOpsMixin:
             log.debug("ROT enumeration unavailable: %s", exc)
             return
 
-        prefix = f"!{_tai()._PROG_ID_PREFIX}"
+        prefixes = tuple(
+            f"!{p}" for p in getattr(_tai(), "_ROT_PROG_ID_PREFIXES", (_tai()._PROG_ID_PREFIX,))
+        )
         while True:
             try:
                 mons = enum.Next(1)
@@ -321,7 +346,7 @@ class SessionOpsMixin:
                 name = mons[0].GetDisplayName(ctx, None)
             except Exception:
                 continue
-            if not name.startswith(prefix):
+            if not any(name.startswith(p) for p in prefixes):
                 continue
             # "!TcXaeShell.DTE.17.0:23572" -> "TcXaeShell.DTE.17.0"
             body = name[1:]
@@ -587,12 +612,18 @@ class SessionOpsMixin:
 
         # Enumerate ALL running instances via ROT (not just GetActiveObject)
         running: list[dict] = []
+        start_rot_t = time.time()
         for prog_id, moniker, dte in self._enumerate_rot_dtes():
+            if time.time() - start_rot_t > 3.0:
+                log.warning("ROT status iteration exceeded 3.0s budget -- returning partial list")
+                break
+            pid = self._get_dte_pid(dte, moniker=moniker)
             busy = self._probe_dte_busy(dte)
-            is_open, sln = self._read_dte_solution_path(
-                dte, retry_on_busy=False,
-            )
-            pid = self._get_dte_pid(dte)
+            is_open, sln = False, ""
+            if not busy:
+                is_open, sln = self._read_dte_solution_path(
+                    dte, retry_on_busy=False,
+                )
             entry = {
                 "prog_id": prog_id,
                 "xae_version": _tai()._tc_version_label(prog_id),
@@ -1374,25 +1405,47 @@ class SessionOpsMixin:
         if not self._sln_path:
             return None
         sln_dir = os.path.dirname(self._sln_path)
+        if not os.path.isdir(sln_dir):
+            return None
+
+        # 1. Try reading directly from plc_proj_item
+        if self._plc_proj_item:
+            try:
+                if hasattr(self._plc_proj_item, "FileName") and self._plc_proj_item.FileName:
+                    fn = str(self._plc_proj_item.FileName)
+                    if fn.endswith(".plcproj") and os.path.isfile(fn):
+                        return os.path.abspath(fn)
+            except Exception:
+                pass
+            try:
+                if hasattr(self._plc_proj_item, "FileNames"):
+                    fn = str(self._plc_proj_item.FileNames(1))
+                    if fn.endswith(".plcproj") and os.path.isfile(fn):
+                        return os.path.abspath(fn)
+            except Exception:
+                pass
+
         proj_name = self._normalize_proj_name(
             str(self._plc_proj_item.Name)
         ) if self._plc_proj_item else ""
-        for dirpath, _dirs, files in os.walk(sln_dir):
-            depth = dirpath.replace(sln_dir, "").count(os.sep)
-            if depth > 4:
-                _dirs.clear()
-                continue
+
+        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_CompileInfo"}
+        first_match = None
+        for dirpath, dirnames, files in os.walk(sln_dir):
+            dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
             for f in files:
                 if not f.endswith(".plcproj"):
                     continue
-                if proj_name and os.path.splitext(f)[0] == proj_name:
-                    found = os.path.join(dirpath, f)
-                    log.info("Auto-detected plcproj: %s", found)
+                found = os.path.abspath(os.path.join(dirpath, f))
+                if proj_name and os.path.splitext(f)[0].lower() == proj_name.lower():
+                    log.info("Auto-detected plcproj by name '%s': %s", proj_name, found)
                     return found
-                if not proj_name:
-                    found = os.path.join(dirpath, f)
-                    log.info("Auto-detected plcproj (first match): %s", found)
-                    return found
+                if first_match is None:
+                    first_match = found
+
+        if first_match:
+            log.info("Auto-detected plcproj (first match in solution dir): %s", first_match)
+            return first_match
         return None
 
     @staticmethod

@@ -4,6 +4,7 @@ import sys
 
 
 _PROG_ID_PREFIX = "TcXaeShell.DTE."
+_ROT_PROG_ID_PREFIXES = ("TcXaeShell.DTE.", "VisualStudio.DTE.")
 _DEFAULT_PROG_ID = f"{_PROG_ID_PREFIX}17.0"
 PROG_ID = _DEFAULT_PROG_ID
 
@@ -14,11 +15,17 @@ _XAE_VERSION_ALIASES = {
     "15.0": f"{_PROG_ID_PREFIX}15.0",
     "17": f"{_PROG_ID_PREFIX}17.0",
     "15": f"{_PROG_ID_PREFIX}15.0",
+    "vs2022": "VisualStudio.DTE.17.0",
+    "vs2019": "VisualStudio.DTE.16.0",
+    "vs2017": "VisualStudio.DTE.15.0",
 }
 
 _PROG_ID_TO_TC_VERSION = {
     f"{_PROG_ID_PREFIX}17.0": "4026",
     f"{_PROG_ID_PREFIX}15.0": "4024",
+    "VisualStudio.DTE.17.0": "VS2022/4026",
+    "VisualStudio.DTE.16.0": "VS2019/4024",
+    "VisualStudio.DTE.15.0": "VS2017/4024",
 }
 
 
@@ -28,7 +35,11 @@ def _tai():
 
 
 def _prog_id_version_key(prog_id: str) -> tuple[int, ...]:
-    suffix = prog_id[len(_PROG_ID_PREFIX):] if prog_id.startswith(_PROG_ID_PREFIX) else prog_id
+    suffix = prog_id
+    for prefix in _ROT_PROG_ID_PREFIXES:
+        if prog_id.startswith(prefix):
+            suffix = prog_id[len(prefix):]
+            break
     parts: list[int] = []
     for piece in suffix.split("."):
         try:
@@ -39,7 +50,7 @@ def _prog_id_version_key(prog_id: str) -> tuple[int, ...]:
 
 
 def _discover_registered_prog_ids() -> list[str]:
-    """Return registered TcXaeShell DTE ProgIDs, newest VS version first."""
+    """Return registered TcXaeShell & Visual Studio DTE ProgIDs, newest version first."""
     import winreg
 
     found: list[str] = []
@@ -52,7 +63,7 @@ def _discover_registered_prog_ids() -> list[str]:
                     idx += 1
                 except OSError:
                     break
-                if not name.startswith(_PROG_ID_PREFIX):
+                if not any(name.startswith(p) for p in _ROT_PROG_ID_PREFIXES):
                     continue
                 try:
                     winreg.OpenKey(
@@ -64,8 +75,15 @@ def _discover_registered_prog_ids() -> list[str]:
     except OSError:
         pass
 
-    found.sort(key=_prog_id_version_key, reverse=True)
+    found.sort(
+        key=lambda p: (
+            _prog_id_version_key(p),
+            1 if p.startswith(_PROG_ID_PREFIX) else 0,
+        ),
+        reverse=True,
+    )
     return found
+
 
 
 def _normalize_xae_version(version: Optional[str]) -> Optional[str]:

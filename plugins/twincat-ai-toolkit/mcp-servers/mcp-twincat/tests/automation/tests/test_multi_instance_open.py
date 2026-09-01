@@ -112,7 +112,13 @@ class TestNormalizeXaeVersion:
     def test_tc_version_label(self):
         assert _tc_version_label(PROG_4026) == "4026"
         assert _tc_version_label(PROG_4024) == "4024"
+        assert _tc_version_label("VisualStudio.DTE.17.0") == "VS2022/4026"
         assert _tc_version_label(None) == ""
+
+    def test_vs_version_aliases(self):
+        with patch("twincat_automation_interface._discover_registered_prog_ids",
+                    return_value=REGISTERED + ["VisualStudio.DTE.17.0"]):
+            assert _normalize_xae_version("vs2022") == "VisualStudio.DTE.17.0"
 
 
 # ==================================================================
@@ -141,6 +147,19 @@ class TestFindDteBySolution:
 
         assert dte is right
         assert prog_id == PROG_4024
+
+    def test_finds_visual_studio_rot_instance(self):
+        """Solution open in Visual Studio ROT instance is matched properly."""
+        bridge = _make_bridge()
+        vs_dte = _fake_dte(r"C:\proj\VsTarget.sln")
+        rot_entries = [
+            ("VisualStudio.DTE.17.0", "!VisualStudio.DTE.17.0:444", vs_dte),
+        ]
+        with patch.object(bridge, "_enumerate_rot_dtes", return_value=rot_entries):
+            with patch("twincat_automation_interface._canonical_path", side_effect=lambda p: p.lower()):
+                prog_id, dte = bridge._find_dte_by_solution(r"c:\proj\vstarget.sln")
+        assert dte is vs_dte
+        assert prog_id == "VisualStudio.DTE.17.0"
 
     def test_filter_by_prog_id(self):
         bridge = _make_bridge()

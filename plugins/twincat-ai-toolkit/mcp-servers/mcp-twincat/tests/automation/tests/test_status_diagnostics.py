@@ -413,3 +413,14 @@ class TestDismissSafeDialogs:
         assert "not auto-dismissable" in result.message.lower() or (
             "remain" in result.message.lower()
         )
+
+
+class TestGetStatusTimeout:
+    def test_get_status_catches_timeout_and_returns_degraded(self):
+        bridge = _make_bridge()
+        with patch.object(bridge, "_call_sta", side_effect=TimeoutError("STA thread timeout")):
+            result = bridge.get_status(timeout_s=5)
+        assert result.xae_available is True
+        assert result.running_instance is False
+        assert "timed out" in result.message.lower()
+
