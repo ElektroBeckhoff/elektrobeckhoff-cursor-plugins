@@ -47,6 +47,7 @@ BLOCKING_FINDING_IDS = frozenset({
 
 REQUIRED_STEPS = (
     "umrt_start",
+    "license_preflight",
     "open",
     "io_disabled",
     "set_target",
@@ -196,6 +197,7 @@ class SystemtestBackends:
     ads_read_list: Callable[..., Any]
     ads_write: Callable[..., Any]
     ads_read: Callable[..., Any]
+    check_licenses: Optional[Callable[..., Any]] = None
 
 
 def run_umrt_systemtest(
@@ -241,6 +243,34 @@ def run_umrt_systemtest(
         )
     if not ok:
         return _finalize(report)
+
+    # --- 1b. License Pre-flight Check ---
+    if backends.check_licenses:
+        try:
+            lic_res = _to_dict(backends.check_licenses(
+                instance=start_res.get("instance"),
+                net_id=net_id,
+            ))
+        except Exception as exc:
+            lic_res = {"success": True, "message": str(exc), "skipped": True}
+
+        lic_ok = _ok(lic_res)
+        if lic_res.get("missing_trial_license") or lic_res.get("licenses_ok") is False:
+            lic_ok = False
+        add(
+            "license_preflight",
+            lic_ok,
+            lic_res.get("message") or ("licenses ok" if lic_ok else "license missing"),
+            lic_res,
+        )
+        if not lic_ok:
+            report.ask_user.append(
+                "UmRT 7-day trial license for TC3 PLC (TC1200) is missing. "
+                "Please activate a 7-day trial license in TwinCAT (SYSTEM -> License) before activating."
+            )
+            return _finalize(report)
+    else:
+        add("license_preflight", True, "skipped (no checker configured)")
 
     # --- 2. Open ---
     try:
@@ -604,6 +634,9 @@ def build_live_backends() -> SystemtestBackends:
         result["net_id"] = net_id
         return result
 
+    def check_licenses(instance: Optional[str] = None, net_id: str = "", **_kw):
+        return umrt.check_licenses(instance=instance)
+
     return SystemtestBackends(
         umrt_status=umrt_status,
         umrt_start=umrt_start,
@@ -620,6 +653,7 @@ def build_live_backends() -> SystemtestBackends:
         ads_read_list=ads_read_list,
         ads_write=ads_write,
         ads_read=ads_read,
+        check_licenses=check_licenses,
     )
 
 

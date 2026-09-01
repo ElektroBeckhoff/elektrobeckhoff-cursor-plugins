@@ -131,6 +131,12 @@ class FakeBackends:
             f.calls.append("read")
             return _ok(symbol=symbol, value=f.values.get(symbol))
 
+        def check_licenses(instance=None, net_id=""):
+            f.calls.append("check_licenses")
+            if hasattr(f, "licenses_result"):
+                return f.licenses_result
+            return _ok(licenses_ok=True)
+
         return SystemtestBackends(
             umrt_status=umrt_status,
             umrt_start=umrt_start,
@@ -147,6 +153,7 @@ class FakeBackends:
             ads_read_list=ads_read_list,
             ads_write=ads_write,
             ads_read=ads_read,
+            check_licenses=check_licenses,
         )
 
 
@@ -187,6 +194,26 @@ class TestUmrtSystemtestPass(unittest.TestCase):
 
 
 class TestUmrtSystemtestFailFast(unittest.TestCase):
+    def test_missing_license_preflight_blocks_early(self):
+        fake = FakeBackends()
+        fake.licenses_result = {
+            "success": False,
+            "licenses_ok": False,
+            "missing_trial_license": True,
+            "message": "No active license files found in UmRT Target/License folder.",
+        }
+        cfg = SystemtestConfig(
+            sln_path=r"C:\sample\Sample.sln",
+            settle_s=0,
+            read_symbols=["P_Sample.fbX._bFlag"],
+            skip_write=True,
+        )
+        report = run_umrt_systemtest(cfg, fake.backends())
+        self.assertFalse(report.passed)
+        self.assertFalse(report.step("license_preflight").passed)
+        self.assertIsNone(report.step("open"))
+        self.assertTrue(any("trial license" in a.lower() for a in report.ask_user))
+
     def test_license_blocks_after_messages(self):
         fake = FakeBackends()
         fake.messages_findings = [{

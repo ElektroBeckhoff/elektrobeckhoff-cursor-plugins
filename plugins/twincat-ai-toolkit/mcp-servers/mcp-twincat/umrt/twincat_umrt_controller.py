@@ -383,6 +383,65 @@ def _terminate_pid(pid: int) -> bool:
     return False
 
 
+def inspect_instance_licenses(instance_path: str) -> dict[str, Any]:
+    """Inspect license directory of an UmRT instance for .tclsp / .tclse / .xml files."""
+    if not instance_path or not os.path.isdir(instance_path):
+        return {
+            "success": False,
+            "licenses_ok": False,
+            "missing_trial_license": True,
+            "found_files": [],
+            "message": f"Instance path not found: {instance_path}",
+        }
+
+    search_dirs = [
+        os.path.join(instance_path, "3.1", "Target", "License"),
+        os.path.join(instance_path, "Target", "License"),
+        os.path.join(instance_path, "3.1", "Boot", "License"),
+        os.path.join(instance_path, "Boot", "License"),
+    ]
+
+    found_files: list[str] = []
+    for d in search_dirs:
+        if os.path.isdir(d):
+            try:
+                for f in os.listdir(d):
+                    if f.lower().endswith((".tclsp", ".tclse", ".xml")):
+                        found_files.append(os.path.join(d, f))
+            except Exception:
+                pass
+
+    if not found_files:
+        return {
+            "success": False,
+            "licenses_ok": False,
+            "missing_trial_license": True,
+            "found_files": [],
+            "message": "No active license files (.tclsp/.tclse) found in UmRT License directory",
+        }
+
+    detected_licenses: list[str] = []
+    for fpath in found_files:
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                matches = re.findall(r"(TC\d+|TF\d+)", content)
+                for m in matches:
+                    if m not in detected_licenses:
+                        detected_licenses.append(m)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "licenses_ok": True,
+        "missing_trial_license": False,
+        "found_files": [os.path.basename(f) for f in found_files],
+        "detected_licenses": detected_licenses,
+        "message": f"Found {len(found_files)} license file(s) with {len(detected_licenses)} license item(s)",
+    }
+
+
 class UmrtController:
     """High-level Usermode Runtime lifecycle helper."""
 
@@ -540,6 +599,13 @@ class UmrtController:
             if inst.name == self.mcp_instance and inst.running and inst.ams_net_id:
                 return inst.ams_net_id
         return ""
+
+    def check_licenses(self, instance: Optional[str] = None) -> dict[str, Any]:
+        """Check if the given or default MCP UmRT instance has active license files."""
+        inst_name = (instance or self.mcp_instance).strip()
+        inst_root = resolve_instances_root()
+        dest = os.path.join(inst_root, inst_name)
+        return inspect_instance_licenses(dest)
 
     def start(
         self,
