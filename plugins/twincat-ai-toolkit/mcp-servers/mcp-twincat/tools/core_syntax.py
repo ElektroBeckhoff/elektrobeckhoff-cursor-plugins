@@ -117,7 +117,7 @@ def twincat_check_syntax(
     include_warnings: Include severity=WARNING items (e.g. TC-SEM-007 narrowing warnings) (default: True).
     """
     try:
-        from twincat_core.project import WorkspaceIndex
+        from twincat_core.project import get_shared_workspace
         from twincat_core.semantic.diagnostics import run_semantic_analysis
         from twincat_core.syntax.diagnostics import DiagnosticSeverity
 
@@ -136,11 +136,10 @@ def twincat_check_syntax(
                 target_path = Path.cwd().resolve()
 
         files_to_check: list[Path] = []
-        workspace: Optional[WorkspaceIndex] = None
+        workspace = get_shared_workspace(target_path)
 
         if target_path.is_file():
             if target_path.suffix.lower() == ".plcproj":
-                workspace = WorkspaceIndex.from_plcproj(target_path)
                 if workspace.project:
                     files_to_check = [
                         item.abs_path
@@ -152,7 +151,7 @@ def twincat_check_syntax(
                 if isinstance(resolved, dict) and not resolved.get("success", True):
                     return _json(resolved)
                 plcproj_p = Path(resolved if isinstance(resolved, str) else resolved["plcproj_path"])
-                workspace = WorkspaceIndex.from_plcproj(plcproj_p)
+                workspace = get_shared_workspace(plcproj_p)
                 if workspace.project:
                     files_to_check = [
                         item.abs_path
@@ -160,41 +159,20 @@ def twincat_check_syntax(
                         if not item.exclude_from_build and item.abs_path.is_file()
                     ]
             elif target_path.suffix.lower() in (".tcpou", ".tcdut", ".tcgvl", ".tcio"):
-                # Single file: walk upward to find nearest .plcproj to build full symbol context
-                plcs = []
-                cur = target_path.parent
-                for _ in range(8):
-                    found = [f for f in cur.glob("*.plcproj") if f.is_file()]
-                    if found:
-                        plcs = found
-                        break
-                    if cur.parent == cur:
-                        break
-                    cur = cur.parent
-                if plcs:
-                    workspace = WorkspaceIndex.from_plcproj(plcs[0])
-                else:
-                    workspace = WorkspaceIndex()
                 files_to_check = [target_path]
             else:
                 return _json({"success": False, "error": f"Unsupported file type: {target_path.suffix}"})
         elif target_path.is_dir():
-            plcs = list(target_path.glob("*.plcproj"))
-            if not plcs:
-                plcs = [
-                    p for p in target_path.glob("**/*.plcproj")
-                    if not any(part.lower() in _EXCLUDES_LOWER for part in p.parts)
+            if workspace.project and (
+                target_path == workspace.project.root_dir.resolve()
+                or target_path == workspace.project.project_path.parent.resolve()
+            ):
+                files_to_check = [
+                    item.abs_path
+                    for item in workspace.project.compile_items.values()
+                    if not item.exclude_from_build and item.abs_path.is_file()
                 ]
-            if plcs:
-                workspace = WorkspaceIndex.from_plcproj(plcs[0])
-                if workspace.project:
-                    files_to_check = [
-                        item.abs_path
-                        for item in workspace.project.compile_items.values()
-                        if not item.exclude_from_build and item.abs_path.is_file()
-                    ]
             else:
-                workspace = WorkspaceIndex()
                 pattern = "**/*" if recursive else "*"
                 candidates: list[Path] = []
                 for ext in (".TcPOU", ".TcDUT", ".TcGVL", ".TcIO"):
@@ -209,7 +187,7 @@ def twincat_check_syntax(
                         files_to_check.append(rf)
 
         if not workspace:
-            workspace = WorkspaceIndex()
+            workspace = get_shared_workspace()
 
         if not files_to_check:
             return _json({

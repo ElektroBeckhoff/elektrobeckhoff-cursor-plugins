@@ -1,10 +1,12 @@
 """Incremental Workspace Index integrating XML, Syntax AST/CST, and Semantic Resolution."""
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..semantic.resolver import SymbolResolver
 from ..semantic.scopes import Scope, ScopeKind
@@ -33,6 +35,52 @@ from ..xml.reader import read_tc_xml, read_tc_xml_file
 from ..xml.types import CdataKind, CdataSpan, TcXmlDocument
 from .plcproj_parser import parse_plcproj_file
 from .project_graph import CompileItem, PlcProject
+
+
+def _parse_file_declarations_worker(
+    path: Path,
+) -> tuple[
+    Path,
+    Optional[TcXmlDocument],
+    str,
+    list[tuple[CdataSpan, int, int, int, Optional[AstNode], list[CstNode], list[SyntaxDiagnostic]]],
+    Optional[Exception],
+]:
+    """Worker function for concurrent XML parsing and declaration extraction."""
+    try:
+        xml_doc = read_tc_xml_file(path)
+        content_bytes = xml_doc.raw_text.encode("utf-8")
+        chash = hashlib.sha256(content_bytes).hexdigest()
+
+        cdata_results: list[
+            tuple[CdataSpan, int, int, int, Optional[AstNode], list[CstNode], list[SyntaxDiagnostic]]
+        ] = []
+        for span in xml_doc.cdata_spans:
+            if not span.content.strip():
+                continue
+            cdata_start_line, cdata_start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
+            line_offset = cdata_start_line - 1
+            col_offset = cdata_start_col - 1
+            char_offset = span.content_start
+
+            if span.kind in (
+                CdataKind.POU_DECLARATION,
+                CdataKind.DUT_DECLARATION,
+                CdataKind.GVL_DECLARATION,
+                CdataKind.ITF_DECLARATION,
+                CdataKind.METHOD_DECLARATION,
+                CdataKind.PROPERTY_DECLARATION,
+                CdataKind.PROPERTY_GET_DECLARATION,
+                CdataKind.PROPERTY_SET_DECLARATION,
+            ):
+                ast_node, cst_nodes, diags = parse_declaration(span.content)
+                cdata_results.append((span, line_offset, col_offset, char_offset, ast_node, cst_nodes, diags))
+            elif span.is_implementation:
+                cdata_results.append((span, line_offset, col_offset, char_offset, None, [], []))
+
+        return path, xml_doc, chash, cdata_results, None
+    except Exception as exc:
+        return path, None, "", [], exc
 
 
 @dataclass(slots=True)
@@ -88,29 +136,19 @@ class WorkspaceIndex:
             self.projects.append(proj)
             self._register_project_libraries(proj)
 
-            # Prioritize DUTs and GVLs first so all types and globals are registered
-            duts_gvls = []
-            pous_itfs = []
-            for item in proj.compile_items.values():
-                if item.exclude_from_build or not item.abs_path.is_file():
-                    continue
-                itype = item.item_type.lower()
-                if itype in ("tcdut", "tcgvl"):
-                    duts_gvls.append(item)
-                elif itype in ("tcpou", "tcio"):
-                    pous_itfs.append(item)
-
-            for item in duts_gvls:
-                try:
-                    self.update_file(item.abs_path, declaration_only=True)
-                except Exception:
-                    continue
-
-            for item in pous_itfs:
-                try:
-                    self.update_file(item.abs_path, declaration_only=True)
-                except Exception:
-                    continue
+            items_to_index = [
+                item.abs_path
+                for item in proj.compile_items.values()
+                if not item.exclude_from_build and item.abs_path.is_file() and item.item_type.lower() in ("tcpou", "tcdut", "tcgvl", "tcio")
+            ]
+            if len(items_to_index) > 4:
+                self.index_files_batch(items_to_index, declaration_only=True)
+            else:
+                for item_path in items_to_index:
+                    try:
+                        self.update_file(item_path, declaration_only=True)
+                    except Exception:
+                        continue
         except Exception:
             pass
 
@@ -127,41 +165,72 @@ class WorkspaceIndex:
         if not self.project:
             return
 
-        for item in self.project.compile_items.values():
-            if item.exclude_from_build:
-                continue
-            if item.abs_path.is_file() and item.item_type.lower() in ("tcpou", "tcdut", "tcgvl", "tcio"):
+        items_to_index = [
+            item.abs_path
+            for item in self.project.compile_items.values()
+            if not item.exclude_from_build and item.abs_path.is_file() and item.item_type.lower() in ("tcpou", "tcdut", "tcgvl", "tcio")
+        ]
+        if len(items_to_index) > 4:
+            self.index_files_batch(items_to_index, declaration_only=True)
+        else:
+            for item_path in items_to_index:
                 try:
-                    self.update_file(item.abs_path, declaration_only=True)
-                except Exception as ex:
-                    # Log or record diagnostic, don't crash entire indexing
+                    self.update_file(item_path, declaration_only=True)
+                except Exception:
                     continue
 
-    def update_file(
+    def index_files_batch(self, file_paths: Sequence[Path], declaration_only: bool = True) -> None:
+        """Scan and index multiple files concurrently using a thread pool."""
+        if not file_paths:
+            return
+
+        unique_paths = list(dict.fromkeys(p.resolve() for p in file_paths if p.is_file()))
+        if not unique_paths:
+            return
+
+        max_workers = min(32, max(4, (os.cpu_count() or 4) * 4))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {
+                executor.submit(_parse_file_declarations_worker, p): p
+                for p in unique_paths
+            }
+            results_by_path: dict[Path, tuple] = {}
+            for future in concurrent.futures.as_completed(future_to_path):
+                p, xml_doc, chash, cdata_results, exc = future.result()
+                if xml_doc and not exc:
+                    results_by_path[p] = (xml_doc, chash, cdata_results)
+
+        # Register in priority order: DUTs and GVLs first, then POUs and ITFs
+        duts_gvls: list[Path] = []
+        pous_itfs: list[Path] = []
+        for p in unique_paths:
+            if p.suffix.lower() in (".tcdut", ".tcgvl"):
+                duts_gvls.append(p)
+            else:
+                pous_itfs.append(p)
+
+        for p in duts_gvls + pous_itfs:
+            if p in results_by_path:
+                xml_doc, chash, cdata_results = results_by_path[p]
+                try:
+                    self._register_parsed_file(
+                        path=p,
+                        xml_doc=xml_doc,
+                        chash=chash,
+                        cdata_results=cdata_results,
+                        declaration_only=declaration_only,
+                    )
+                except Exception:
+                    continue
+
+    def _register_parsed_file(
         self,
-        file_path: Path,
-        text: Optional[str] = None,
-        declaration_only: bool = False,
+        path: Path,
+        xml_doc: TcXmlDocument,
+        chash: str,
+        cdata_results: list[tuple[CdataSpan, int, int, int, Optional[AstNode], list[CstNode], list[SyntaxDiagnostic]]],
+        declaration_only: bool = True,
     ) -> IndexedFile:
-        """Incrementally index or re-index a single TwinCAT file."""
-        path = file_path.resolve()
-
-        if text is None:
-            xml_doc = read_tc_xml_file(path)
-            content_bytes = xml_doc.raw_text.encode("utf-8")
-        else:
-            xml_doc = read_tc_xml(text, file_path=path)
-            content_bytes = text.encode("utf-8")
-
-        chash = hashlib.sha256(content_bytes).hexdigest()
-
-        # Check cache
-        if path in self.indexed_files:
-            existing = self.indexed_files[path]
-            if existing.content_hash == chash:
-                if declaration_only or existing.has_full_implementation:
-                    return existing
-
         # Remove old symbols and types associated with this file
         self.remove_file(path)
 
@@ -179,15 +248,7 @@ class WorkspaceIndex:
 
         default_span = SourceSpan.from_bounds(1, 1, 0, 1, 1, 0)
 
-        for span in xml_doc.cdata_spans:
-            if not span.content.strip():
-                continue
-
-            cdata_start_line, cdata_start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
-            line_offset = cdata_start_line - 1
-            col_offset = cdata_start_col - 1
-            char_offset = span.content_start
-
+        for span, line_offset, col_offset, char_offset, ast_node, cst_nodes, diags in cdata_results:
             # 1. Top-Level POU / DUT / GVL / ITF Declarations
             if span.kind in (
                 CdataKind.POU_DECLARATION,
@@ -195,7 +256,6 @@ class WorkspaceIndex:
                 CdataKind.GVL_DECLARATION,
                 CdataKind.ITF_DECLARATION,
             ):
-                ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
                 all_diags.extend(
                     SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
@@ -426,7 +486,6 @@ class WorkspaceIndex:
 
             # 2. Method Declarations
             elif span.kind == CdataKind.METHOD_DECLARATION:
-                ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
                 all_diags.extend(
                     SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
@@ -476,7 +535,6 @@ class WorkspaceIndex:
 
             # 3. Property Declarations
             elif span.kind == CdataKind.PROPERTY_DECLARATION:
-                ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
                 all_diags.extend(
                     SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
@@ -506,7 +564,6 @@ class WorkspaceIndex:
                     property_scopes[p_name.lower()] = p_scope
 
             elif span.kind in (CdataKind.PROPERTY_GET_DECLARATION, CdataKind.PROPERTY_SET_DECLARATION):
-                ast_node, cst_nodes, diags = parse_declaration(span.content)
                 all_cst_nodes.extend(cst_nodes)
                 all_diags.extend(
                     SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
@@ -540,11 +597,11 @@ class WorkspaceIndex:
             # 4. Implementation Bodies (POU, Method, Action, Property)
             elif span.is_implementation:
                 if not declaration_only:
-                    stmts, cst_nodes, diags = parse_implementation(span.content)
-                    all_cst_nodes.extend(cst_nodes)
+                    stmts, cst_nodes_impl, diags_impl = parse_implementation(span.content)
+                    all_cst_nodes.extend(cst_nodes_impl)
                     all_diags.extend(
                         SyntaxDiagnostic(d.message, d.span.offset_by(line_offset, col_offset, char_offset), d.severity, d.code)
-                        for d in diags
+                        for d in diags_impl
                     )
 
                     impl_scope = active_pou_scope or self.symbol_table.global_scope
@@ -595,6 +652,65 @@ class WorkspaceIndex:
         )
         self.indexed_files[path] = indexed
         return indexed
+
+    def update_file(
+        self,
+        file_path: Path,
+        text: Optional[str] = None,
+        declaration_only: bool = False,
+    ) -> IndexedFile:
+        """Incrementally index or re-index a single TwinCAT file."""
+        path = file_path.resolve()
+
+        if text is None:
+            xml_doc = read_tc_xml_file(path)
+            content_bytes = xml_doc.raw_text.encode("utf-8")
+        else:
+            xml_doc = read_tc_xml(text, file_path=path)
+            content_bytes = text.encode("utf-8")
+
+        chash = hashlib.sha256(content_bytes).hexdigest()
+
+        # Check cache
+        if path in self.indexed_files:
+            existing = self.indexed_files[path]
+            if existing.content_hash == chash:
+                if declaration_only or existing.has_full_implementation:
+                    return existing
+
+        cdata_results: list[
+            tuple[CdataSpan, int, int, int, Optional[AstNode], list[CstNode], list[SyntaxDiagnostic]]
+        ] = []
+        for span in xml_doc.cdata_spans:
+            if not span.content.strip():
+                continue
+            cdata_start_line, cdata_start_col = offset_to_line_col(xml_doc.raw_text, span.content_start)
+            line_offset = cdata_start_line - 1
+            col_offset = cdata_start_col - 1
+            char_offset = span.content_start
+
+            if span.kind in (
+                CdataKind.POU_DECLARATION,
+                CdataKind.DUT_DECLARATION,
+                CdataKind.GVL_DECLARATION,
+                CdataKind.ITF_DECLARATION,
+                CdataKind.METHOD_DECLARATION,
+                CdataKind.PROPERTY_DECLARATION,
+                CdataKind.PROPERTY_GET_DECLARATION,
+                CdataKind.PROPERTY_SET_DECLARATION,
+            ):
+                ast_node, cst_nodes, diags = parse_declaration(span.content)
+                cdata_results.append((span, line_offset, col_offset, char_offset, ast_node, cst_nodes, diags))
+            elif span.is_implementation:
+                cdata_results.append((span, line_offset, col_offset, char_offset, None, [], []))
+
+        return self._register_parsed_file(
+            path=path,
+            xml_doc=xml_doc,
+            chash=chash,
+            cdata_results=cdata_results,
+            declaration_only=declaration_only,
+        )
 
     def remove_file(self, file_path: Path) -> None:
         """Remove a file from the workspace index, symbol table, and type index."""
@@ -669,17 +785,37 @@ def get_shared_workspace(path_or_plcproj: Optional[Path | str] = None, force_ref
         target_proj_path: Optional[Path] = None
         if p.is_file() and p.suffix.lower() == ".plcproj":
             target_proj_path = p
+        elif p.is_file() and p.suffix.lower() in (".tcpou", ".tcdut", ".tcgvl", ".tcio"):
+            cur = p.parent
+            for _ in range(8):
+                plcs = [f for f in cur.glob("*.plcproj") if f.is_file()]
+                if plcs:
+                    target_proj_path = plcs[0].resolve()
+                    break
+                if cur.parent == cur:
+                    break
+                cur = cur.parent
         elif p.is_dir():
             plcs = list(p.glob("*.plcproj")) or list(p.glob("**/*.plcproj"))
             if plcs:
                 target_proj_path = plcs[0].resolve()
+            else:
+                cur = p
+                for _ in range(8):
+                    found = [f for f in cur.glob("*.plcproj") if f.is_file()]
+                    if found:
+                        target_proj_path = found[0].resolve()
+                        break
+                    if cur.parent == cur:
+                        break
+                    cur = cur.parent
 
         already_loaded = False
         if _SHARED_WORKSPACE is not None and not force_refresh:
             if _SHARED_WORKSPACE.project and target_proj_path:
                 already_loaded = (_SHARED_WORKSPACE.project.project_path.resolve() == target_proj_path)
             elif _SHARED_WORKSPACE.project and not target_proj_path:
-                already_loaded = (_SHARED_WORKSPACE.project.root_dir.resolve() == p)
+                already_loaded = (_SHARED_WORKSPACE.project.root_dir.resolve() in (p, *p.parents))
             elif not _SHARED_WORKSPACE.project and not target_proj_path and _SHARED_WORKSPACE.indexed_files:
                 already_loaded = True
 
