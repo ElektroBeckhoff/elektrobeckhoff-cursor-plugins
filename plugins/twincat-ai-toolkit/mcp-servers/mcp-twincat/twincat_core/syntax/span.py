@@ -63,6 +63,31 @@ class SourceSpan:
         return f"[{self.start.line}:{self.start.col}..{self.end.line}:{self.end.col}]"
 
 
+from bisect import bisect_right
+from functools import lru_cache
+
+
+@lru_cache(maxsize=256)
+def _get_line_starts(text: str) -> tuple[int, ...]:
+    starts = [0]
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\r":
+            if i + 1 < n and text[i + 1] == "\n":
+                i += 2
+            else:
+                i += 1
+            starts.append(i)
+        elif ch == "\n":
+            i += 1
+            starts.append(i)
+        else:
+            i += 1
+    return tuple(starts)
+
+
 def offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
     """Calculate 1-based line and 1-based column for a 0-based character offset in text.
 
@@ -73,27 +98,18 @@ def offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
     if offset >= len(text):
         offset = len(text)
 
-    # If offset points to '\n' preceded by '\r', it is the second byte of CRLF on the current line
-    if offset < len(text) and text[offset] == "\n" and offset > 0 and text[offset - 1] == "\r":
-        lines_before = text[: offset - 1].splitlines(keepends=True)
-        cur_line = len(lines_before) + 1 if (lines_before and lines_before[-1].endswith(("\n", "\r"))) else max(1, len(lines_before))
-        last_line_len = len(lines_before[-1]) if (lines_before and not lines_before[-1].endswith(("\n", "\r"))) else 0
-        return cur_line, last_line_len + 2
-
-    lines_before = text[:offset].splitlines(keepends=True)
-    if not lines_before:
-        return 1, 1
-    if lines_before[-1].endswith(("\n", "\r")):
-        return len(lines_before) + 1, 1
-    return len(lines_before), len(lines_before[-1]) + 1
+    starts = _get_line_starts(text)
+    line_idx = bisect_right(starts, offset) - 1
+    return line_idx + 1, offset - starts[line_idx] + 1
 
 
 def line_col_to_offset(text: str, line: int, col: int) -> int:
     """Calculate 0-based character offset for 1-based line and 1-based column in text."""
     if line <= 1:
         return max(0, col - 1)
-    lines = text.splitlines(keepends=True)
-    if line > len(lines):
+    starts = _get_line_starts(text)
+    if line > len(starts):
         return len(text)
-    return sum(len(l) for l in lines[: line - 1]) + max(0, col - 1)
+    line_start = starts[line - 1]
+    return min(len(text), line_start + max(0, col - 1))
 

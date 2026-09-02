@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from typing import List, Optional, Sequence, Tuple
 
 from .ast import (
@@ -37,6 +38,51 @@ class DeclarationParser:
         # Non-trivia tokens for parser navigation
         self.tokens = [t for t in tokens if not t.is_trivia]
         self.pos = 0
+
+        # Pre-index token start offsets for O(log N) leading trivia searches
+        self._token_start_offsets = [t.span.start.offset for t in tokens]
+
+        # Pre-parse and index pragmas for fast O(1) / O(k) lookups
+        self._pragmas: list[tuple[int, PragmaAttribute]] = []
+        for t in tokens:
+            if t.type == TokenType.PRAGMA:
+                raw = t.value
+                m = _RE_PRAGMA_ATTR.search(raw)
+                if m:
+                    attr_name = m.group(1)
+                    attr_val = m.group(2)
+                    self._pragmas.append(
+                        (
+                            t.span.start.offset,
+                            PragmaAttribute(
+                                span=t.span,
+                                name=attr_name,
+                                value=attr_val,
+                                raw_text=raw,
+                            ),
+                        )
+                    )
+                else:
+                    self._pragmas.append(
+                        (
+                            t.span.start.offset,
+                            PragmaAttribute(
+                                span=t.span,
+                                name=raw.strip("{} "),
+                                value=None,
+                                raw_text=raw,
+                            ),
+                        )
+                    )
+
+        # Pre-index comments by line for O(1) trailing doc comment lookups
+        self._comments_by_line: dict[int, list[Token]] = {}
+        for t in tokens:
+            if t.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
+                line = t.span.start.line
+                if line not in self._comments_by_line:
+                    self._comments_by_line[line] = []
+                self._comments_by_line[line].append(t)
 
     @classmethod
     def from_source(cls, source: str) -> "DeclarationParser":
@@ -80,32 +126,13 @@ class DeclarationParser:
         return None
 
     def _extract_pragmas(self, span: SourceSpan) -> list[PragmaAttribute]:
-        """Extract pragmas from full token stream that appear within or right before span."""
+        """Extract pragmas from pre-parsed pragma list that appear within or right before span."""
+        if not self._pragmas:
+            return []
         pragmas: list[PragmaAttribute] = []
-        for t in self.all_tokens:
-            if t.type == TokenType.PRAGMA and t.span.start.offset <= span.end.offset:
-                raw = t.value
-                m = _RE_PRAGMA_ATTR.search(raw)
-                if m:
-                    attr_name = m.group(1)
-                    attr_val = m.group(2)
-                    pragmas.append(
-                        PragmaAttribute(
-                            span=t.span,
-                            name=attr_name,
-                            value=attr_val,
-                            raw_text=raw,
-                        )
-                    )
-                else:
-                    pragmas.append(
-                        PragmaAttribute(
-                            span=t.span,
-                            name=raw.strip("{} "),
-                            value=None,
-                            raw_text=raw,
-                        )
-                    )
+        for start_off, p_obj in self._pragmas:
+            if start_off <= span.end.offset:
+                pragmas.append(p_obj)
         return pragmas
 
     @staticmethod
@@ -123,23 +150,20 @@ class DeclarationParser:
     def _extract_doc_comment(self, span: SourceSpan) -> Optional[str]:
         """Extract doc comment (trailing on same line or leading on immediately preceding lines)."""
         # 1. Trailing comment: same line as span.end, offset >= span.end.offset
-        trailing_comments: list[str] = []
-        for tok in self.all_tokens:
-            if tok.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
-                if tok.span.start.line == span.end.line and tok.span.start.offset >= span.end.offset:
+        line_comments = self._comments_by_line.get(span.end.line)
+        if line_comments:
+            trailing_comments: list[str] = []
+            for tok in line_comments:
+                if tok.span.start.offset >= span.end.offset:
                     cleaned = self._clean_comment_text(tok.value)
                     if cleaned:
                         trailing_comments.append(cleaned)
-
-        if trailing_comments:
-            return " ".join(trailing_comments)
+            if trailing_comments:
+                return " ".join(trailing_comments)
 
         # 2. Leading comments: find comments immediately preceding span.start.offset
+        idx = bisect_left(self._token_start_offsets, span.start.offset)
         leading_comments: list[str] = []
-        idx = 0
-        while idx < len(self.all_tokens) and self.all_tokens[idx].span.start.offset < span.start.offset:
-            idx += 1
-
         back_idx = idx - 1
         while back_idx >= 0:
             tok = self.all_tokens[back_idx]

@@ -98,7 +98,9 @@ class Lexer:
         return Position(line=self.line, col=self.col, offset=self.offset)
 
     def _advance(self, count: int) -> None:
-        for _ in range(count):
+        if count <= 0:
+            return
+        if count == 1:
             if self.offset < self.length:
                 ch = self.source[self.offset]
                 self.offset += 1
@@ -106,14 +108,35 @@ class Lexer:
                     self.line += 1
                     self.col = 1
                 elif ch == "\r":
-                    # Lookahead for CRLF
                     if self.offset < self.length and self.source[self.offset] == "\n":
-                        pass  # handled when next char (\n) is consumed
+                        pass
                     else:
                         self.line += 1
                         self.col = 1
                 else:
                     self.col += 1
+            return
+
+        end_off = min(self.offset + count, self.length)
+        segment = self.source[self.offset : end_off]
+        if "\n" not in segment and "\r" not in segment:
+            self.offset = end_off
+            self.col += len(segment)
+            return
+
+        for ch in segment:
+            self.offset += 1
+            if ch == "\n":
+                self.line += 1
+                self.col = 1
+            elif ch == "\r":
+                if self.offset < self.length and self.source[self.offset] == "\n":
+                    pass
+                else:
+                    self.line += 1
+                    self.col = 1
+            else:
+                self.col += 1
 
     def tokenize_all(self, include_trivia: bool = True) -> list[Token]:
         """Tokenize entire source into a list of Tokens."""
