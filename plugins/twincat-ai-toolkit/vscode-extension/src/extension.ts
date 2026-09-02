@@ -127,6 +127,116 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Command: Format Document / File(s) / Folder (Recursive)
+  const formatDocumentHandler = async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+    // Determine target paths from arguments or active editor
+    const targetPaths: string[] = [];
+
+    if (uris && Array.isArray(uris) && uris.length > 0) {
+      for (const u of uris) {
+        if (u && u.fsPath) {
+          targetPaths.push(u.fsPath);
+        }
+      }
+    } else if (uri && uri.fsPath) {
+      targetPaths.push(uri.fsPath);
+    } else if (vscode.window.activeTextEditor) {
+      targetPaths.push(vscode.window.activeTextEditor.document.uri.fsPath);
+    }
+
+    if (targetPaths.length === 0) {
+      vscode.window.showWarningMessage('TwinCAT: No file or folder selected for formatting.');
+      return;
+    }
+
+    // Ensure unsaved changes are saved before file-based formatting
+    await vscode.workspace.saveAll(false);
+
+    if (!client) {
+      vscode.window.showErrorMessage('TwinCAT Language Server is not running.');
+      return;
+    }
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'TwinCAT Formatter',
+        cancellable: false,
+      },
+      async (progress) => {
+        progress.report({ message: 'Formatting TwinCAT files...' });
+        try {
+          const response = await client!.sendRequest<{
+            success: boolean;
+            total: number;
+            formatted: number;
+            unchanged: number;
+            errors: number;
+            message?: string;
+            results?: Array<{
+              file: string;
+              path: string;
+              changed: boolean;
+              success: boolean;
+              errors?: string[];
+              warnings?: string[];
+            }>;
+          }>('twincat/formatFiles', {
+            paths: targetPaths,
+            recursive: true,
+            dryRun: false,
+          });
+
+          if (!response) {
+            vscode.window.showErrorMessage('TwinCAT: Formatter returned no response.');
+            return;
+          }
+
+          if (response.total === 0) {
+            vscode.window.setStatusBarMessage(
+              response.message || 'TwinCAT: No formattable files found.',
+              4000
+            );
+            return;
+          }
+
+          if (response.errors > 0) {
+            const errDetails = response.results
+              ?.filter((r) => !r.success || (r.errors && r.errors.length > 0))
+              .map((r) => `${r.file}: ${r.errors?.join(', ')}`)
+              .slice(0, 3)
+              .join('; ');
+            vscode.window.showErrorMessage(
+              `TwinCAT Format: ${response.errors} error(s) occurred (${response.formatted} formatted, ${response.unchanged} unchanged). ${errDetails ? '[' + errDetails + ']' : ''}`
+            );
+          } else if (response.formatted === 0) {
+            vscode.window.setStatusBarMessage(
+              `TwinCAT: All ${response.total} file(s) are already formatted.`,
+              4000
+            );
+          } else {
+            vscode.window.setStatusBarMessage(
+              `TwinCAT: Formatted ${response.formatted} of ${response.total} file(s) (${response.unchanged} unchanged).`,
+              5000
+            );
+          }
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`TwinCAT Format error: ${err?.message || err}`);
+        }
+      }
+    );
+  };
+
+  const formatDocumentCmd = vscode.commands.registerCommand(
+    'twincat.formatDocument',
+    formatDocumentHandler
+  );
+
+  const formatCmd = vscode.commands.registerCommand(
+    'twincat.format',
+    formatDocumentHandler
+  );
+
   // Command: Format Current Section / Member
   const formatSectionCmd = vscode.commands.registerCommand(
     'twincat.formatSection',
@@ -194,6 +304,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     client,
     restartServerCmd,
+    formatDocumentCmd,
+    formatCmd,
     formatSectionCmd
   );
 }

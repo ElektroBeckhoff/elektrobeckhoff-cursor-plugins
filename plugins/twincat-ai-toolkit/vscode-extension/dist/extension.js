@@ -18604,6 +18604,83 @@ function activate(context) {
       }
     }
   );
+  const formatDocumentHandler = async (uri, uris) => {
+    const targetPaths = [];
+    if (uris && Array.isArray(uris) && uris.length > 0) {
+      for (const u of uris) {
+        if (u && u.fsPath) {
+          targetPaths.push(u.fsPath);
+        }
+      }
+    } else if (uri && uri.fsPath) {
+      targetPaths.push(uri.fsPath);
+    } else if (vscode2.window.activeTextEditor) {
+      targetPaths.push(vscode2.window.activeTextEditor.document.uri.fsPath);
+    }
+    if (targetPaths.length === 0) {
+      vscode2.window.showWarningMessage("TwinCAT: No file or folder selected for formatting.");
+      return;
+    }
+    await vscode2.workspace.saveAll(false);
+    if (!client) {
+      vscode2.window.showErrorMessage("TwinCAT Language Server is not running.");
+      return;
+    }
+    await vscode2.window.withProgress(
+      {
+        location: vscode2.ProgressLocation.Notification,
+        title: "TwinCAT Formatter",
+        cancellable: false
+      },
+      async (progress) => {
+        progress.report({ message: "Formatting TwinCAT files..." });
+        try {
+          const response = await client.sendRequest("twincat/formatFiles", {
+            paths: targetPaths,
+            recursive: true,
+            dryRun: false
+          });
+          if (!response) {
+            vscode2.window.showErrorMessage("TwinCAT: Formatter returned no response.");
+            return;
+          }
+          if (response.total === 0) {
+            vscode2.window.setStatusBarMessage(
+              response.message || "TwinCAT: No formattable files found.",
+              4e3
+            );
+            return;
+          }
+          if (response.errors > 0) {
+            const errDetails = response.results?.filter((r) => !r.success || r.errors && r.errors.length > 0).map((r) => `${r.file}: ${r.errors?.join(", ")}`).slice(0, 3).join("; ");
+            vscode2.window.showErrorMessage(
+              `TwinCAT Format: ${response.errors} error(s) occurred (${response.formatted} formatted, ${response.unchanged} unchanged). ${errDetails ? "[" + errDetails + "]" : ""}`
+            );
+          } else if (response.formatted === 0) {
+            vscode2.window.setStatusBarMessage(
+              `TwinCAT: All ${response.total} file(s) are already formatted.`,
+              4e3
+            );
+          } else {
+            vscode2.window.setStatusBarMessage(
+              `TwinCAT: Formatted ${response.formatted} of ${response.total} file(s) (${response.unchanged} unchanged).`,
+              5e3
+            );
+          }
+        } catch (err) {
+          vscode2.window.showErrorMessage(`TwinCAT Format error: ${err?.message || err}`);
+        }
+      }
+    );
+  };
+  const formatDocumentCmd = vscode2.commands.registerCommand(
+    "twincat.formatDocument",
+    formatDocumentHandler
+  );
+  const formatCmd = vscode2.commands.registerCommand(
+    "twincat.format",
+    formatDocumentHandler
+  );
   const formatSectionCmd = vscode2.commands.registerCommand(
     "twincat.formatSection",
     async () => {
@@ -18652,6 +18729,8 @@ function activate(context) {
   context.subscriptions.push(
     client,
     restartServerCmd,
+    formatDocumentCmd,
+    formatCmd,
     formatSectionCmd
   );
 }
