@@ -399,6 +399,7 @@ def inspect_instance_licenses(instance_path: str) -> dict[str, Any]:
         os.path.join(instance_path, "Target", "License"),
         os.path.join(instance_path, "3.1", "Boot", "License"),
         os.path.join(instance_path, "Boot", "License"),
+        os.path.join(instance_path, "License"),
     ]
 
     found_files: list[str] = []

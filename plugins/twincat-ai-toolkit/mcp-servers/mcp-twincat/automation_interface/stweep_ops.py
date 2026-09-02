@@ -1232,8 +1232,10 @@ class StweepOpsMixin:
     @staticmethod
     def _collect_formattable_files(root: str, recursive: bool) -> list[str]:
         out: list[str] = []
+        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
         if recursive:
-            for dirpath, _dirnames, filenames in os.walk(root):
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
                 for name in filenames:
                     if os.path.splitext(name)[1].lower() in _FORMATABLE_EXTS:
                         out.append(os.path.join(dirpath, name))

@@ -167,6 +167,11 @@ def resolve_plcproj_path(
 
     candidates = list(root.glob("*.plcproj"))
     if len(candidates) == 0:
+        candidates = [
+            p for p in root.glob("**/*.plcproj")
+            if not any(part.lower() in EXCLUDED_DIR_NAMES or part.lower() in ("samples", "versions") for part in p.parts)
+        ]
+    if len(candidates) == 0:
         raise FileNotFoundError(f"No .plcproj under: {root}")
     if len(candidates) > 1:
         names = ", ".join(c.name for c in candidates)
