@@ -33,7 +33,7 @@ from ..syntax.parser_statements import StatementParser
 from ..syntax.span import SourceSpan, offset_to_line_col
 from .scopes import Scope
 from .symbols import SymbolKind
-from .type_compatibility import TypeCheckResultKind, check_type_assignment
+from .type_compatibility import TypeCheckResultKind, check_type_assignment, _clean_type_str
 from .type_index import BUILTIN_TYPES
 
 if TYPE_CHECKING:
@@ -50,6 +50,12 @@ def extract_base_type_name(type_ref: str) -> str:
     cleaned = type_ref.strip()
     if not cleaned:
         return ""
+
+    for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
+        if re.match(rf"^{prefix}\s+", cleaned, re.IGNORECASE):
+            cleaned = re.sub(rf"^{prefix}\s+", "", cleaned, flags=re.IGNORECASE).strip()
+    if ":" in cleaned:
+        cleaned = cleaned.rsplit(":", 1)[-1].strip()
 
     if RE_STRING_LEN.match(cleaned):
         return "WSTRING" if cleaned.upper().startswith("W") else "STRING"
@@ -435,7 +441,8 @@ def _validate_statement(
     elif isinstance(stmt, IfStmt):
         _validate_expression_identifiers(stmt.condition, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
         cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
-        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+        cond_clean = _clean_type_str(cond_t) if cond_t else ""
+        if cond_clean and cond_clean not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_clean.startswith("__SYSTEM"):
             diagnostics.append(
                 SyntaxDiagnostic(
                     message=f"IF condition expression must be of type 'BOOL', found '{cond_t}'",
@@ -449,7 +456,8 @@ def _validate_statement(
         for branch in stmt.elsifs:
             _validate_expression_identifiers(branch.condition, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
             b_cond_t = index.resolver.infer_expression_type(branch.condition, scope)
-            if b_cond_t and b_cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not b_cond_t.upper().startswith("__SYSTEM"):
+            b_cond_clean = _clean_type_str(b_cond_t) if b_cond_t else ""
+            if b_cond_clean and b_cond_clean not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not b_cond_clean.startswith("__SYSTEM"):
                 diagnostics.append(
                     SyntaxDiagnostic(
                         message=f"ELSIF condition expression must be of type 'BOOL', found '{b_cond_t}'",
@@ -467,7 +475,8 @@ def _validate_statement(
     elif isinstance(stmt, WhileStmt):
         _validate_expression_identifiers(stmt.condition, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
         cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
-        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+        cond_clean = _clean_type_str(cond_t) if cond_t else ""
+        if cond_clean and cond_clean not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_clean.startswith("__SYSTEM"):
             diagnostics.append(
                 SyntaxDiagnostic(
                     message=f"WHILE condition expression must be of type 'BOOL', found '{cond_t}'",
@@ -482,7 +491,8 @@ def _validate_statement(
     elif isinstance(stmt, RepeatStmt):
         _validate_expression_identifiers(stmt.condition, scope, index, file_path, diagnostics, line_offset, col_offset, char_offset)
         cond_t = index.resolver.infer_expression_type(stmt.condition, scope)
-        if cond_t and cond_t.upper() not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_t.upper().startswith("__SYSTEM"):
+        cond_clean = _clean_type_str(cond_t) if cond_t else ""
+        if cond_clean and cond_clean not in ("BOOL", "BIT", "ANY", "ANY_TYPE", "PVOID") and not cond_clean.startswith("__SYSTEM"):
             diagnostics.append(
                 SyntaxDiagnostic(
                     message=f"REPEAT UNTIL condition expression must be of type 'BOOL', found '{cond_t}'",

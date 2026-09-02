@@ -1237,6 +1237,58 @@ END_VAR
         assert len(sem_003_unimpl) == 1
         assert "InitParentNode" in sem_003_unimpl[0].message
 
+    def test_var_in_out_constant_no_init_required(self, tmp_path):
+        from twincat_core.syntax.parser_declarations import DeclarationParser
+
+        cdata = """FUNCTION_BLOCK FB_Stream
+VAR_IN_OUT CONSTANT
+    sKey   : STRING;
+    sValue : STRING;
+END_VAR
+"""
+        parser = DeclarationParser.from_source(cdata)
+        ast_node, cst_nodes = parser.parse_declaration_file()
+        assert len(parser.diagnostics) == 0, f"Expected 0 diagnostics for VAR_IN_OUT CONSTANT without initial value, got: {parser.diagnostics}"
+
+    def test_method_boolean_return_with_var_inst_state_machine(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_HttpClient.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_HttpClient" Id="{55555555-5555-5555-5555-555555555555}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_HttpClient
+VAR
+    bExecute : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[]]></Implementation>
+    <Method Name="Execute" Id="{55555555-5555-5555-5555-555555555556}">
+      <Declaration><![CDATA[METHOD PUBLIC Execute : BOOL
+VAR_INST
+    _nState : INT;
+END_VAR
+]]></Declaration>
+      <Implementation><![CDATA[
+IF Execute THEN
+    _nState := 1;
+END_IF;
+
+IF _nState = 1 THEN
+    Execute := TRUE;
+END_IF;
+]]></Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        assert len(diags) == 0, f"Expected 0 diagnostics for Method returning BOOL with VAR_INST, got: {diags}"
+
+
 
 
 

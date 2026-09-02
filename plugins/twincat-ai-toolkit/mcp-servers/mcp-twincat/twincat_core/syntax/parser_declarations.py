@@ -217,6 +217,8 @@ class DeclarationParser:
                 TokenType.KEYWORD_VAR_STAT,
                 TokenType.KEYWORD_VAR_INST,
                 TokenType.KEYWORD_VAR_CONFIG,
+                TokenType.KEYWORD_VAR_EXTERNAL,
+                TokenType.KEYWORD_VAR_GENERIC,
             ):
                 var_blocks, block_csts = self.parse_all_var_blocks()
                 cst_nodes.extend(block_csts)
@@ -260,9 +262,11 @@ class DeclarationParser:
             TokenType.KEYWORD_VAR_IN_OUT,
             TokenType.KEYWORD_VAR_TEMP,
             TokenType.KEYWORD_VAR_STAT,
+            TokenType.KEYWORD_VAR_INST,
             TokenType.KEYWORD_VAR_CONFIG,
             TokenType.KEYWORD_VAR_GLOBAL,
             TokenType.KEYWORD_VAR_EXTERNAL,
+            TokenType.KEYWORD_VAR_GENERIC,
             TokenType.KEYWORD_END_FUNCTION,
             TokenType.KEYWORD_END_METHOD,
             TokenType.KEYWORD_END_PROPERTY,
@@ -927,6 +931,7 @@ class DeclarationParser:
             mod_tok = self.advance()
             if mod_tok.type == TokenType.KEYWORD_CONSTANT:
                 is_constant = True
+                block_type = f"{block_type} CONSTANT"
             elif mod_tok.type == TokenType.KEYWORD_RETAIN:
                 is_retain = True
             elif mod_tok.type == TokenType.KEYWORD_PERSISTENT:
@@ -976,8 +981,8 @@ class DeclarationParser:
 
         # Validation rules for variables in block
         for v in variables:
-            # TC-DECL-003: Constant variables must have an initial value
-            if is_constant or v.is_constant:
+            # TC-DECL-003: Constant variables must have an initial value (VAR_IN_OUT CONSTANT is a reference contract, not an initialization)
+            if (is_constant or v.is_constant) and not block_type.startswith("VAR_IN_OUT"):
                 if not v.initial_value or not v.initial_value.strip():
                     self.diagnostics.append(
                         SyntaxDiagnostic(
@@ -988,7 +993,7 @@ class DeclarationParser:
                         )
                     )
             # TC-DECL-004: VAR_IN_OUT variables cannot have an initial value
-            if block_type == "VAR_IN_OUT" and v.initial_value:
+            if block_type.startswith("VAR_IN_OUT") and v.initial_value:
                 self.diagnostics.append(
                     SyntaxDiagnostic(
                         message=f"VAR_IN_OUT variable '{v.name}' cannot have an initial value",

@@ -99,6 +99,13 @@ def _clean_type_str(type_str: str) -> str:
     t = type_str.strip()
     if not t:
         return ""
+    # Strip VAR_INST, VAR_STAT, etc. modifiers if present in raw declaration strings
+    for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
+        if t.upper().startswith(f"{prefix} "):
+            t = t[len(prefix) + 1:].strip()
+    if ":" in t:
+        # e.g. "BOOL VAR_INST _nState : INT" -> take the last part after the colon
+        t = t.rsplit(":", 1)[-1].strip()
     if t.upper().startswith("POINTER TO"):
         inner = t[10:].strip()
         return f"POINTER TO {_clean_type_str(inner)}"

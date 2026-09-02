@@ -155,6 +155,11 @@ class TypeIndex:
         s = raw.strip()
         if not s:
             return ""
+        for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
+            if re.match(rf"^{prefix}\s+", s, re.IGNORECASE):
+                s = re.sub(rf"^{prefix}\s+", "", s, flags=re.IGNORECASE).strip()
+        if ":" in s:
+            s = s.rsplit(":", 1)[-1].strip()
         if re.match(r"^REFERENCE\s+TO\s+", s, re.IGNORECASE):
             s = re.sub(r"^REFERENCE\s+TO\s+", "", s, flags=re.IGNORECASE).strip()
         if re.match(r"^POINTER\s+TO\s+", s, re.IGNORECASE):
