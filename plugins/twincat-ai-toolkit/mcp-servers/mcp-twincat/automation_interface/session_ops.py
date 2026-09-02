@@ -302,6 +302,14 @@ class SessionOpsMixin:
         self._sln_path = state["sln_path"]
         self._plcproj_file_path = state.get("plcproj_file_path")
         self._prog_id = state.get("prog_id") or self._prog_id
+        if not self._plcproj_file_path or not _tai().os.path.isfile(self._plcproj_file_path):
+            self._plcproj_file_path = self._detect_plcproj_path()
+        elif self._sln_path:
+            sln_dir = _tai().os.path.dirname(self._sln_path)
+            repo = self._find_git_root(self._sln_path) or sln_dir
+            norm_plc = _tai().os.path.abspath(self._plcproj_file_path)
+            if not (norm_plc.startswith(_tai().os.path.abspath(sln_dir)) or norm_plc.startswith(_tai().os.path.abspath(repo))):
+                self._plcproj_file_path = self._detect_plcproj_path()
         self._ensure_silent_mode()
         log.info("Re-attached to cached XAE instance for '%s'",
                  self._sln_path)
@@ -817,12 +825,14 @@ class SessionOpsMixin:
                 log.info("XAE version requested: %s (%s)",
                          xae_version, preferred_prog_id)
 
-        if plcproj_path:
-            self._plcproj_file_path = plcproj_path
-
         expected_sln = sln_path
         if not expected_sln and plcproj_path:
             expected_sln = self._find_sln_near(plcproj_path)
+
+        if plcproj_path:
+            self._plcproj_file_path = plcproj_path
+        elif self._sln_path and expected_sln and _tai()._canonical_path(expected_sln) != _tai()._canonical_path(self._sln_path):
+            self._plcproj_file_path = None
 
         if expected_sln and not _tai().os.path.isfile(expected_sln):
             return self._open_result(
@@ -845,6 +855,9 @@ class SessionOpsMixin:
                 self._dte = None
                 self._sys_man = None
                 self._plc_proj_item = None
+                self._sln_path = None
+                if not plcproj_path:
+                    self._plcproj_file_path = None
 
         # 1. Registry: re-attach to a previously tracked instance
         if not self._dte and norm_expected:
@@ -1042,8 +1055,14 @@ class SessionOpsMixin:
             )
 
         self._sln_path = str(self._dte.Solution.FullName)
-        if not self._plcproj_file_path:
+        if not self._plcproj_file_path or not _tai().os.path.isfile(self._plcproj_file_path):
             self._plcproj_file_path = self._detect_plcproj_path()
+        elif self._sln_path:
+            sln_dir = _tai().os.path.dirname(self._sln_path)
+            repo = self._find_git_root(self._sln_path) or sln_dir
+            norm_plc = _tai().os.path.abspath(self._plcproj_file_path)
+            if not (norm_plc.startswith(_tai().os.path.abspath(sln_dir)) or norm_plc.startswith(_tai().os.path.abspath(repo))):
+                self._plcproj_file_path = self._detect_plcproj_path()
         # New solution open clears I/O prereq (devices may differ)
         if hasattr(self, "_ensure_prereqs"):
             prereqs = self._ensure_prereqs()
@@ -1409,25 +1428,26 @@ class SessionOpsMixin:
             return None
 
         # 1. Try reading directly from plc_proj_item
-        if self._plc_proj_item:
+        plc_item = getattr(self, "_plc_proj_item", None)
+        if plc_item:
             try:
-                if hasattr(self._plc_proj_item, "FileName") and self._plc_proj_item.FileName:
-                    fn = str(self._plc_proj_item.FileName)
+                if hasattr(plc_item, "FileName") and plc_item.FileName:
+                    fn = str(plc_item.FileName)
                     if fn.endswith(".plcproj") and os.path.isfile(fn):
                         return os.path.abspath(fn)
             except Exception:
                 pass
             try:
-                if hasattr(self._plc_proj_item, "FileNames"):
-                    fn = str(self._plc_proj_item.FileNames(1))
+                if hasattr(plc_item, "FileNames"):
+                    fn = str(plc_item.FileNames(1))
                     if fn.endswith(".plcproj") and os.path.isfile(fn):
                         return os.path.abspath(fn)
             except Exception:
                 pass
 
         proj_name = self._normalize_proj_name(
-            str(self._plc_proj_item.Name)
-        ) if self._plc_proj_item else ""
+            str(plc_item.Name)
+        ) if plc_item else ""
 
         excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_CompileInfo"}
         first_match = None

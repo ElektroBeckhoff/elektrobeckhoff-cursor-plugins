@@ -291,7 +291,10 @@ def _resolve_path(path: str) -> Union[str, dict]:
 
 def _auto_detect_plcproj(sln_path: str = "", bridge_sln_getter: Any = None) -> str:
     """Find the first .plcproj file near the solution, active bridge, or git repo root."""
-    excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
+    excludes = {
+        "samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo",
+        "solution", "twincat3-solution", "fixtures", ".pytest_cache", ".cursor",
+    }
 
     search_roots: list[str] = []
     sln_path = _clean_path(sln_path)
@@ -302,6 +305,14 @@ def _auto_detect_plcproj(sln_path: str = "", bridge_sln_getter: Any = None) -> s
         repo = _find_repo_root(sln_path)
         if repo and repo != sln_dir and os.path.isdir(repo):
             search_roots.append(repo)
+    if not search_roots and not bridge_sln_getter:
+        try:
+            from .solution import _get_bridge
+            b = _get_bridge()
+            if b:
+                bridge_sln_getter = lambda: b._call_sta(lambda: b._sln_path, timeout=2)
+        except Exception:
+            pass
     if not search_roots and bridge_sln_getter:
         try:
             b_sln = bridge_sln_getter() or ""
@@ -323,7 +334,18 @@ def _auto_detect_plcproj(sln_path: str = "", bridge_sln_getter: Any = None) -> s
         if not os.path.isdir(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
-            dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
+            dirnames[:] = [
+                d for d in dirnames
+                if d.lower() not in excludes
+                and not d.lower().startswith(".pytest")
+            ]
+            # Avoid plugin-internal fixtures if scanning from plugin repo
+            norm_dir = dirpath.replace("\\", "/").lower()
+            if "/plugins/" in norm_dir and "/solution/" in norm_dir:
+                continue
+            if "/fixtures/" in norm_dir:
+                continue
+
             for f in filenames:
                 if f.lower().endswith(".plcproj"):
                     return os.path.abspath(os.path.join(dirpath, f))
@@ -344,6 +366,21 @@ def _resolve_plcproj_path(
     plcproj_path = _clean_path(plcproj_path)
     sln_path = _clean_path(sln_path)
     plcproj_from_bridge = _clean_path(plcproj_from_bridge)
+
+    if not plcproj_from_bridge:
+        try:
+            from .solution import _get_bridge
+            b = _get_bridge()
+            if b:
+                plcproj_from_bridge = _clean_path(
+                    b._call_sta(lambda: b._plcproj_file_path, timeout=2) or ""
+                )
+                if not sln_path:
+                    sln_path = _clean_path(
+                        b._call_sta(lambda: b._sln_path, timeout=2) or ""
+                    )
+        except Exception:
+            pass
 
     if plcproj_path:
         raw = plcproj_path

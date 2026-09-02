@@ -4,11 +4,19 @@ Core syntax, AST, semantic diagnostics, and symbol resolution MCP tools for Twin
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, List, Optional
 
 from twincat_plcproj_ops import read_project_info
-from .common import _clean_path, _json, _resolve_plcproj_path, _resolve_sln, _EXCLUDES_LOWER
+from .common import (
+    _clean_path,
+    _find_repo_root,
+    _json,
+    _resolve_plcproj_path,
+    _resolve_sln,
+    _EXCLUDES_LOWER,
+)
 
 
 def twincat_plcproj_info(plcproj_path: str = "") -> str:
@@ -124,7 +132,92 @@ def twincat_check_syntax(
         target_path: Optional[Path] = None
         cleaned_path = _clean_path(path)
         if cleaned_path:
-            p = Path(cleaned_path).resolve()
+            p = Path(cleaned_path)
+            if not p.is_absolute() and not p.exists():
+                found_candidate: Optional[Path] = None
+                # 1. Search in active bridge solution/plcproj directory
+                try:
+                    from .solution import _get_bridge
+                    b = _get_bridge()
+                    if b:
+                        b_sln = _clean_path(b._call_sta(lambda: b._sln_path, timeout=2) or "")
+                        b_plc = _clean_path(b._call_sta(lambda: b._plcproj_file_path, timeout=2) or "")
+                        search_dirs = []
+                        if b_plc and os.path.isfile(b_plc):
+                            search_dirs.append(Path(b_plc).parent)
+                        if b_sln and os.path.isfile(b_sln):
+                            search_dirs.append(Path(b_sln).parent)
+                            b_repo = _find_repo_root(b_sln)
+                            if b_repo and Path(b_repo) not in search_dirs:
+                                search_dirs.append(Path(b_repo))
+                        for sdir in search_dirs:
+                            direct = sdir / p
+                            if direct.is_file():
+                                found_candidate = direct.resolve()
+                                break
+                            for match in sdir.rglob(p.name):
+                                if match.is_file():
+                                    found_candidate = match.resolve()
+                                    break
+                            if found_candidate:
+                                break
+                except Exception:
+                    pass
+
+                # 2. Search in workspace project root if already indexed
+                if not found_candidate:
+                    try:
+                        from twincat_core.project import get_shared_workspace
+                        ws = get_shared_workspace()
+                        if ws:
+                            if ws.project:
+                                proj_root = ws.project.root_dir
+                                direct = proj_root / p
+                                if direct.is_file():
+                                    found_candidate = direct.resolve()
+                                else:
+                                    for match in proj_root.rglob(p.name):
+                                        if match.is_file():
+                                            found_candidate = match.resolve()
+                                            break
+                            if not found_candidate and getattr(ws, "root_dir", None):
+                                r_dir = Path(ws.root_dir)
+                                direct = r_dir / p
+                                if direct.is_file():
+                                    found_candidate = direct.resolve()
+                                else:
+                                    for match in r_dir.rglob(p.name):
+                                        if match.is_file():
+                                            found_candidate = match.resolve()
+                                            break
+                            if not found_candidate and getattr(ws, "indexed_files", None):
+                                for f in ws.indexed_files:
+                                    if Path(f).name.lower() == p.name.lower():
+                                        found_candidate = Path(f).resolve()
+                                        break
+                    except Exception:
+                        pass
+
+                # 3. Search near CWD / repo root
+                if not found_candidate:
+                    cwd = Path.cwd()
+                    for match in cwd.rglob(p.name):
+                        norm_m = str(match).replace("\\", "/").lower()
+                        if "/plugins/" in norm_m and "/solution/" in norm_m:
+                            continue
+                        if "/fixtures/" in norm_m:
+                            continue
+                        if match.is_file():
+                            found_candidate = match.resolve()
+                            break
+
+                if found_candidate:
+                    p = found_candidate
+                else:
+                    p = p.resolve()
+            else:
+                p = p.resolve()
+
             if not p.exists():
                 return _json({"success": False, "error": f"Path does not exist: {path}"})
             target_path = p

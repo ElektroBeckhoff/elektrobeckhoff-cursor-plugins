@@ -170,5 +170,66 @@ class TestExportProgressDirectArtifacts(unittest.TestCase):
         self.assertEqual(prog.compiled_library_path, r"C:\Versions\1.6.8.0\Tc3_EB_BA-1.6.8.0.compiled-library")
 
 
+    def test_auto_detect_plcproj_excludes_solution_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a fixture directory with a plcproj
+            fixture_dir = os.path.join(tmpdir, "plugins", "twincat-ai-toolkit", "solution", "twincat3-solution")
+            os.makedirs(fixture_dir, exist_ok=True)
+            with open(os.path.join(fixture_dir, "test.plcproj"), "w") as f:
+                f.write("<Project/>")
+
+            # Create real project
+            real_dir = os.path.join(tmpdir, "RealProject")
+            os.makedirs(real_dir, exist_ok=True)
+            real_plcproj = os.path.join(real_dir, "RealProject.plcproj")
+            with open(real_plcproj, "w") as f:
+                f.write("<Project/>")
+
+            found = _auto_detect_plcproj(tmpdir)
+            self.assertEqual(os.path.normcase(found), os.path.normcase(real_plcproj))
+
+    def test_session_ops_solution_switch_clears_stale_plcproj(self):
+        with patch.object(TcAutomationInterface, "__init__", lambda self: None):
+            b = TcAutomationInterface.__new__(TcAutomationInterface)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_a = os.path.join(tmpdir, "RepoA")
+            repo_b = os.path.join(tmpdir, "RepoB")
+            os.makedirs(repo_a, exist_ok=True)
+            os.makedirs(repo_b, exist_ok=True)
+
+            sln_a = os.path.join(repo_a, "SolutionA.sln")
+            plc_a = os.path.join(repo_a, "PlcA.plcproj")
+            with open(sln_a, "w") as f:
+                f.write("sln")
+            with open(plc_a, "w") as f:
+                f.write("<Project/>")
+
+            sln_b = os.path.join(repo_b, "SolutionB.sln")
+            plc_b = os.path.join(repo_b, "PlcB.plcproj")
+            with open(sln_b, "w") as f:
+                f.write("sln")
+            with open(plc_b, "w") as f:
+                f.write("<Project/>")
+
+            b._sln_path = sln_a
+            b._plcproj_file_path = plc_a
+            b._instances = {}
+
+            # Verify that restore or open for solution B does not inherit plc_a
+            b._restore_from_registry = MagicMock(return_value=False)
+            b._find_plc_project_with_retry = MagicMock()
+            b._dte = MagicMock()
+            b._dte.Solution.FullName = sln_b
+            b._get_system_manager = MagicMock(return_value=MagicMock())
+            b._save_active_to_registry = MagicMock()
+            b._prune_stale_instances = MagicMock()
+
+            # Calling detect on solution B should find plc_b, not plc_a
+            b._sln_path = sln_b
+            detected = b._detect_plcproj_path()
+            self.assertEqual(os.path.normcase(detected), os.path.normcase(plc_b))
+
+
 if __name__ == "__main__":
     unittest.main()

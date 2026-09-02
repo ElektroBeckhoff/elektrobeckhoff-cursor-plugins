@@ -192,7 +192,6 @@ def twincat_open(
         proj_name = _active_read_proj_name(plcproj_path)
 
     bridge = _get_bridge()
-    bridge._plcproj_file_path = plcproj_path or None
 
     try:
         return _json(bridge.open_solution(
@@ -477,10 +476,26 @@ def twincat_export_library(
     plcproj_path = _clean_path(plcproj_path)
 
     bridge = _get_bridge()
-    sln_path = bridge._call_sta(lambda: bridge._sln_path, timeout=5) or ""
-    plcproj_from_bridge = bridge._call_sta(
-        lambda: bridge._plcproj_file_path, timeout=5,
-    ) or ""
+
+    def _sync_and_get_session():
+        if bridge._dte and bridge._is_dte_alive():
+            try:
+                actual_sln = str(bridge._dte.Solution.FullName)
+                if actual_sln:
+                    bridge._sln_path = actual_sln
+                    if not bridge._plcproj_file_path or not os.path.isfile(bridge._plcproj_file_path):
+                        bridge._plcproj_file_path = bridge._detect_plcproj_path()
+                    else:
+                        sln_dir = os.path.dirname(actual_sln)
+                        repo = _find_repo_root(actual_sln) or sln_dir
+                        norm_plc = os.path.abspath(bridge._plcproj_file_path)
+                        if not (norm_plc.startswith(os.path.abspath(sln_dir)) or norm_plc.startswith(os.path.abspath(repo))):
+                            bridge._plcproj_file_path = bridge._detect_plcproj_path()
+            except Exception:
+                pass
+        return (bridge._sln_path or "", bridge._plcproj_file_path or "")
+
+    sln_path, plcproj_from_bridge = bridge._call_sta(_sync_and_get_session, timeout=5) or ("", "")
 
     plcproj_explicit = bool(plcproj_path and str(plcproj_path).strip())
     resolved_plcproj = _resolve_plcproj_path(

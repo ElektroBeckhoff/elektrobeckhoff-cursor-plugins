@@ -162,3 +162,35 @@ END_TYPE
         res = json.loads(srv.twincat_check_syntax(path="c:/invalid/path/that/does/not/exist"))
         assert res["success"] is False
         assert "does not exist" in res["error"]
+
+    def test_check_syntax_single_filename_resolved_via_workspace(self, tmp_path: Path):
+        from twincat_core.project import WorkspaceIndex, get_shared_workspace
+        import twincat_core.project.workspace_index as wsi
+
+        deep_dir = tmp_path / "POUs" / "Core"
+        deep_dir.mkdir(parents=True)
+        pou_file = deep_dir / "FB_DeepNested.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_DeepNested" Id="{66666666-6666-6666-6666-666666666666}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_DeepNested
+VAR
+    nCount : INT;
+END_VAR
+]]></Declaration>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        # Mock shared workspace
+        ws = WorkspaceIndex()
+        ws.root_dir = tmp_path
+        ws.update_file(pou_file)
+        old_ws = wsi._SHARED_WORKSPACE
+        try:
+            wsi._SHARED_WORKSPACE = ws
+            res = json.loads(srv.twincat_check_syntax(path="FB_DeepNested.TcPOU"))
+            assert res["success"] is True
+            assert res["total_files"] == 1
+            assert res["error_count"] == 0
+        finally:
+            wsi._SHARED_WORKSPACE = old_ws
