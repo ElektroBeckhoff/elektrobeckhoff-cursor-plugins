@@ -26,6 +26,7 @@ from formatter.st_lexer import tokenize
 from formatter.diff_reporter import generate_diff
 from formatter.safe_writer import SafeFileWriter
 from formatter.st_call_expr import match_control_call_opener, match_multiline_call_opener
+from twincat_core.constants import _EXCLUDES_LOWER, filter_scan_dirnames
 from twincat_core.syntax import TokenType as CoreTokenType, tokenize_st, validate_st_syntax_in_xml
 from twincat_core.xml import CdataKind, CdataSpan, patch_by_filter, read_tc_xml
 from formatter.st_alignment import (
@@ -287,12 +288,6 @@ def process_batch(
     return batch
 
 
-_EXCLUDES_LOWER: set[str] = {
-    ".git", "node_modules", "_libraries", "_compileinfo", "versions",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache", "bin", "obj",
-}
-
-
 def discover_files(
     paths: Sequence[str],
     *,
@@ -316,7 +311,7 @@ def discover_files(
         elif path.is_dir():
             if recursive:
                 for root, dirs, files in os.walk(path):
-                    dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDES_LOWER]
+                    filter_scan_dirnames(dirs, root)
                     for f in sorted(files):
                         full = os.path.join(root, f)
                         if _is_formattable(full, include, exclude):
@@ -351,7 +346,7 @@ def discover_project_files(project_path: str) -> list[str]:
 
     result: list[str] = []
     for root, dirs, files in os.walk(search_root):
-        dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDES_LOWER]
+        filter_scan_dirnames(dirs, root)
         for f in sorted(files):
             if _is_formattable(f, None, None):
                 result.append(str(Path(os.path.join(root, f)).resolve()))

@@ -1449,10 +1449,10 @@ class SessionOpsMixin:
             str(plc_item.Name)
         ) if plc_item else ""
 
-        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_CompileInfo"}
+        from twincat_core.constants import filter_scan_dirnames
         first_match = None
         for dirpath, dirnames, files in os.walk(sln_dir):
-            dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
+            filter_scan_dirnames(dirnames, dirpath)
             for f in files:
                 if not f.endswith(".plcproj"):
                     continue

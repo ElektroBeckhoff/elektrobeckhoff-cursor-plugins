@@ -1232,10 +1232,10 @@ class StweepOpsMixin:
     @staticmethod
     def _collect_formattable_files(root: str, recursive: bool) -> list[str]:
         out: list[str] = []
-        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
+        from twincat_core.constants import filter_scan_dirnames
         if recursive:
             for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
+                filter_scan_dirnames(dirnames, dirpath)
                 for name in filenames:
                     if os.path.splitext(name)[1].lower() in _FORMATABLE_EXTS:
                         out.append(os.path.join(dirpath, name))

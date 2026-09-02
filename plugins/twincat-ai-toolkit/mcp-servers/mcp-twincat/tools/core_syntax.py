@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from twincat_plcproj_ops import read_project_info
+from twincat_core.constants import is_internal_toolkit_path
 from .common import (
     _clean_path,
     _find_repo_root,
@@ -202,10 +203,7 @@ def twincat_check_syntax(
                 if not found_candidate:
                     cwd = Path.cwd()
                     for match in cwd.rglob(p.name):
-                        norm_m = str(match).replace("\\", "/").lower()
-                        if "/plugins/" in norm_m and "/solution/" in norm_m:
-                            continue
-                        if "/fixtures/" in norm_m:
+                        if is_internal_toolkit_path(match):
                             continue
                         if match.is_file():
                             found_candidate = match.resolve()

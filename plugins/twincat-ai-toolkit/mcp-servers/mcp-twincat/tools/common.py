@@ -13,13 +13,19 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Union
 
 from twincat_plcproj_ops import read_project_info
+from twincat_core.constants import (
+    DEFAULT_PROJECT_EXCLUDES,
+    TOOLKIT_ROOT_DIR,
+    _EXCLUDES_LOWER,
+    filter_scan_dirnames,
+    is_internal_toolkit_path,
+    should_skip_dir,
+)
 
 _SLN_PROJECT_RE = re.compile(
     r'^Project\("[^"]*"\)\s*=\s*"[^"]*"\s*,\s*"([^"]+\.tsproj)"',
     re.MULTILINE,
 )
-
-_EXCLUDES_LOWER = {"samples", "samples_", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
 
 
 def _json(obj: Any) -> str:
@@ -68,13 +74,15 @@ def _scan_plcproj_in_dir(dir_path: str) -> List[str]:
     """Walk a directory tree and collect .plcproj files (excluding known noise)."""
     results = []
     dir_path = _clean_path(dir_path)
-    if not os.path.isdir(dir_path):
+    if not os.path.isdir(dir_path) or is_internal_toolkit_path(dir_path):
         return results
     for dirpath, dirnames, filenames in os.walk(dir_path):
-        dirnames[:] = [d for d in dirnames if d.lower() not in _EXCLUDES_LOWER]
+        filter_scan_dirnames(dirnames, dirpath)
         for f in filenames:
             if f.lower().endswith(".plcproj"):
-                results.append(os.path.normpath(os.path.join(dirpath, f)))
+                cand = os.path.normpath(os.path.join(dirpath, f))
+                if not is_internal_toolkit_path(cand):
+                    results.append(cand)
     return results
 
 
@@ -291,19 +299,14 @@ def _resolve_path(path: str) -> Union[str, dict]:
 
 def _auto_detect_plcproj(sln_path: str = "", bridge_sln_getter: Any = None) -> str:
     """Find the first .plcproj file near the solution, active bridge, or git repo root."""
-    excludes = {
-        "samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo",
-        "solution", "twincat3-solution", "fixtures", ".pytest_cache", ".cursor",
-    }
-
     search_roots: list[str] = []
     sln_path = _clean_path(sln_path)
     if sln_path:
         sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
-        if os.path.isdir(sln_dir):
+        if os.path.isdir(sln_dir) and not is_internal_toolkit_path(sln_dir):
             search_roots.append(sln_dir)
         repo = _find_repo_root(sln_path)
-        if repo and repo != sln_dir and os.path.isdir(repo):
+        if repo and repo != sln_dir and os.path.isdir(repo) and not is_internal_toolkit_path(repo):
             search_roots.append(repo)
     if not search_roots and not bridge_sln_getter:
         try:
@@ -319,36 +322,29 @@ def _auto_detect_plcproj(sln_path: str = "", bridge_sln_getter: Any = None) -> s
             b_sln = _clean_path(b_sln)
             if b_sln and os.path.isfile(b_sln):
                 b_dir = os.path.dirname(b_sln)
-                if os.path.isdir(b_dir):
+                if os.path.isdir(b_dir) and not is_internal_toolkit_path(b_dir):
                     search_roots.append(b_dir)
                 b_repo = _find_repo_root(b_sln)
-                if b_repo and b_repo != b_dir and os.path.isdir(b_repo):
+                if b_repo and b_repo != b_dir and os.path.isdir(b_repo) and not is_internal_toolkit_path(b_repo):
                     search_roots.append(b_repo)
         except Exception:
             pass
 
     if not search_roots:
-        search_roots.append(os.getcwd())
+        cwd = os.getcwd()
+        if not is_internal_toolkit_path(cwd):
+            search_roots.append(cwd)
 
     for root_dir in search_roots:
-        if not os.path.isdir(root_dir):
+        if not os.path.isdir(root_dir) or is_internal_toolkit_path(root_dir):
             continue
         for dirpath, dirnames, filenames in os.walk(root_dir):
-            dirnames[:] = [
-                d for d in dirnames
-                if d.lower() not in excludes
-                and not d.lower().startswith(".pytest")
-            ]
-            # Avoid plugin-internal fixtures if scanning from plugin repo
-            norm_dir = dirpath.replace("\\", "/").lower()
-            if "/plugins/" in norm_dir and "/solution/" in norm_dir:
-                continue
-            if "/fixtures/" in norm_dir:
-                continue
-
+            filter_scan_dirnames(dirnames, dirpath, exclude_internal_toolkit=True)
             for f in filenames:
                 if f.lower().endswith(".plcproj"):
-                    return os.path.abspath(os.path.join(dirpath, f))
+                    cand = os.path.abspath(os.path.join(dirpath, f))
+                    if not is_internal_toolkit_path(cand):
+                        return cand
     return ""
 
 
@@ -398,7 +394,7 @@ def _resolve_plcproj_path(
         candidates.append(os.path.join(os.getcwd(), raw))
         candidates.append(os.path.abspath(raw))
         for c in candidates:
-            if os.path.isfile(c):
+            if os.path.isfile(c) and not is_internal_toolkit_path(c):
                 return os.path.abspath(os.path.normpath(c))
 
         # Check basename match
@@ -406,23 +402,26 @@ def _resolve_plcproj_path(
         search_dirs = []
         if sln_path:
             sln_dir = os.path.dirname(sln_path) if os.path.isfile(sln_path) else sln_path
-            if os.path.isdir(sln_dir):
+            if os.path.isdir(sln_dir) and not is_internal_toolkit_path(sln_dir):
                 search_dirs.append(sln_dir)
             repo = _find_repo_root(sln_path)
-            if repo and repo not in search_dirs and os.path.isdir(repo):
+            if repo and repo not in search_dirs and os.path.isdir(repo) and not is_internal_toolkit_path(repo):
                 search_dirs.append(repo)
         if not search_dirs:
-            search_dirs.append(os.getcwd())
+            cwd = os.getcwd()
+            if not is_internal_toolkit_path(cwd):
+                search_dirs.append(cwd)
 
-        excludes = {"samples", "versions", "_libraries", ".git", "node_modules", "_compileinfo"}
         for sdir in search_dirs:
-            if not os.path.isdir(sdir):
+            if not os.path.isdir(sdir) or is_internal_toolkit_path(sdir):
                 continue
             for dirpath, dirnames, files in os.walk(sdir):
-                dirnames[:] = [d for d in dirnames if d.lower() not in excludes]
+                filter_scan_dirnames(dirnames, dirpath, exclude_internal_toolkit=True)
                 for f in files:
                     if f.lower() == base_name.lower():
-                        return os.path.abspath(os.path.join(dirpath, f))
+                        cand = os.path.abspath(os.path.join(dirpath, f))
+                        if not is_internal_toolkit_path(cand):
+                            return cand
 
     # Priority 2: Active bridge session
     if plcproj_from_bridge and os.path.isfile(plcproj_from_bridge):
