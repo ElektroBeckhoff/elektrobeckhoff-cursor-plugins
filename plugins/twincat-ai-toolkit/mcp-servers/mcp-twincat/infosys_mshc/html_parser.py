@@ -191,27 +191,71 @@ def extract_syntax(raw_html: str) -> str:
 
 _extract_syntax = extract_syntax
 
+NOISE_FUNC_NAMES = {
+    "returns",
+    "return",
+    "rueckgabewert",
+    "rueckgabe",
+    "rückgabewert",
+    "rückgabe",
+    "meaning",
+    "bedeutung",
+    "wert",
+    "value",
+    "the",
+    "die",
+    "der",
+    "das",
+    "this",
+    "diese",
+    "dieser",
+    "dieses",
+}
+
+
+def normalize_return_type(t: Optional[str]) -> Optional[str]:
+    """Normalize return type string, mapping boolean literals to BOOL."""
+    if not t:
+        return None
+    cleaned = t.strip()
+    if not cleaned:
+        return None
+    cleaned_base = cleaned.split("(")[0].strip()
+    if cleaned_base.upper() in ("TRUE", "FALSE"):
+        return "BOOL"
+    return cleaned_base
+
 
 def extract_return_type(syntax: str, full_text: str = "", sym_type: str = "") -> Optional[str]:
     """Extract return type for Functions, Methods, and Properties from declaration syntax or text."""
-    text_to_search = (syntax + "\n" + full_text[:2000]).replace("VAR_INPUT", " VAR_INPUT ").replace("VAR_OUTPUT", " VAR_OUTPUT ")
+    # 1. Check syntax block first with strict regexes
+    if syntax:
+        m = re.search(r'\bFUNCTION\s+([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', syntax, re.IGNORECASE)
+        if m and m.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m.group(2))
 
-    # 1. Standard ST FUNCTION declaration e.g. "FUNCTION MEMCPY : UDINT" or "MEMCPY FUNCTION : UDINT"
-    m = re.search(r'FUNCTION\s+\w+\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
-    if m:
-        ret = m.group(1).strip()
-        return ret.split("(")[0].strip()
+        m2 = re.search(r'\b([A-Za-z0-9_]+)\s+FUNCTION\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', syntax, re.IGNORECASE)
+        if m2 and m2.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m2.group(2))
 
-    m2 = re.search(r'(\w+)\s+FUNCTION\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
-    if m2:
-        ret = m2.group(2).strip()
-        return ret.split("(")[0].strip()
+        m_meth = re.search(r'\b(?:METHOD|PROPERTY)\s+([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', syntax, re.IGNORECASE)
+        if m_meth and m_meth.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m_meth.group(2))
 
-    # 2. METHOD or PROPERTY declaration e.g. "METHOD M_GetVal : INT"
-    m_meth = re.search(r'(?:METHOD|PROPERTY)\s+\w+\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
-    if m_meth:
-        ret = m_meth.group(1).strip()
-        return ret.split("(")[0].strip()
+    # 2. Fallback to full text search with noise filtering
+    if full_text:
+        text_to_search = full_text[:2000]
+        m = re.search(r'\bFUNCTION\s+([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+        if m and m.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m.group(2))
+
+        m2 = re.search(r'\b([A-Za-z0-9_]+)\s+FUNCTION\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+        if m2 and m2.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m2.group(2))
+
+        m_meth = re.search(r'\b(?:METHOD|PROPERTY)\s+([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)', text_to_search, re.IGNORECASE)
+        if m_meth and m_meth.group(1).lower() not in NOISE_FUNC_NAMES:
+            return normalize_return_type(m_meth.group(2))
 
     return None
 
@@ -446,7 +490,27 @@ def parse_page(
     properties = extract_properties(sections.get("properties", ""))
 
     full_text_raw = strip_tags(raw_html)
-    return_type = extract_return_type(syntax, full_text_raw)
+    return_type = None
+
+    # Check return_value section table first (authoritative in InfoSys)
+    rv_section = sections.get("return_value", "")
+    if rv_section:
+        rv_params = parse_param_table(rv_section)
+        for row in rv_params:
+            row_type = row.get("type", "").strip()
+            if row_type:
+                return_type = normalize_return_type(row_type)
+                break
+        if not return_type:
+            rv_text = strip_tags(rv_section).strip()
+            if rv_text.upper() in ("BOOL", "TRUE", "FALSE", "BIT"):
+                return_type = "BOOL"
+            elif rv_text.split() and rv_text.split()[0].upper() in ("BOOL", "INT", "DINT", "UDINT", "UINT", "ULINT", "LINT", "REAL", "LREAL", "STRING", "TIME", "HRESULT"):
+                return_type = rv_text.split()[0].upper()
+
+    if not return_type:
+        return_type = extract_return_type(syntax, full_text_raw)
+
     has_methods = bool(methods)
 
     canonical_name, sym_type = extract_canonical_name_and_type(

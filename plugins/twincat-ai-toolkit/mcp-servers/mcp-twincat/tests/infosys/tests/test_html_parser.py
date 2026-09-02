@@ -204,6 +204,30 @@ def test_extract_properties_and_return_type():
     assert sym_fb == "FUNCTION_BLOCK"
 
 
+def test_extract_return_type_noise_filtering_and_return_value_table():
+    from infosys_mshc.html_parser import parse_page, extract_return_type
+
+    # 1. Prose containing "The function returns: TRUE" should not extract "TRUE" as a return type
+    prose_noise = "The function returns: TRUE if the concatenation was successful."
+    assert extract_return_type("", prose_noise) is None
+
+    # 2. Page with return_value table having BOOL and syntax without explicit return type
+    raw_html = (
+        "<html><head><title>CONCAT2</title></head><body>"
+        "<h2>Syntax</h2>"
+        "<pre>FUNCTION CONCAT2\nVAR_INPUT\n    STR1 : STRING;\n    STR2 : STRING;\nEND_VAR</pre>"
+        "<p>The function returns: TRUE if successful.</p>"
+        "<h2>Rückgabewert</h2>"
+        "<table><tr><th>Name</th><th>Typ</th><th>Beschreibung</th></tr>"
+        "<tr><td>CONCAT2</td><td>BOOL</td><td>TRUE if strings were merged</td></tr></table>"
+        "</body></html>"
+    )
+    page = parse_page(raw_html, "tc2_utilities/1033/concat2.html")
+    assert page["canonical_name"] == "CONCAT2"
+    assert page["type"] == "FUNCTION"
+    assert page["return_type"] == "BOOL"
+
+
 def test_parse_page_with_properties_and_canonical():
     raw_html = (
         "<html><head>"
