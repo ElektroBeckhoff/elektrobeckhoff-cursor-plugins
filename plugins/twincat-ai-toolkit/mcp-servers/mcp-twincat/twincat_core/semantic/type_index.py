@@ -35,6 +35,12 @@ BUILTIN_TYPES: Set[str] = {
 }
 
 
+_RE_PREFIX = re.compile(r"^(?:VAR_INST|VAR_STAT|VAR_TEMP|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR)\s+", re.IGNORECASE)
+_RE_REF_TO = re.compile(r"^REFERENCE\s+TO\s+", re.IGNORECASE)
+_RE_PTR_TO = re.compile(r"^POINTER\s+TO\s+", re.IGNORECASE)
+_RE_OF = re.compile(r"\bOF\s+(.+)$", re.IGNORECASE)
+
+
 @dataclass(slots=True)
 class TypeDescriptor:
     """Detailed structural information about a declared type (FB, STRUCT, ENUM, etc.)."""
@@ -72,6 +78,7 @@ class TypeIndex:
     def __init__(self) -> None:
         self._types: dict[str, list[TypeDescriptor]] = {}  # lowercase_name -> list of TypeDescriptor
         self._libraries: dict[str, set[str]] = {}          # lowercase_library_name -> set of lowercase type names
+        self._enum_members: dict[str, list[Symbol]] = {}   # lowercase_member_name -> list of Symbol
         self._init_builtins()
 
     def _init_builtins(self) -> None:
@@ -98,6 +105,20 @@ class TypeIndex:
 
         self._types[key].append(descriptor)
 
+        # Index enum members for fast O(1) unqualified member lookups
+        if descriptor.kind == SymbolKind.ENUM:
+            for member in descriptor.enum_members.values():
+                m_key = member.name.lower()
+                if m_key not in self._enum_members:
+                    self._enum_members[m_key] = []
+                if descriptor.file_path:
+                    res_path = descriptor.file_path.resolve()
+                    self._enum_members[m_key] = [
+                        s for s in self._enum_members[m_key]
+                        if not (s.file_path and s.file_path == res_path and s.name.lower() == m_key)
+                    ]
+                self._enum_members[m_key].append(member)
+
     def remove_types_by_file(self, file_path: Path) -> None:
         """Remove all types defined in the given file (used for incremental re-indexing)."""
         res_path = file_path.resolve()
@@ -108,6 +129,25 @@ class TypeIndex:
             ]
             if not self._types[k]:
                 del self._types[k]
+
+        for m_key in list(self._enum_members.keys()):
+            self._enum_members[m_key] = [
+                s for s in self._enum_members[m_key]
+                if not (s.file_path is not None and s.file_path == res_path)
+            ]
+            if not self._enum_members[m_key]:
+                del self._enum_members[m_key]
+
+    def find_unqualified_enum_member(self, name: str, context_path: Optional[Path] = None) -> Optional[Symbol]:
+        """Look up an unqualified enum member across all registered enum types with proximity support."""
+        if not name:
+            return None
+        candidates = self._enum_members.get(name.lower())
+        if not candidates:
+            return None
+        if len(candidates) == 1 or not context_path:
+            return candidates[0]
+        return max(candidates, key=lambda s: compute_proximity(context_path, s.file_path))
 
     def register_library_type(self, library_name: str, type_name: str) -> None:
         """Associate a type with a specific library namespace (e.g. 'Tc2_Standard')."""
@@ -149,22 +189,18 @@ class TypeIndex:
 
         return None
 
-    @staticmethod
-    def clean_type_name(raw: str) -> str:
+    @classmethod
+    def clean_type_name(cls, raw: str) -> str:
         """Extract the core identifier from a complex type signature."""
         s = raw.strip()
         if not s:
             return ""
-        for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
-            if re.match(rf"^{prefix}\s+", s, re.IGNORECASE):
-                s = re.sub(rf"^{prefix}\s+", "", s, flags=re.IGNORECASE).strip()
+        s = _RE_PREFIX.sub("", s).strip()
         if ":" in s:
             s = s.rsplit(":", 1)[-1].strip()
-        if re.match(r"^REFERENCE\s+TO\s+", s, re.IGNORECASE):
-            s = re.sub(r"^REFERENCE\s+TO\s+", "", s, flags=re.IGNORECASE).strip()
-        if re.match(r"^POINTER\s+TO\s+", s, re.IGNORECASE):
-            s = re.sub(r"^POINTER\s+TO\s+", "", s, flags=re.IGNORECASE).strip()
-        m_arr = re.search(r"\bOF\s+(.+)$", s, re.IGNORECASE)
+        s = _RE_REF_TO.sub("", s).strip()
+        s = _RE_PTR_TO.sub("", s).strip()
+        m_arr = _RE_OF.search(s)
         if m_arr:
             s = m_arr.group(1).strip()
         if "(" in s:

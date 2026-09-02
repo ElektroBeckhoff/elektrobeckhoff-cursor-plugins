@@ -87,9 +87,9 @@ class SymbolResolver:
             return global_sym
 
         # 5. Level 3: Unqualified Enum member search
-        for t_desc in self.type_index.get_all_user_types():
-            if t_desc.kind == SymbolKind.ENUM and name.lower() in t_desc.enum_members:
-                return t_desc.enum_members[name.lower()]
+        enum_sym = self.type_index.find_unqualified_enum_member(name, context_path=context_path)
+        if enum_sym is not None:
+            return enum_sym
 
         # 6. Level 5: Standard Library & Built-in types/functions (e.g. TON, R_TRIG, CONCAT)
         t_desc = self.type_index.get_type(name, context_path=context_path)

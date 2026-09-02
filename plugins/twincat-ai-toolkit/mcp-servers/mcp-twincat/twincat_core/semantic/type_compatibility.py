@@ -1,6 +1,7 @@
 """Type compatibility, conversion validation, and narrowing diagnostics for IEC 61131-3 and TwinCAT 3."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -10,6 +11,8 @@ from .symbols import SymbolKind
 
 if TYPE_CHECKING:
     from .type_index import TypeDescriptor, TypeIndex
+
+_RE_PREFIX = re.compile(r"^(?:VAR_INST|VAR_STAT|VAR_TEMP|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR)\s+", re.IGNORECASE)
 
 
 class TypeCheckResultKind(StrEnum):
@@ -99,17 +102,15 @@ def _clean_type_str(type_str: str) -> str:
     t = type_str.strip()
     if not t:
         return ""
-    # Strip VAR_INST, VAR_STAT, etc. modifiers if present in raw declaration strings
-    for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
-        if t.upper().startswith(f"{prefix} "):
-            t = t[len(prefix) + 1:].strip()
+    t = _RE_PREFIX.sub("", t).strip()
     if ":" in t:
         # e.g. "BOOL VAR_INST _nState : INT" -> take the last part after the colon
         t = t.rsplit(":", 1)[-1].strip()
-    if t.upper().startswith("POINTER TO"):
+    u = t.upper()
+    if u.startswith("POINTER TO"):
         inner = t[10:].strip()
         return f"POINTER TO {_clean_type_str(inner)}"
-    if t.upper().startswith("REFERENCE TO"):
+    if u.startswith("REFERENCE TO"):
         inner = t[12:].strip()
         return f"REFERENCE TO {_clean_type_str(inner)}"
     if "[" in t:

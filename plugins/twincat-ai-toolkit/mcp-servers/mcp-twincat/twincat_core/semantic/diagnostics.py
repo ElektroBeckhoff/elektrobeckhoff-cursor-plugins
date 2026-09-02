@@ -39,6 +39,7 @@ from .type_index import BUILTIN_TYPES
 if TYPE_CHECKING:
     from ..project.workspace_index import WorkspaceIndex
 
+_RE_PREFIX = re.compile(r"^(?:VAR_INST|VAR_STAT|VAR_TEMP|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR)\s+", re.IGNORECASE)
 RE_ARRAY_OF = re.compile(r'ARRAY\s*\[.*?\]\s*OF\s+(.+)', re.IGNORECASE | re.DOTALL)
 RE_POINTER_TO = re.compile(r'POINTER\s+TO\s+(.+)', re.IGNORECASE)
 RE_REFERENCE_TO = re.compile(r'REFERENCE\s+TO\s+(.+)', re.IGNORECASE)
@@ -51,9 +52,7 @@ def extract_base_type_name(type_ref: str) -> str:
     if not cleaned:
         return ""
 
-    for prefix in ("VAR_INST", "VAR_STAT", "VAR_TEMP", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR"):
-        if re.match(rf"^{prefix}\s+", cleaned, re.IGNORECASE):
-            cleaned = re.sub(rf"^{prefix}\s+", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = _RE_PREFIX.sub("", cleaned).strip()
     if ":" in cleaned:
         cleaned = cleaned.rsplit(":", 1)[-1].strip()
 
@@ -81,6 +80,31 @@ def extract_base_type_name(type_ref: str) -> str:
         cleaned = cleaned.split("(")[0].strip()
 
     return cleaned
+
+
+def _fast_infer_literal_type(val: str) -> Optional[str]:
+    """Fast type inference for common literal initial values without StatementParser."""
+    v_upper = val.upper()
+    if v_upper in ("TRUE", "FALSE"):
+        return "BOOL"
+    if (val.startswith("'") and val.endswith("'")) or v_upper.startswith("STRING#'"):
+        return "STRING_LITERAL"
+    if (val.startswith('"') and val.endswith('"')) or v_upper.startswith("WSTRING#\""):
+        return "WSTRING_LITERAL"
+    if v_upper.startswith(("T#", "TIME#", "LTIME#", "D#", "DATE#", "TOD#", "TIME_OF_DAY#", "DT#", "DATE_AND_TIME#")):
+        prefix = v_upper.split("#", 1)[0]
+        return "TIME" if prefix in ("T", "TIME") else prefix
+    if v_upper.startswith(("INT#", "DINT#", "SINT#", "LINT#", "UINT#", "UDINT#", "USINT#", "ULINT#", "BYTE#", "WORD#", "DWORD#", "LWORD#", "REAL#", "LREAL#")):
+        return v_upper.split("#", 1)[0]
+    if v_upper.startswith(("16#", "8#", "2#")):
+        return "INT_LITERAL"
+    if val.isdigit() or (val.startswith(("-", "+")) and val[1:].isdigit()):
+        return "INT_LITERAL"
+    if "." in val:
+        parts = val.split(".")
+        if len(parts) == 2 and (parts[0].isdigit() or (parts[0].startswith(("-", "+")) and parts[0][1:].isdigit())) and parts[1].isdigit():
+            return "REAL_LITERAL"
+    return None
 
 
 def _has_unresolved_base_class(
@@ -258,30 +282,32 @@ def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[Syntax
             # Skip composite struct/array constructors to avoid false positives on nested elements
             if not init_val.startswith("(") and not init_val.startswith("["):
                 try:
-                    p = StatementParser.from_source(init_val)
-                    init_expr = p.parse_expression()
-                    if init_expr:
-                        init_t = index.resolver.infer_expression_type(init_expr, index.symbol_table.global_scope)
-                        if init_t:
-                            res = check_type_assignment(sym.type_ref, init_t, index.type_index, file_path)
-                            if res.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR and sym.span and sym.span.start.line > 0:
-                                diagnostics.append(
-                                    SyntaxDiagnostic(
-                                        message=f"Initial value for '{sym.name}': {res.message}",
-                                        span=sym.span,
-                                        severity=DiagnosticSeverity.ERROR,
-                                        code="TC-SEM-006",
-                                    )
+                    init_t = _fast_infer_literal_type(init_val)
+                    if not init_t:
+                        p = StatementParser.from_source(init_val)
+                        init_expr = p.parse_expression()
+                        if init_expr:
+                            init_t = index.resolver.infer_expression_type(init_expr, index.symbol_table.global_scope)
+                    if init_t:
+                        res = check_type_assignment(sym.type_ref, init_t, index.type_index, file_path)
+                        if res.kind == TypeCheckResultKind.TYPE_MISMATCH_ERROR and sym.span and sym.span.start.line > 0:
+                            diagnostics.append(
+                                SyntaxDiagnostic(
+                                    message=f"Initial value for '{sym.name}': {res.message}",
+                                    span=sym.span,
+                                    severity=DiagnosticSeverity.ERROR,
+                                    code="TC-SEM-006",
                                 )
-                            elif res.kind == TypeCheckResultKind.NARROWING_WARNING and sym.span and sym.span.start.line > 0:
-                                diagnostics.append(
-                                    SyntaxDiagnostic(
-                                        message=f"Initial value for '{sym.name}': {res.message}",
-                                        span=sym.span,
-                                        severity=DiagnosticSeverity.WARNING,
-                                        code="TC-SEM-007",
-                                    )
+                            )
+                        elif res.kind == TypeCheckResultKind.NARROWING_WARNING and sym.span and sym.span.start.line > 0:
+                            diagnostics.append(
+                                SyntaxDiagnostic(
+                                    message=f"Initial value for '{sym.name}': {res.message}",
+                                    span=sym.span,
+                                    severity=DiagnosticSeverity.WARNING,
+                                    code="TC-SEM-007",
                                 )
+                            )
                 except Exception:
                     pass
 
@@ -346,7 +372,7 @@ def _validate_expression_identifiers(
             return
         if index.type_index.get_type(name, context_path=file_path) is not None:
             return
-        if any(t.kind == SymbolKind.ENUM and name.lower() in t.enum_members for t in index.type_index.get_all_user_types()):
+        if index.type_index.find_unqualified_enum_member(name, context_path=file_path) is not None:
             return
         if index.symbol_table.find_gvl_scope(name, context_path=file_path) is not None:
             return
