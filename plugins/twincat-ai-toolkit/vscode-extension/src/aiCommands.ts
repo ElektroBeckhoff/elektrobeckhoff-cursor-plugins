@@ -252,33 +252,76 @@ Respond in German with a short and concise summary of what was done.`;
 }
 
 /**
- * Copies the pre-structured prompt to the clipboard and opens the Cursor Chat panel
- * with the prompt prefilled (without automatically submitting).
- * The user can select their preferred model and start the generation.
+ * Delay helper for waiting on Cursor UI focus after command execution.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const aiOutput = vscode.window.createOutputChannel('TwinCAT AI Commands');
+
+/**
+ * Execute a command only if it is registered. Returns true on success.
+ * Unknown commands in VS Code/Cursor throw — we catch and continue.
+ */
+async function tryExecuteKnownCommand(commandId: string): Promise<boolean> {
+  try {
+    const all = await vscode.commands.getCommands(true);
+    if (!all.includes(commandId)) {
+      aiOutput.appendLine(`[skip] command not registered: ${commandId}`);
+      return false;
+    }
+    await vscode.commands.executeCommand(commandId);
+    aiOutput.appendLine(`[ok] ${commandId}`);
+    return true;
+  } catch (err) {
+    aiOutput.appendLine(`[fail] ${commandId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+/**
+ * Insert prompt into the CURRENT Cursor Agent chat input.
+ *
+ * NEVER call these — they always create a new agent/composer in Cursor:
+ * - workbench.action.chat.open ({ query } or bare)
+ * - aichat.newchataction / composer.newAgentChat / composer.createNew
+ * - composer.startComposerPrompt (toggles; can create in some modes)
  */
 async function sendPromptToCursor(prompt: string, title: string): Promise<void> {
-  // 1. Always copy prompt to clipboard so it's ready to paste (Ctrl+V) if needed
-  await vscode.env.clipboard.writeText(prompt);
+  aiOutput.appendLine(`--- sendPromptToCursor: ${title} ---`);
+  aiOutput.appendLine(`extensionPath hint: use Output panel "TwinCAT AI Commands" after Reload Window`);
 
-  // 2. Open Chat panel and prefill the input (does not auto-execute)
-  try {
-    await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
-  } catch {
-    try {
-      await vscode.commands.executeCommand('aichat.newchataction');
-    } catch {
-      try {
-        await vscode.commands.executeCommand('workbench.action.chat.open');
-      } catch {
-        // Ignore fallback errors
-      }
-    }
+  // 1. Clipboard backup (manual Ctrl+V if paste misses the chat input)
+  await vscode.env.clipboard.writeText(prompt);
+  aiOutput.appendLine('[ok] clipboard write');
+
+  // 2. Focus CURRENT agent only — no create/open-new commands
+  const focused =
+    (await tryExecuteKnownCommand('composer.focusComposer')) ||
+    (await tryExecuteKnownCommand('aichat.newfollowupaction'));
+
+  if (!focused) {
+    aiOutput.appendLine('[warn] could not focus current chat — prompt left on clipboard only');
+    vscode.window.showWarningMessage(
+      `[TwinCAT AI] Could not focus the current Chat. Prompt is on the clipboard — paste with Ctrl+V.`
+    );
+    return;
   }
 
-  // 3. Inform user to select model and hit start
-  vscode.window.setStatusBarMessage(`$(sparkle) [TwinCAT AI] Prompt for "${title}" ready in Chat. Select model & click Start.`, 6000);
+  // 3. Paste into focused chat input (no auto-submit)
+  await delay(200);
+  const pasted = await tryExecuteKnownCommand('editor.action.clipboardPasteAction');
+  if (!pasted) {
+    aiOutput.appendLine('[warn] paste failed — clipboard still has prompt');
+  }
+
+  vscode.window.setStatusBarMessage(
+    `$(sparkle) [TwinCAT AI] "${title}" → current Chat (clipboard ready). Select model & Start.`,
+    6000
+  );
   vscode.window.showInformationMessage(
-    `[TwinCAT AI] Prompt for "${title}" inserted into Chat (and copied to clipboard). Select your model and click Start.`
+    `[TwinCAT AI] Prompt for "${title}" sent to the current Chat (also on clipboard). Select model & Start.`
   );
 }
 

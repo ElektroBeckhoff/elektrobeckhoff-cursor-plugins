@@ -6399,9 +6399,9 @@ var require_async = __commonJS({
         this.onSuccess = void 0;
         this.task = void 0;
       }
-      trigger(task, delay = this.defaultDelay) {
+      trigger(task, delay2 = this.defaultDelay) {
         this.task = task;
-        if (delay >= 0) {
+        if (delay2 >= 0) {
           this.cancelTimeout();
         }
         if (!this.completionPromise) {
@@ -6415,11 +6415,11 @@ var require_async = __commonJS({
             return result;
           });
         }
-        if (delay >= 0 || this.timeout === void 0) {
+        if (delay2 >= 0 || this.timeout === void 0) {
           this.timeout = (0, vscode_languageserver_protocol_1.RAL)().timer.setTimeout(() => {
             this.timeout = void 0;
             this.onSuccess(void 0);
-          }, delay >= 0 ? delay : this.defaultDelay);
+          }, delay2 >= 0 ? delay2 : this.defaultDelay);
         }
         return this.completionPromise;
       }
@@ -18434,23 +18434,49 @@ ${refList}
 
 Respond in German with a short and concise summary of what was done.`;
 }
-async function sendPromptToCursor(prompt, title) {
-  await vscode.env.clipboard.writeText(prompt);
+function delay(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+var aiOutput = vscode.window.createOutputChannel("TwinCAT AI Commands");
+async function tryExecuteKnownCommand(commandId) {
   try {
-    await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt });
-  } catch {
-    try {
-      await vscode.commands.executeCommand("aichat.newchataction");
-    } catch {
-      try {
-        await vscode.commands.executeCommand("workbench.action.chat.open");
-      } catch {
-      }
+    const all = await vscode.commands.getCommands(true);
+    if (!all.includes(commandId)) {
+      aiOutput.appendLine(`[skip] command not registered: ${commandId}`);
+      return false;
     }
+    await vscode.commands.executeCommand(commandId);
+    aiOutput.appendLine(`[ok] ${commandId}`);
+    return true;
+  } catch (err) {
+    aiOutput.appendLine(`[fail] ${commandId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
-  vscode.window.setStatusBarMessage(`$(sparkle) [TwinCAT AI] Prompt for "${title}" ready in Chat. Select model & click Start.`, 6e3);
+}
+async function sendPromptToCursor(prompt, title) {
+  aiOutput.appendLine(`--- sendPromptToCursor: ${title} ---`);
+  aiOutput.appendLine(`extensionPath hint: use Output panel "TwinCAT AI Commands" after Reload Window`);
+  await vscode.env.clipboard.writeText(prompt);
+  aiOutput.appendLine("[ok] clipboard write");
+  const focused = await tryExecuteKnownCommand("composer.focusComposer") || await tryExecuteKnownCommand("aichat.newfollowupaction");
+  if (!focused) {
+    aiOutput.appendLine("[warn] could not focus current chat \u2014 prompt left on clipboard only");
+    vscode.window.showWarningMessage(
+      `[TwinCAT AI] Could not focus the current Chat. Prompt is on the clipboard \u2014 paste with Ctrl+V.`
+    );
+    return;
+  }
+  await delay(200);
+  const pasted = await tryExecuteKnownCommand("editor.action.clipboardPasteAction");
+  if (!pasted) {
+    aiOutput.appendLine("[warn] paste failed \u2014 clipboard still has prompt");
+  }
+  vscode.window.setStatusBarMessage(
+    `$(sparkle) [TwinCAT AI] "${title}" \u2192 current Chat (clipboard ready). Select model & Start.`,
+    6e3
+  );
   vscode.window.showInformationMessage(
-    `[TwinCAT AI] Prompt for "${title}" inserted into Chat (and copied to clipboard). Select your model and click Start.`
+    `[TwinCAT AI] Prompt for "${title}" sent to the current Chat (also on clipboard). Select model & Start.`
   );
 }
 function registerAiCommands(context) {
