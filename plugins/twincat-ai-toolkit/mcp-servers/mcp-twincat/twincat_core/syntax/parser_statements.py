@@ -774,12 +774,31 @@ class StatementParser:
             span = SourceSpan.merge(op_tok.span, operand.span)
             return UnaryExpr(span=span, op=op_tok.value, operand=operand)
 
+        # ADR / REF / ADRREF → AddressOfExpr (pointer/reference operators)
         if tok.type in (
             TokenType.KEYWORD_ADR,
             TokenType.KEYWORD_REF,
+            TokenType.KEYWORD_ADRREF,
+        ):
+            op_tok = self.advance()
+            if self.peek().type == TokenType.PAREN_OPEN:
+                self.advance()
+                target = self.parse_expression()
+                close_tok = self.expect(TokenType.PAREN_CLOSE, f"Expected ')' closing {op_tok.value}")
+                end_span = close_tok.span if close_tok else target.span
+                span = SourceSpan.merge(op_tok.span, end_span)
+                return AddressOfExpr(
+                    span=span,
+                    target=target,
+                    is_ref=(op_tok.type in (TokenType.KEYWORD_REF, TokenType.KEYWORD_ADRREF)),
+                )
+            return IdentifierExpr(span=op_tok.span, name=op_tok.value)
+
+        # SIZEOF / XSIZEOF / BITADR / INDEXOF → CallExpr so type inference returns UDINT/DINT
+        # (must not reuse AddressOfExpr — that yields POINTER TO <arg> and false TC-SEM-006)
+        if tok.type in (
             TokenType.KEYWORD_SIZEOF,
             TokenType.KEYWORD_XSIZEOF,
-            TokenType.KEYWORD_ADRREF,
             TokenType.KEYWORD_BITADR,
             TokenType.KEYWORD_INDEXOF,
         ):
@@ -790,9 +809,12 @@ class StatementParser:
                 close_tok = self.expect(TokenType.PAREN_CLOSE, f"Expected ')' closing {op_tok.value}")
                 end_span = close_tok.span if close_tok else target.span
                 span = SourceSpan.merge(op_tok.span, end_span)
-                return AddressOfExpr(span=span, target=target, is_ref=(op_tok.type in (TokenType.KEYWORD_REF, TokenType.KEYWORD_ADRREF)))
-            else:
-                return IdentifierExpr(span=op_tok.span, name=op_tok.value)
+                return CallExpr(
+                    span=span,
+                    callee=IdentifierExpr(span=op_tok.span, name=op_tok.value),
+                    args=[CallArg(span=target.span, value=target)],
+                )
+            return IdentifierExpr(span=op_tok.span, name=op_tok.value)
 
         # 2. Parenthesized expressions (expr)
         if tok.type == TokenType.PAREN_OPEN:

@@ -634,6 +634,16 @@ class DeclarationParser:
         start_span = start_tok.span
         end_span = start_span
 
+        access = "PUBLIC"
+        while self.peek().type in (
+            TokenType.KEYWORD_PUBLIC,
+            TokenType.KEYWORD_PROTECTED,
+            TokenType.KEYWORD_PRIVATE,
+            TokenType.KEYWORD_INTERNAL,
+        ):
+            mod_tok = self.advance()
+            access = mod_tok.value.upper()
+
         name_tok = self.expect(TokenType.IDENTIFIER, "Expected type name after TYPE")
         name = name_tok.value if name_tok else ""
 
@@ -754,6 +764,7 @@ class DeclarationParser:
             name=name,
             definition=body_node,
             extends_type=extends_type,
+            access_modifier=access,
             comment=type_comment,
             pragmas=pragmas,
         )

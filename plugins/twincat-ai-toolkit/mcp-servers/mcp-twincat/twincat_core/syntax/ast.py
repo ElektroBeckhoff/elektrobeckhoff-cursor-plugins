@@ -324,6 +324,7 @@ class TypeDecl(AstNode):
     name: str = ""
     definition: Union[EnumType, StructType, UnionType, str] = ""
     extends_type: Optional[str] = None
+    access_modifier: str = "PUBLIC"  # PUBLIC, PROTECTED, PRIVATE, INTERNAL
     pragmas: list[PragmaAttribute] = field(default_factory=list)
     comment: Optional[str] = None
 

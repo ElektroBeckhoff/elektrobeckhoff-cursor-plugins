@@ -34,6 +34,13 @@ BUILTIN_TYPES: Set[str] = {
     "t_maxstring", "t_amsnetid", "t_amsport",
 }
 
+BUILTIN_ALIASES: dict[str, str] = {
+    "T_MAXSTRING": "STRING(255)",
+    "T_AMSNETID": "STRING(23)",
+    "T_AMSPORT": "UINT",
+    "PVOID": "DWORD",
+}
+
 
 _RE_PREFIX = re.compile(r"^(?:VAR_INST|VAR_STAT|VAR_TEMP|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR)\s+", re.IGNORECASE)
 _RE_REF_TO = re.compile(r"^REFERENCE\s+TO\s+", re.IGNORECASE)
@@ -84,9 +91,11 @@ class TypeIndex:
     def _init_builtins(self) -> None:
         for t_name in BUILTIN_TYPES:
             upper_name = t_name.upper()
+            base_type = BUILTIN_ALIASES.get(upper_name)
             self.register_type(TypeDescriptor(
                 name=upper_name,
                 kind=SymbolKind.ALIAS,
+                base_type_name=base_type,
             ))
 
     def register_type(self, descriptor: TypeDescriptor) -> None:
@@ -175,9 +184,21 @@ class TypeIndex:
             candidates = self._types.get(type_suffix)
 
         if candidates:
-            if len(candidates) == 1 or not context_path:
-                return candidates[0]
-            return max(candidates, key=lambda d: compute_proximity(context_path, d.file_path))
+            cand = (
+                candidates[0]
+                if (len(candidates) == 1 or not context_path)
+                else max(candidates, key=lambda d: compute_proximity(context_path, d.file_path))
+            )
+            # If candidate is an ALIAS stub without base_type_name and without local file_path,
+            # consult InfoSys on-demand to see if a richer definition is available.
+            if cand.kind == SymbolKind.ALIAS and cand.base_type_name is None and cand.file_path is None:
+                infosys_desc = InfoSysTypeProvider.get_instance().lookup_type(cleaned)
+                if infosys_desc is not None:
+                    self.register_type(infosys_desc)
+                    if infosys_desc.namespace:
+                        self.register_library_type(infosys_desc.namespace, infosys_desc.name)
+                    return infosys_desc
+            return cand
 
         # 2. On-demand dynamic lookup from Beckhoff InfoSys (.mshc)
         infosys_desc = InfoSysTypeProvider.get_instance().lookup_type(cleaned)

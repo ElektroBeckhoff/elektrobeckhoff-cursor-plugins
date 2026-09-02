@@ -340,6 +340,32 @@ class SymbolResolver:
                 member_sym = self.resolve_member_access(target_type, expr.member_name, current_scope)
                 if member_sym:
                     return member_sym.type_ref
+
+                # Optional naming fallback when target is an FB instance and member is unresolved
+                # (e.g. external FB like FB_IoT_Utilities_Time where members aren't in index)
+                m_name = expr.member_name
+                clean_target = self.type_index.clean_type_name(target_type).upper()
+                is_fb = (
+                    clean_target.startswith("FB_")
+                    or "TON" in clean_target
+                    or "TOF" in clean_target
+                    or "TP" in clean_target
+                    or (isinstance(expr.target, IdentifierExpr) and expr.target.name.lower().startswith(("_fb", "fb")))
+                )
+                if is_fb and len(m_name) >= 2:
+                    if m_name.startswith("t") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "TIME"
+                    if m_name.startswith("b") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "BOOL"
+                    if m_name.startswith("n") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "DINT"
+                    if m_name.startswith("f") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "LREAL"
+                    if m_name.startswith("s") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "STRING"
+                    if m_name.startswith("hr") and (m_name[1].isupper() or m_name[1] == "_"):
+                        return "HRESULT"
+
             return None
 
         if isinstance(expr, DerefExpr):
@@ -357,7 +383,12 @@ class SymbolResolver:
         if isinstance(expr, AddressOfExpr):
             target_t = self.infer_expression_type(expr.target, current_scope)
             if target_t:
-                return f"POINTER TO {target_t}"
+                inner_t = target_t.strip()
+                while inner_t.upper().startswith("REFERENCE TO "):
+                    inner_t = inner_t[13:].strip()
+                if expr.is_ref:
+                    return f"REFERENCE TO {inner_t}"
+                return f"POINTER TO {inner_t}"
             return "PVOID"
 
         if isinstance(expr, CallExpr):
@@ -368,7 +399,7 @@ class SymbolResolver:
                     return upper_callee[3:]
                 if "_TO_" in upper_callee:
                     return upper_callee.split("_TO_")[-1]
-                if upper_callee in ("SIZEOF", "LEN", "BITADR", "INDEXOF"):
+                if upper_callee in ("SIZEOF", "XSIZEOF", "LEN", "BITADR", "INDEXOF"):
                     return "UDINT"
                 if upper_callee in ("LOWER_BOUND", "UPPER_BOUND"):
                     return "DINT"
@@ -452,39 +483,41 @@ class SymbolResolver:
             if op in ("AND", "OR", "XOR"):
                 left_t = self.infer_expression_type(expr.left, current_scope)
                 right_t = self.infer_expression_type(expr.right, current_scope)
-                clean_l = self.type_index.clean_type_name(left_t).upper() if left_t else ""
-                clean_r = self.type_index.clean_type_name(right_t).upper() if right_t else ""
+                # Use raw upper type strings — do NOT use clean_type_name (strips POINTER TO)
+                clean_l = left_t.upper().strip() if left_t else ""
+                clean_r = right_t.upper().strip() if right_t else ""
                 # Bitwise operations on BYTE, WORD, DWORD, LWORD or integer types
                 if clean_l and clean_l not in ("BOOL", "BIT", "ANY_INT"):
-                    return clean_l
+                    return left_t
                 if clean_r and clean_r not in ("BOOL", "BIT", "ANY_INT"):
-                    return clean_r
+                    return right_t
                 if clean_l == "ANY_INT" or clean_r == "ANY_INT":
                     return "ANY_INT"
                 return "BOOL"
             if op in ("+", "-", "*", "/", "MOD", "EXPT"):
                 left_t = self.infer_expression_type(expr.left, current_scope)
                 right_t = self.infer_expression_type(expr.right, current_scope)
-                clean_l = self.type_index.clean_type_name(left_t).upper() if left_t else ""
-                clean_r = self.type_index.clean_type_name(right_t).upper() if right_t else ""
+                # Preserve POINTER TO / REFERENCE TO — clean_type_name would strip them
+                clean_l = left_t.upper().strip() if left_t else ""
+                clean_r = right_t.upper().strip() if right_t else ""
                 if clean_l == "LREAL" or clean_r == "LREAL":
                     return "LREAL"
                 if clean_l == "REAL" or clean_r == "REAL":
                     return "REAL"
                 if clean_l and clean_l not in ("ANY_INT", "ANY_REAL", "ANY"):
-                    return clean_l
+                    return left_t
                 if clean_r and clean_r not in ("ANY_INT", "ANY_REAL", "ANY"):
-                    return clean_r
-                return left_t or right_t or "INT"
+                    return right_t
+                return left_t or right_t
             return None
 
         if isinstance(expr, UnaryExpr):
             if expr.op.upper() == "NOT":
                 operand_t = self.infer_expression_type(expr.operand, current_scope)
                 if operand_t:
-                    clean_op = self.type_index.clean_type_name(operand_t).upper()
+                    clean_op = operand_t.upper().strip()
                     if clean_op not in ("BOOL", "BIT"):
-                        return clean_op
+                        return operand_t
                 return "BOOL"
             return self.infer_expression_type(expr.operand, current_scope)
 

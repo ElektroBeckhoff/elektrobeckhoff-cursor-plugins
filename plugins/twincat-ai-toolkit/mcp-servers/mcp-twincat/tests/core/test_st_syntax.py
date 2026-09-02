@@ -208,6 +208,21 @@ END_TYPE
         assert ast_node.definition.fields[2].name == "arrPayload"
         assert ast_node.definition.fields[2].type_name == "ARRAY [ 0 .. 99 ] OF BYTE"
 
+    def test_parse_type_internal_access_modifier(self):
+        source = """TYPE INTERNAL ST_InternalConfig :
+STRUCT
+    nId : UDINT;
+    bFlag : BOOL;
+END_STRUCT
+END_TYPE
+"""
+        ast_node, cst_nodes, diags = parse_declaration(source)
+        assert len(diags) == 0
+        assert isinstance(ast_node, TypeDecl)
+        assert ast_node.name == "ST_InternalConfig"
+        assert ast_node.access_modifier == "INTERNAL"
+        assert isinstance(ast_node.definition, StructType)
+
     def test_parse_enum_type(self):
         source = """{attribute 'qualified_only'}
 TYPE E_State :

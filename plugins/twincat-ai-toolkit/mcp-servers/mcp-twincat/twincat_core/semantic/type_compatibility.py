@@ -80,7 +80,7 @@ DT_TYPES: dict[str, tuple[int, int]] = {
 }
 
 STRING_TYPES: Set[str] = {"STRING", "WSTRING"}
-BOOLEAN_TYPES: Set[str] = {"BOOL", "BIT"}
+BOOLEAN_TYPES: Set[str] = {"BOOL", "BIT", "TRUE", "FALSE"}
 
 GENERIC_TYPES: Set[str] = {
     "ANY",
@@ -107,6 +107,8 @@ def _clean_type_str(type_str: str) -> str:
         # e.g. "BOOL VAR_INST _nState : INT" -> take the last part after the colon
         t = t.rsplit(":", 1)[-1].strip()
     u = t.upper()
+    if u in ("TRUE", "FALSE"):
+        return "BOOL"
     if u.startswith("POINTER TO"):
         inner = t[10:].strip()
         return f"POINTER TO {_clean_type_str(inner)}"
@@ -117,7 +119,10 @@ def _clean_type_str(type_str: str) -> str:
         t = t.split("[")[0].strip()
     if "(" in t:
         t = t.split("(")[0].strip()
-    return t.upper()
+    u2 = t.upper()
+    if u2 in ("TRUE", "FALSE"):
+        return "BOOL"
+    return u2
 
 
 def _is_8bit_string(t: str, type_index: Optional[TypeIndex] = None, context_path: Optional[Path] = None) -> bool:
@@ -127,7 +132,7 @@ def _is_8bit_string(t: str, type_index: Optional[TypeIndex] = None, context_path
     u = t.upper().strip()
     if u.startswith("WSTRING"):
         return False
-    if u in ("STRING", "STRING_LITERAL", "T_MAXSTRING", "ANY_STRING"):
+    if u in ("STRING", "STRING_LITERAL", "T_MAXSTRING", "T_AMSNETID", "ANY_STRING"):
         return True
     if u.startswith("STRING(") or u.startswith("STRING [") or u.startswith("STRING "):
         return True
@@ -335,6 +340,9 @@ def check_type_assignment(
             or _is_interface_type(t_clean, type_index, context_path)
         ):
             return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        # TIME / LTIME accept integer-tick literals in TwinCAT
+        if t_clean in TIME_TYPES or t_clean in DATE_TYPES or t_clean in TOD_TYPES or t_clean in DT_TYPES:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
         if t_clean in BOOLEAN_TYPES:
             return TypeCheckResult(
                 TypeCheckResultKind.TYPE_MISMATCH_ERROR,
@@ -347,11 +355,27 @@ def check_type_assignment(
                 message=f"Cannot convert integer literal to '{target_type}' without TO_STRING()",
                 code="TC-SEM-006",
             )
-        return TypeCheckResult(
-            TypeCheckResultKind.TYPE_MISMATCH_ERROR,
-            message=f"Cannot convert integer literal to '{target_type}'",
-            code="TC-SEM-006",
-        )
+        # Unknown / external-library aliases (e.g. Tc2_Utilities T_FILETIME64 : ULINT)
+        # are not in the local type index — TwinCAT accepts integer literals for them.
+        t_desc_lit = type_index.get_type(t_clean, context_path=context_path) if type_index else None
+        if t_desc_lit is None:
+            return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
+        # Known STRUCT / ENUM / FB / INTERFACE targets reject bare integer literals
+        if t_desc_lit.kind in (
+            SymbolKind.STRUCT,
+            SymbolKind.ENUM,
+            SymbolKind.FUNCTION_BLOCK,
+            SymbolKind.POU,
+            SymbolKind.INTERFACE,
+            SymbolKind.UNION,
+        ):
+            return TypeCheckResult(
+                TypeCheckResultKind.TYPE_MISMATCH_ERROR,
+                message=f"Cannot convert integer literal to '{target_type}'",
+                code="TC-SEM-006",
+            )
+        # Known ALIAS / other typed aliases already unwrapped above; residual → compatible
+        return TypeCheckResult(TypeCheckResultKind.COMPATIBLE)
 
     if s_clean in ("ANY_REAL", "REAL_LITERAL"):
         if t_clean in FLOATS or t_clean in ("ANY_REAL", "ANY_NUM"):

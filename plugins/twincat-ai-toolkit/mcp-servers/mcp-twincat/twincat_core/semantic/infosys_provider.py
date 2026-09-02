@@ -124,10 +124,17 @@ class InfoSysTypeProvider:
             description = page.get("description", "")
             syntax = page.get("syntax", "")
             ret_type = page.get("return_type")
+            if ret_type:
+                ret_type_clean = ret_type.strip().split("(")[0].strip()
+                if ret_type_clean.upper() in ("TRUE", "FALSE"):
+                    ret_type = "BOOL"
+                else:
+                    ret_type = ret_type_clean
 
-            # 1. Map entity kind (Function Block vs Function vs Struct vs Interface vs Enum)
+            # 1. Map entity kind (Function Block vs Function vs Struct vs Interface vs Enum vs Alias)
             upper_title = title.upper()
             kind = None
+            base_type_name = ret_type
 
             if (
                 "FUNCTION_BLOCK" in sym_type_raw
@@ -159,6 +166,16 @@ class InfoSysTypeProvider:
                 or ret_type is not None
             ):
                 kind = SymbolKind.FUNCTION
+            elif (
+                "TYPE" in sym_type_raw
+                or "ALIAS" in sym_type_raw
+                or upper_title.startswith("T_")
+            ):
+                kind = SymbolKind.ALIAS
+                if not base_type_name and syntax:
+                    m_alias = re.search(r':\s*([^;]+);', syntax)
+                    if m_alias:
+                        base_type_name = m_alias.group(1).strip()
 
             if kind is None:
                 self._cache[key] = None
@@ -169,7 +186,7 @@ class InfoSysTypeProvider:
             desc = TypeDescriptor(
                 name=title,
                 kind=kind,
-                base_type_name=ret_type,
+                base_type_name=base_type_name,
                 namespace=library_name,
                 is_external=True,
             )
@@ -179,7 +196,7 @@ class InfoSysTypeProvider:
                 name=title,
                 kind=kind,
                 span=DEFAULT_SPAN,
-                type_ref=ret_type if kind == SymbolKind.FUNCTION else title,
+                type_ref=ret_type if kind == SymbolKind.FUNCTION else (base_type_name if kind == SymbolKind.ALIAS else title),
                 doc_comment=description or f"Beckhoff library entity {title} ({library_name})",
             )
             desc.symbol = root_sym

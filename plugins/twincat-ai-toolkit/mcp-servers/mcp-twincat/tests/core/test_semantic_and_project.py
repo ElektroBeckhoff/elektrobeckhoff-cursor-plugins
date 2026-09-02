@@ -712,6 +712,61 @@ bFlag := 'hello';
         assert len(mismatch_diags) == 2
         assert "Cannot convert" in mismatch_diags[0].message
 
+    def test_sizeof_minus_literal_and_filetime_alias_literal_ok(self, tmp_path):
+        """Regression: SIZEOF(str)-1 → UDINT; integer literal → unknown T_FILETIME64 alias."""
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+        from twincat_core.semantic.type_compatibility import TypeCheckResultKind, check_type_assignment
+        from twincat_core.syntax.ast import CallExpr
+        from twincat_core.syntax.parser_statements import StatementParser
+
+        # 1) SIZEOF(...) parses as CallExpr (not AddressOfExpr)
+        stmts, _ = StatementParser.from_source("nCopy := SIZEOF(_sFieldBuf) - 1;").parse_statements()
+        assert len(stmts) == 1
+        rhs = stmts[0].value
+        assert isinstance(rhs.left, CallExpr)
+        assert isinstance(rhs.left.callee, IdentifierExpr)
+        assert rhs.left.callee.name.upper() == "SIZEOF"
+
+        # 2) Integer literal assignable to unknown library alias (Tc2_Utilities T_FILETIME64 : ULINT)
+        res = check_type_assignment("T_FILETIME64", "ANY_INT", type_index=TypeIndex())
+        assert res.kind == TypeCheckResultKind.COMPATIBLE
+
+        # 3) End-to-end: no TC-SEM-006 on SIZEOF(stringAlias)-1 or nLastLog := 0
+        alias_file = tmp_path / "T_EB_Influx_FieldValue.TcDUT"
+        alias_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="T_EB_Influx_FieldValue" Id="{0e3ac22a-8889-4f9b-bb2a-73dee3168d78}">
+    <Declaration><![CDATA[TYPE T_EB_Influx_FieldValue : STRING(255);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>""", encoding="utf-8")
+
+        pou_file = tmp_path / "FB_SizeofFiletime.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_SizeofFiletime" Id="{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SizeofFiletime
+VAR
+    _sFieldBuf : T_EB_Influx_FieldValue;
+    nCopy      : UDINT;
+    nLastLog   : T_FILETIME64;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+nCopy := SIZEOF(_sFieldBuf) - 1;
+nLastLog := 0;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(alias_file)
+        ws.update_file(pou_file)
+        diags = run_semantic_analysis(ws, pou_file)
+        mismatch = [d for d in diags if d.code == "TC-SEM-006"]
+        assert mismatch == [], f"Unexpected TC-SEM-006: {[d.message for d in mismatch]}"
+
     def test_semantic_implicit_narrowing_and_sign_change_warning(self, tmp_path):
         from twincat_core.semantic.diagnostics import run_semantic_analysis
         from twincat_core.syntax.diagnostics import DiagnosticSeverity
@@ -1287,6 +1342,88 @@ END_IF;
 
         diags = run_semantic_analysis(ws, pou_file)
         assert len(diags) == 0, f"Expected 0 diagnostics for Method returning BOOL with VAR_INST, got: {diags}"
+
+    def test_adr_reference_to_fb_type_inference(self):
+        from twincat_core.syntax.ast import AddressOfExpr, IdentifierExpr, SourceSpan
+        from twincat_core.semantic.symbols import Symbol, SymbolKind
+        from twincat_core.semantic.symbol_table import SymbolTable
+        from twincat_core.semantic.resolver import SymbolResolver
+        from twincat_core.semantic.type_index import TypeIndex
+
+        dummy_span = SourceSpan.from_bounds(1, 1, 0, 1, 1, 0)
+        type_index = TypeIndex()
+        sym_table = SymbolTable()
+        resolver = SymbolResolver(sym_table, type_index)
+
+        # Declare fbStream : REFERENCE TO FB_PayloadStream
+        sym_table.global_scope.define(
+            Symbol(name="fbStream", kind=SymbolKind.VARIABLE, span=dummy_span, type_ref="REFERENCE TO FB_PayloadStream")
+        )
+
+        adr_expr = AddressOfExpr(
+            span=dummy_span,
+            target=IdentifierExpr(span=dummy_span, name="fbStream"),
+            is_ref=False,
+        )
+        inferred = resolver.infer_expression_type(adr_expr, sym_table.global_scope)
+        assert inferred == "POINTER TO FB_PayloadStream"
+
+    def test_concat2_and_true_boolean_compatibility(self):
+        from twincat_core.semantic.type_compatibility import check_type_assignment, TypeCheckResultKind
+        from twincat_core.semantic.type_index import TypeIndex
+
+        type_index = TypeIndex()
+        # Assignment of "TRUE" string literal type to "BOOL"
+        res = check_type_assignment("BOOL", "TRUE", type_index=type_index)
+        assert res.kind == TypeCheckResultKind.COMPATIBLE
+
+        # Reverse check
+        res_rev = check_type_assignment("TRUE", "BOOL", type_index=type_index)
+        assert res_rev.kind == TypeCheckResultKind.COMPATIBLE
+
+    def test_amsnetid_string_alias_compatibility(self):
+        from twincat_core.semantic.type_compatibility import check_type_assignment, TypeCheckResultKind
+        from twincat_core.semantic.type_index import TypeIndex
+
+        type_index = TypeIndex()
+        # T_AmsNetId assigned to STRING(23)
+        res1 = check_type_assignment("STRING(23)", "T_AmsNetId", type_index=type_index)
+        assert res1.kind == TypeCheckResultKind.COMPATIBLE
+
+        # STRING(23) assigned to T_AmsNetId
+        res2 = check_type_assignment("T_AmsNetId", "STRING(23)", type_index=type_index)
+        assert res2.kind == TypeCheckResultKind.COMPATIBLE
+
+        # Plain STRING assigned to T_AmsNetId
+        res3 = check_type_assignment("T_AmsNetId", "STRING", type_index=type_index)
+        assert res3.kind == TypeCheckResultKind.COMPATIBLE
+
+    def test_unresolved_fb_member_time_arithmetic_no_false_positive(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+
+        pou_file = tmp_path / "FB_TimeCalc.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_TimeCalc" Id="{66666666-6666-6666-6666-666666666666}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_TimeCalc
+VAR
+    _fbTime : FB_IoT_Utilities_Time;
+    tTotalDiff : TIME;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+tTotalDiff := _fbTime.tTimeDiffPos + _fbTime.tTimeDiffNeg;
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        tc_sem_006 = [d for d in diags if d.code == "TC-SEM-006"]
+        assert len(tc_sem_006) == 0, f"Expected 0 TC-SEM-006 diagnostics for TIME arithmetic on FB members, got: {tc_sem_006}"
+
 
 
 
