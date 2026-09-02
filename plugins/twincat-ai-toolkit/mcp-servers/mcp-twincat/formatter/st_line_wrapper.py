@@ -17,6 +17,7 @@ from formatter.constants import (
     MAX_STRUCT_INIT_SINGLE_LINE,
     MULTILINE_CALL_INDENT,
 )
+from formatter.st_call_expr import split_single_line_call
 from formatter.st_string_scan import iter_st_string_spans
 from formatter.st_alignment import _find_colon_pos, _strip_strings
 
@@ -26,8 +27,6 @@ from formatter.st_alignment import _find_colon_pos, _strip_strings
 # ---------------------------------------------------------------------------
 
 _RE_BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.DOTALL)
-_RE_FB_CALL = re.compile(r"^(\s*(?:[\w.^]+(?:\s*:=\s*)?)?[\w.^]+)\((.+)\);\s*$")
-_RE_FB_CALL_NO_SEMI = re.compile(r"^(\s*(?:[\w.^]+(?:\s*:=\s*)?)?[\w.^]+)\((.+)\)\s*$")
 _RE_TRAILING_BC = re.compile(r"\s*\(\*.*?\*\)\s*$")
 
 
@@ -236,12 +235,10 @@ def _try_wrap_if_condition_call(
 
 def _needs_call_wrap(line: str, max_params: int) -> bool:
     """Check if line is an FB call that exceeds param count limit."""
-    stripped = line.strip()
-    match = _RE_FB_CALL.match(line) or _RE_FB_CALL_NO_SEMI.match(line)
-    if not match:
+    split = split_single_line_call(line)
+    if not split:
         return False
-    params_str = match.group(2)
-    params = _split_params(params_str)
+    params = _split_params(split.params)
     return len(params) > max_params
 
 
@@ -262,13 +259,13 @@ def _try_wrap_fb_call(
     line: str, max_params: int, call_indent: int
 ) -> list[str] | None:
     """Wrap FB call to multiline format if it exceeds param limit."""
-    has_semi = line.rstrip().endswith(");")
-    match = _RE_FB_CALL.match(line) if has_semi else _RE_FB_CALL_NO_SEMI.match(line)
-    if not match:
+    split = split_single_line_call(line)
+    if not split:
         return None
 
-    full_prefix = match.group(1)
-    params_str = match.group(2)
+    full_prefix = split.prefix
+    params_str = split.params
+    has_semi = split.has_semicolon
     indent_len = len(full_prefix) - len(full_prefix.lstrip())
     indent_str = " " * indent_len
     params = _split_params(params_str)

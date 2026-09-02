@@ -4,12 +4,14 @@ from __future__ import annotations
 import re
 
 from formatter.constants import ST_KEYWORDS
+from formatter.st_call_expr import match_control_call_opener
 from formatter.st_string_scan import sub_st_string_literals
 
 _RE_BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.DOTALL)
 _RE_LINE_COMMENT = re.compile(r"//.*$", re.MULTILINE)
 
-# Multiline IF/ELSIF/WHILE/UNTIL condition ending in an unclosed call ``(``.
+# Back-compat alias: control-flow multiline call openers (IF/WHILE/…).
+# Prefer ``is_if_wrapped_call_opener`` / ``match_control_call_opener``.
 RE_IF_MULTILINE_CALL = re.compile(
     r"^(\s*)"
     r"(?:IF|ELSIF|WHILE|UNTIL)\s+"
@@ -62,5 +64,5 @@ def is_case_label(code: str) -> bool:
 
 
 def is_if_wrapped_call_opener(stripped: str) -> bool:
-    """True for multiline IF/ELSIF conditions ending in an unclosed call ``(``."""
-    return stripped.endswith("(") and RE_IF_MULTILINE_CALL.match(stripped) is not None
+    """True for multiline IF/ELSIF/WHILE/UNTIL conditions ending in an unclosed call ``(``."""
+    return match_control_call_opener(stripped) is not None

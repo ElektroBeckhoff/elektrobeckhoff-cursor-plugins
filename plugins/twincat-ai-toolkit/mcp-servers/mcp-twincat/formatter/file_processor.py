@@ -25,7 +25,7 @@ from formatter.constants import FORMATTABLE_EXTENSIONS, TokenType
 from formatter.st_lexer import tokenize
 from formatter.diff_reporter import generate_diff
 from formatter.safe_writer import SafeFileWriter
-from formatter.st_parse_utils import RE_IF_MULTILINE_CALL
+from formatter.st_call_expr import match_control_call_opener, match_multiline_call_opener
 from twincat_core.syntax import TokenType as CoreTokenType, tokenize_st, validate_st_syntax_in_xml
 from twincat_core.xml import CdataKind, CdataSpan, patch_by_filter, read_tc_xml
 from formatter.st_alignment import (
@@ -395,25 +395,14 @@ def _format_st_pipeline(source: str, config: FormatterConfig) -> str:
     return "\n".join(parts)
 
 
-_RE_FB_CALL_OPEN = re.compile(r"^(\s*)[\w.^]+(?:\s*\[[^\]]+\])*\s*\(\s*$")
-_RE_ASSIGN_CALL_OPEN = re.compile(
-    r"^(\s*).+:=\s*.+[A-Za-z_]\w*\s*\(\s*$",
-)
-
-
-def _match_multiline_call_opener(line: str) -> re.Match[str] | None:
-    """Match standalone ``Fb(`` or assignment/IF call opener lines."""
+def _match_multiline_call_opener(line: str):
+    """Match standalone ``Fb(``, assignment, or IF/WHILE call opener lines."""
     if "(" not in line:
         return None
-    m = _RE_FB_CALL_OPEN.match(line)
+    m = match_multiline_call_opener(line)
     if m:
         return m
-    m = _RE_ASSIGN_CALL_OPEN.match(line)
-    if m:
-        return m
-    if line.rstrip().endswith("("):
-        return RE_IF_MULTILINE_CALL.match(line)
-    return None
+    return match_control_call_opener(line)
 
 
 def _normalize_call_param_indent(lines: list[str], call_indent: int) -> list[str]:
