@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Sync local twincat-ai-toolkit plugin development files directly into Cursor's local plugin cache.
+"""Sync local plugin development files directly into Cursor's local plugin cache.
 
 Allows manual local testing and live updates without waiting for GitHub Marketplace release.
+Synchronizes all plugins under plugins/ (twincat-ai-toolkit, pdf-tools, etc.).
 """
 
 from __future__ import annotations
@@ -37,9 +38,14 @@ def should_ignore(path: Path) -> bool:
     return False
 
 
-def get_source_plugin_dir() -> Path:
-    # Source is parent of .dev/
-    return Path(__file__).resolve().parent.parent
+def get_repo_plugins_dir() -> Path:
+    # Locate plugins/ directory
+    current = Path(__file__).resolve().parent
+    while current.parent != current:
+        if (current / "plugins").is_dir():
+            return current / "plugins"
+        current = current.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def get_cursor_plugins_root() -> Path:
@@ -47,15 +53,15 @@ def get_cursor_plugins_root() -> Path:
     return user_home / ".cursor" / "plugins"
 
 
-def find_target_cache_dirs(plugins_root: Path) -> List[Path]:
+def find_target_cache_dirs(plugins_root: Path, plugin_name: str) -> List[Path]:
     targets: Set[Path] = set()
 
     if not plugins_root.is_dir():
         print(f"[!] Cursor plugins root not found at: {plugins_root}")
         return []
 
-    # 1. Look in cache/elektrobeckhoff-cursor-plugins/twincat-ai-toolkit/
-    cache_base = plugins_root / "cache" / "elektrobeckhoff-cursor-plugins" / "twincat-ai-toolkit"
+    # 1. Look in cache/elektrobeckhoff-cursor-plugins/<plugin_name>/
+    cache_base = plugins_root / "cache" / "elektrobeckhoff-cursor-plugins" / plugin_name
     if cache_base.is_dir():
         for item in cache_base.iterdir():
             if item.is_dir():
@@ -64,7 +70,7 @@ def find_target_cache_dirs(plugins_root: Path) -> List[Path]:
     # 2. Look in marketplaces/
     marketplaces = plugins_root / "marketplaces"
     if marketplaces.is_dir():
-        for p in marketplaces.glob("**/twincat-ai-toolkit"):
+        for p in marketplaces.glob(f"**/{plugin_name}"):
             if p.is_dir() and ".dev" not in p.parts:
                 targets.add(p)
 
@@ -159,39 +165,54 @@ def sync_directory(src: Path, dst: Path) -> int:
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="Sync local twincat-ai-toolkit plugin to Cursor cache.")
+    parser = argparse.ArgumentParser(description="Sync local plugins to Cursor cache.")
     parser.add_argument("--no-install-ext", action="store_true", help="Skip installing the VSIX extension into Cursor/VS Code.")
+    parser.add_argument("--plugin", type=str, default="", help="Specific plugin to sync (defaults to all).")
     args = parser.parse_args()
 
     print("=" * 65)
-    print(" TwinCAT AI Toolkit - Local Cursor Plugin Cache Synchronizer")
+    print(" Cursor Plugins - Local Cache Synchronizer")
     print("=" * 65)
 
-    source_dir = get_source_plugin_dir()
-    print(f"Source plugin directory:\n  {source_dir}\n")
-
-    build_and_install_vsix(source_dir, install_to_editor=not args.no_install_ext)
-
-    plugins_root = get_cursor_plugins_root()
-    targets = find_target_cache_dirs(plugins_root)
-
-    if not targets:
-        print("[!] No target cache directories found.")
+    plugins_dir = get_repo_plugins_dir()
+    if not plugins_dir.is_dir():
+        print(f"[!] Plugins directory not found at: {plugins_dir}")
         return
 
-    print(f"\nFound {len(targets)} target cache location(s):")
-    for t in targets:
-        print(f"  -> {t}")
+    available_plugins = [p for p in plugins_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
+    if args.plugin:
+        available_plugins = [p for p in available_plugins if p.name == args.plugin]
 
-    print("\nSyncing files...")
-    total_copied = 0
-    for target in targets:
-        count = sync_directory(source_dir, target)
-        print(f"  [+] Updated {target.name}: {count} file(s) synchronized.")
-        total_copied += count
+    plugins_root = get_cursor_plugins_root()
+    total_all_copied = 0
+
+    for plugin_path in available_plugins:
+        plugin_name = plugin_path.name
+        print(f"\n[*] Processing plugin: {plugin_name} ({plugin_path})")
+
+        # Build and install VSIX if extension exists
+        if (plugin_path / "vscode-extension").is_dir():
+            build_and_install_vsix(plugin_path, install_to_editor=not args.no_install_ext)
+
+        targets = find_target_cache_dirs(plugins_root, plugin_name)
+        if not targets:
+            print(f"[!] No target cache directories found for {plugin_name}.")
+            continue
+
+        print(f"Found {len(targets)} target cache location(s) for {plugin_name}:")
+        for t in targets:
+            print(f"  -> {t}")
+
+        print("Syncing files...")
+        plugin_copied = 0
+        for target in targets:
+            count = sync_directory(plugin_path, target)
+            print(f"  [+] Updated {target}: {count} file(s) synchronized.")
+            plugin_copied += count
+        total_all_copied += plugin_copied
 
     print("-" * 65)
-    print(f"SUCCESS: Synchronized {total_copied} file(s) across all cache locations.")
+    print(f"SUCCESS: Synchronized {total_all_copied} file(s) across all cache locations.")
     print("Tip: In Cursor, press Ctrl+Shift+P -> 'Developer: Reload Window' to apply changes.")
     print("=" * 65)
 
