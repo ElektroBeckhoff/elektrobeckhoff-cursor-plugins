@@ -1,9 +1,10 @@
 """LSP request and notification handler implementations calling twincat_core."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import lsprotocol.types as lsp
 
@@ -1296,6 +1297,89 @@ def handle_format_section(
         "edits": edits,
         "sectionName": section_name,
         "success": True,
+    }
+
+
+def handle_format_files(
+    paths: list[str],
+    recursive: bool = True,
+    dry_run: bool = False,
+    validate: bool = True,
+    format_xml: bool = True,
+    sort_elements: bool = False,
+) -> dict[str, Any]:
+    """Format one or more TwinCAT files or directories recursively."""
+    from formatter.config import load_config
+    from formatter.file_processor import discover_files, discover_project_files, process_batch
+
+    all_files: list[str] = []
+    seen: set[str] = set()
+
+    for p in paths:
+        if not p:
+            continue
+        cleaned = str(p).strip().strip('"').strip("'")
+        if not cleaned:
+            continue
+        abs_p = os.path.abspath(cleaned)
+        if not os.path.exists(abs_p):
+            continue
+
+        if abs_p.lower().endswith(".plcproj"):
+            discovered = discover_project_files(abs_p)
+        elif os.path.isfile(abs_p):
+            discovered = [abs_p]
+        elif os.path.isdir(abs_p):
+            discovered = discover_files([abs_p], recursive=recursive)
+        else:
+            discovered = []
+
+        for f in discovered:
+            norm = os.path.normcase(os.path.abspath(f))
+            if norm not in seen:
+                seen.add(norm)
+                all_files.append(f)
+
+    if not all_files:
+        return {
+            "success": True,
+            "total": 0,
+            "formatted": 0,
+            "unchanged": 0,
+            "errors": 0,
+            "message": "No formattable TwinCAT files found.",
+            "results": [],
+        }
+
+    sample_dir = os.path.dirname(all_files[0]) if all_files else os.getcwd()
+    cfg = load_config(project_root=sample_dir)
+
+    batch = process_batch(
+        all_files,
+        cfg,
+        dry_run=dry_run,
+        validate=validate,
+        format_st=True,
+        format_xml=format_xml,
+        sort_xml=sort_elements,
+    )
+
+    results_list = []
+    for r in batch.results:
+        entry = {"file": os.path.basename(r.path), "path": r.path, "changed": r.changed, "success": r.success}
+        if r.errors:
+            entry["errors"] = list(r.errors)
+        if r.warnings:
+            entry["warnings"] = list(r.warnings)
+        results_list.append(entry)
+
+    return {
+        "success": batch.errors == 0,
+        "total": batch.total,
+        "formatted": batch.formatted,
+        "unchanged": batch.unchanged,
+        "errors": batch.errors,
+        "results": results_list,
     }
 
 

@@ -4,6 +4,7 @@ from .handlers import (
     handle_completion,
     handle_definition,
     handle_document_symbol,
+    handle_format_files,
     handle_format_section,
     handle_formatting,
     handle_hover,
@@ -45,5 +46,6 @@ __all__ = [
     "handle_formatting",
     "handle_range_formatting",
     "handle_format_section",
+    "handle_format_files",
     "get_diagnostics_for_file",
 ]

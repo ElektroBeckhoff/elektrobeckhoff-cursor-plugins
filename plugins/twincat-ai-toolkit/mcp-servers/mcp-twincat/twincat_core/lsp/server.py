@@ -17,6 +17,7 @@ from .handlers import (
     handle_completion,
     handle_definition,
     handle_document_symbol,
+    handle_format_files,
     handle_format_section,
     handle_formatting,
     handle_hover,
@@ -188,6 +189,44 @@ class TwinCatLanguageServer(LanguageServer):
 
             file_path = uri_to_path(uri)
             return handle_format_section(self.workspace_index, file_path, lsp_pos, unsaved_text=unsaved)
+
+        @self.feature("twincat/formatFiles")
+        def on_format_files(params: Any) -> dict[str, Any]:
+            raw_paths = _get_param(params, "paths") or _get_param(params, "files") or []
+            if isinstance(raw_paths, str):
+                raw_paths = [raw_paths]
+            elif not isinstance(raw_paths, list):
+                raw_paths = []
+
+            single_path = _get_param(params, "path")
+            if single_path and single_path not in raw_paths:
+                raw_paths.append(single_path)
+            single_uri = _get_param(params, "uri")
+            if single_uri:
+                raw_paths.append(single_uri)
+
+            resolved_paths: list[str] = []
+            for p in raw_paths:
+                p_str = str(p).strip()
+                if p_str.startswith("file://") or p_str.startswith("file:"):
+                    resolved_paths.append(str(uri_to_path(p_str)))
+                else:
+                    resolved_paths.append(p_str)
+
+            recursive = bool(_get_param(params, "recursive", True))
+            dry_run = bool(_get_param(params, "dry_run", False) or _get_param(params, "dryRun", False))
+            validate = bool(_get_param(params, "validate", True))
+            format_xml = bool(_get_param(params, "format_xml", True) or _get_param(params, "formatXml", True))
+            sort_elements = bool(_get_param(params, "sort_elements", False) or _get_param(params, "sortElements", False))
+
+            return handle_format_files(
+                resolved_paths,
+                recursive=recursive,
+                dry_run=dry_run,
+                validate=validate,
+                format_xml=format_xml,
+                sort_elements=sort_elements,
+            )
 
         @self.feature(lsp.TEXT_DOCUMENT_DEFINITION)
         def on_definition(params: lsp.DefinitionParams) -> Optional[lsp.Location]:

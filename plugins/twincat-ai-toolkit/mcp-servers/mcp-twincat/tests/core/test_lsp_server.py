@@ -12,6 +12,7 @@ from twincat_core.lsp import (
     handle_completion,
     handle_definition,
     handle_document_symbol,
+    handle_format_files,
     handle_format_section,
     handle_formatting,
     handle_hover,
@@ -1784,6 +1785,56 @@ _fbRemoveFromGroup(
         ))
         assert hover_fb_impl is not None
         assert "_fbRemoveFromGroup" in hover_fb_impl.contents.value
+
+
+class TestFormatFilesLsp:
+    """Test recursive file/folder formatting LSP handler."""
+
+    def test_handle_format_files_single_file(self, tmp_path):
+        pou = tmp_path / "FB_Test.TcPOU"
+        pou.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        res = handle_format_files([str(pou)])
+        assert res["success"] is True
+        assert res["total"] == 1
+        assert res["errors"] == 0
+
+    def test_handle_format_files_directory_recursive(self, tmp_path):
+        sub1 = tmp_path / "Sub1"
+        sub1.mkdir()
+        sub2 = sub1 / "Sub2"
+        sub2.mkdir()
+
+        (tmp_path / "FB_Root.TcPOU").write_text(SAMPLE_POU_XML, encoding="utf-8")
+        (sub1 / "FB_Sub1.TcPOU").write_text(SAMPLE_POU_XML, encoding="utf-8")
+        (sub2 / "FB_Sub2.TcPOU").write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        res = handle_format_files([str(tmp_path)], recursive=True)
+        assert res["success"] is True
+        assert res["total"] == 3
+        assert res["errors"] == 0
+
+    def test_handle_format_files_empty(self, tmp_path):
+        empty_dir = tmp_path / "Empty"
+        empty_dir.mkdir()
+        res = handle_format_files([str(empty_dir)])
+        assert res["success"] is True
+        assert res["total"] == 0
+        assert res["results"] == []
+
+    def test_lsp_server_feature_format_files(self, tmp_path):
+        pou = tmp_path / "FB_ServerTest.TcPOU"
+        pou.write_text(SAMPLE_POU_XML, encoding="utf-8")
+
+        server = create_lsp_server()
+        feature_handler = server.protocol.fm.features.get("twincat/formatFiles")
+        assert feature_handler is not None
+
+        params = {"paths": [str(pou)], "recursive": True, "dryRun": False}
+        res = feature_handler(params)
+        assert res["success"] is True
+        assert res["total"] == 1
+
 
 
 
