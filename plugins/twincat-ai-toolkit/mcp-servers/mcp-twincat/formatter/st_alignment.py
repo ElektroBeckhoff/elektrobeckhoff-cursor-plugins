@@ -11,7 +11,7 @@ import re
 from typing import Sequence
 
 from formatter.constants import VAR_BLOCK_KEYWORDS, MULTILINE_CALL_INDENT
-from formatter.st_parse_utils import is_if_wrapped_call_opener
+from formatter.st_parse_utils import is_case_label, is_if_wrapped_call_opener
 from formatter.st_string_scan import sub_st_string_literals
 
 
@@ -38,6 +38,15 @@ _RE_STRUCT_INIT_OPEN = re.compile(
 _RE_STRUCT_PAREN_OPEN = re.compile(r"^\(\s*,?\s*$")
 _RE_ARRAY_STRUCT_OPEN = re.compile(r"^(\s*)([\w.^]+(?:\[[^\]]*\])?)\s*:=\s*\[(?:\(\s*)?$")
 _RE_ELEMENT_CLOSE = re.compile(r"^\s*\),\s*$")
+_RE_SIMPLE_RHS = re.compile(
+    r"^(?:"
+    r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"   # bare or qualified identifier/enum
+    r"|'[^']*'"                           # single-quoted string
+    r'|"[^"]*"'                           # double-quoted string
+    r"|TRUE|FALSE"                        # boolean literal
+    r");\s*$",
+    re.IGNORECASE,
+)
 _RE_ELEMENT_SEP = re.compile(r"^\s*\),\s*\(\s*$")
 _RE_ELEMENT_OPEN = re.compile(r"^\s*\(\s*$")
 _RE_ARRAY_STRUCT_END = re.compile(r"^(\s*)(?:\)\s*)?\];?\s*$")
@@ -2329,15 +2338,68 @@ def compact_orphan_overpadded_assigns(lines: list[str], *, min_gap: int = 3,
             continue
         rhs = line[pos + 2:].lstrip()
         if simple_identifier_only:
-            if not re.match(r"^[A-Za-z_]\w*;\s*$", rhs):
+            if not _RE_SIMPLE_RHS.match(rhs):
                 min_expr_gap = max(min_gap, expression_rhs_min_gap_floor)
-                if expression_rhs_max_gap <= 0 or gap < min_expr_gap or gap > expression_rhs_max_gap:
+                if gap < min_expr_gap or (expression_rhs_max_gap > 0 and gap > expression_rhs_max_gap):
                     result.append(line)
                     continue
         if skip_rhs_or_and_chain and (" OR " in rhs.upper() or " AND " in rhs.upper()):
             result.append(line)
             continue
         result.append(lhs + " := " + rhs)
+    return result
+
+
+def normalize_case_arm_single_assignments(lines: list[str]) -> list[str]:
+    """Normalize := spacing on single assignment statements inside CASE arms.
+
+    When a CASE arm contains exactly one statement and that statement is a simple
+    assignment, collapses any excessive whitespace before ':=' to a single space.
+    """
+    result = list(lines)
+    case_depth = 0
+    i = 0
+    n = len(result)
+    while i < n:
+        line = result[i]
+        stripped = line.strip()
+        u = stripped.upper()
+        if u.startswith("CASE ") and " OF" in u:
+            case_depth += 1
+            i += 1
+            continue
+        if u == "END_CASE" or u.startswith("END_CASE;"):
+            case_depth = max(0, case_depth - 1)
+            i += 1
+            continue
+        if case_depth > 0 and (is_case_label(line) or u == "ELSE"):
+            j = i + 1
+            arm_stmt_indices: list[int] = []
+            while j < n:
+                cur = result[j]
+                cur_s = cur.strip()
+                cur_u = cur_s.upper()
+                if not cur_s or cur_s.startswith("//") or cur_s.startswith("(*"):
+                    j += 1
+                    continue
+                if cur_u.startswith("CASE ") and " OF" in cur_u:
+                    break
+                if cur_u == "END_CASE" or cur_u.startswith("END_CASE;") or is_case_label(cur) or cur_u == "ELSE":
+                    break
+                arm_stmt_indices.append(j)
+                j += 1
+
+            if len(arm_stmt_indices) == 1:
+                idx = arm_stmt_indices[0]
+                stmt_line = result[idx]
+                pos = _find_assign_pos(stmt_line)
+                if pos >= 0:
+                    lhs = stmt_line[:pos].rstrip()
+                    rhs = stmt_line[pos + 2:].lstrip()
+                    result[idx] = lhs + " := " + rhs
+            i = j
+            continue
+        i += 1
     return result
 
 

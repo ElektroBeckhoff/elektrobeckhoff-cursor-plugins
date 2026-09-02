@@ -128,11 +128,9 @@ class AlignmentHeuristicsConfig:
     # Skip re-align when existing padding before ':=' is already tight.
     assign_already_aligned_max_gap: int = 1
     compact_orphan_assign_min_gap: int = 3
-    compact_orphan_assign_max_gap: int = 13
+    compact_orphan_assign_max_gap: int = 0
     compact_orphan_simple_identifier_only: bool = True
-    compact_orphan_expression_rhs_max_gap: int = 13
-    # When RHS is not a bare identifier, don't compact unless the padding gap
-    # stays within a safe window. The lower bound was previously hard-coded.
+    compact_orphan_expression_rhs_max_gap: int = 0
     compact_orphan_expression_rhs_min_gap_floor: int = 10
     # Preserve spacing on OR/AND RHS chains (prevents breaking Golden parity noise).
     compact_orphan_skip_rhs_or_and_chain: bool = True
@@ -179,6 +177,7 @@ class AlignmentHeuristicsConfig:
     align_ref_to_preceding_assign: bool = True
     align_init_injection_if_bodies: bool = True
     align_pre_chained_true_orphans: bool = True
+    normalize_case_arm_single_assignments: bool = True
 
 
 @dataclass(slots=True)
@@ -531,6 +530,9 @@ def config_to_dict(cfg: FormatterConfig) -> dict[str, Any]:
             ),
             "align_pre_chained_true_orphans": (
                 cfg.alignment_heuristics.align_pre_chained_true_orphans
+            ),
+            "normalize_case_arm_single_assignments": (
+                cfg.alignment_heuristics.normalize_case_arm_single_assignments
             ),
         },
         "alignMultiline": {

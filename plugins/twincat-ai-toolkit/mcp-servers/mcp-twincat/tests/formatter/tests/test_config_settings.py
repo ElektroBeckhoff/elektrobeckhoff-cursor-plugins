@@ -152,8 +152,8 @@ def test_config_loading():
     assert config.alignment_heuristics.bool_literal_name_spread_max == 2
     assert config.alignment_heuristics.assign_already_aligned_max_gap == 1
     assert config.alignment_heuristics.compact_orphan_assign_min_gap == 3
-    assert config.alignment_heuristics.compact_orphan_assign_max_gap == 13
-    assert config.alignment_heuristics.compact_orphan_expression_rhs_max_gap == 13
+    assert config.alignment_heuristics.compact_orphan_assign_max_gap == 0
+    assert config.alignment_heuristics.compact_orphan_expression_rhs_max_gap == 0
     assert config.alignment_heuristics.compact_orphan_expression_rhs_min_gap_floor == 10
     assert config.alignment_heuristics.compact_orphan_skip_rhs_or_and_chain is True
     assert config.alignment_heuristics.compact_orphan_simple_identifier_only is True

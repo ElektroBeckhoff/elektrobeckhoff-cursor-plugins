@@ -307,6 +307,34 @@ def _has_code_before(mask: str, pos: int) -> bool:
     return False
 
 
+def _normalize_assign_segment_spacing(segment: str) -> str:
+    """Normalize multi-space padding before ':=' in a statement segment produced by splitting."""
+    if ":=" not in segment:
+        return segment
+    mask = _build_mask(segment)
+    assign_positions: list[int] = []
+    i = 0
+    while i < len(mask) - 1:
+        if mask[i] == ":" and mask[i + 1] == "=":
+            assign_positions.append(i)
+            i += 1
+        i += 1
+
+    if not assign_positions:
+        return segment
+
+    result = segment
+    for pos in reversed(assign_positions):
+        j = pos - 1
+        while j >= 0 and result[j] == " ":
+            j -= 1
+        if j >= 0 and mask[j] != "\x01":
+            lhs = result[:j + 1]
+            rhs = result[pos + 2:].lstrip()
+            result = lhs + " := " + rhs
+    return result
+
+
 def _split_line_statements(
     line: str,
     initial_case_depth: int = 0,
@@ -331,6 +359,7 @@ def _split_line_statements(
     mask = _build_mask(stripped)
 
     splits: list[int] = []
+    case_split_positions: set[int] = set()
 
     # Standalone compiler directives: split before/after
     for pm in _RE_PRAGMA.finditer(stripped):
@@ -498,12 +527,16 @@ def _split_line_statements(
                             if any(c.isalpha() for c in ca_inner):
                                 if rest_pos < n:
                                     splits.append(bc_end_pos)
+                                    case_split_positions.add(bc_end_pos)
                             else:
                                 splits.append(colon_after)
+                                case_split_positions.add(colon_after)
                         else:
                             splits.append(colon_after)
+                            case_split_positions.add(colon_after)
                     else:
                         splits.append(colon_after)
+                        case_split_positions.add(colon_after)
             i += 1
             continue
 
@@ -625,11 +658,15 @@ def _split_line_statements(
     for pos in unique:
         segment = stripped[last:pos].strip()
         if segment:
+            if last in case_split_positions:
+                segment = _normalize_assign_segment_spacing(segment)
             parts.append(segment)
         last = pos
 
     remaining = stripped[last:].strip()
     if remaining:
+        if last in case_split_positions:
+            remaining = _normalize_assign_segment_spacing(remaining)
         parts.append(remaining)
 
     if len(parts) <= 1:

@@ -34,6 +34,7 @@ from formatter.st_alignment import (
     normalize_multi_var_name_commas,
     align_for_body_assignments,
     compact_orphan_overpadded_assigns, compact_same_col_outlier_assigns,
+    normalize_case_arm_single_assignments,
     expand_tight_assignment_spacing,
     normalize_header_and_comment_spacing,
     _find_assign_pos, _is_simple_assignment,
@@ -286,6 +287,12 @@ def process_batch(
     return batch
 
 
+_EXCLUDES_LOWER: set[str] = {
+    ".git", "node_modules", "_libraries", "_compileinfo", "versions",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", "bin", "obj",
+}
+
+
 def discover_files(
     paths: Sequence[str],
     *,
@@ -300,13 +307,16 @@ def discover_files(
     result: list[str] = []
 
     for p in paths:
+        if not p:
+            continue
         path = Path(p)
         if path.is_file():
             if _is_formattable(str(path), include, exclude):
                 result.append(str(path.resolve()))
         elif path.is_dir():
             if recursive:
-                for root, _dirs, files in os.walk(path):
+                for root, dirs, files in os.walk(path):
+                    dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDES_LOWER]
                     for f in sorted(files):
                         full = os.path.join(root, f)
                         if _is_formattable(full, include, exclude):
@@ -326,6 +336,8 @@ def discover_project_files(project_path: str) -> list[str]:
     For .sln: scans the entire solution directory.
     For .plcproj: scans the plcproj parent directory.
     """
+    if not project_path:
+        return []
     p = Path(project_path)
     if not p.exists():
         return []
@@ -338,7 +350,8 @@ def discover_project_files(project_path: str) -> list[str]:
         return []
 
     result: list[str] = []
-    for root, _dirs, files in os.walk(search_root):
+    for root, dirs, files in os.walk(search_root):
+        dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDES_LOWER]
         for f in sorted(files):
             if _is_formattable(f, None, None):
                 result.append(str(Path(os.path.join(root, f)).resolve()))
@@ -797,6 +810,17 @@ def _insert_blank_lines_after_assign(
     return result
 
 
+def _normalize_case_inline_body(body: str) -> str:
+    """Collapse multi-space padding before ':=' when splitting inline CASE arms."""
+    stripped = body.strip()
+    if ":=" not in stripped:
+        return stripped
+    m = re.match(r"^(\s*\S+)\s{2,}:=(.*)$", stripped)
+    if m:
+        return m.group(1) + " :=" + m.group(2)
+    return stripped
+
+
 def _split_case_inline_statements(
     lines: list[str],
     indent_size: int,
@@ -843,14 +867,14 @@ def _split_case_inline_statements(
                         result.append(line)
                         continue
                     result.append(m.group(1) + "ELSE")
-                    result.append(m.group(1) + (" " * indent_size) + body)
+                    result.append(m.group(1) + (" " * indent_size) + _normalize_case_inline_body(body))
                     continue
             m = label_re.match(line)
             if m:
                 indent, label, body = m.groups()
                 if body.strip() and ":=" in body:
                     result.append(indent + label.rstrip())
-                    result.append(indent + (" " * indent_size) + body.strip())
+                    result.append(indent + (" " * indent_size) + _normalize_case_inline_body(body))
                     continue
 
         result.append(line)
@@ -969,6 +993,8 @@ def _format_st_segment(source: str, config: FormatterConfig, *, reindent: bool |
                 expression_rhs_min_gap_floor=heur.compact_orphan_expression_rhs_min_gap_floor,
                 skip_rhs_or_and_chain=heur.compact_orphan_skip_rhs_or_and_chain,
             )
+        if heur.normalize_case_arm_single_assignments:
+            lines = normalize_case_arm_single_assignments(lines)
         if heur.compact_same_col_outlier_enabled:
             lines = compact_same_col_outlier_assigns(
                 lines,
