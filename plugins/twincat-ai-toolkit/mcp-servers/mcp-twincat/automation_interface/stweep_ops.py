@@ -528,30 +528,34 @@ class StweepOpsMixin:
         if result.canceled or result.method == "canceled":
             phase = "canceled"
         self._format_cancel_requested = False
-        done = (
-            result.files_formatted
-            + result.files_failed
-            + result.files_unchanged
-        )
+        try:
+            done = (
+                int(result.files_formatted)
+                + int(result.files_failed)
+                + int(result.files_unchanged)
+            )
+            total = int(result.files_total) if result.files_total is not None else 0
+        except (TypeError, ValueError):
+            done = 0
+            total = 0
+
+        percent = 100.0 if result.success else 0.0
+        if total > 0 and done >= total:
+            percent = 100.0
+        elif total > 0:
+            percent = round(100.0 * done / total, 1)
+
         self._update_format_progress(
             running=False,
             phase=phase,
             current_file="",
-            files_total=result.files_total,
-            files_formatted=result.files_formatted,
-            files_failed=result.files_failed,
+            files_total=total,
+            files_formatted=getattr(result, "files_formatted", 0),
+            files_failed=getattr(result, "files_failed", 0),
             files_done=done,
-            percent=(
-                100.0
-                if result.files_total and done >= result.files_total
-                else (
-                    round(100.0 * done / result.files_total, 1)
-                    if result.files_total
-                    else (100.0 if result.success else 0.0)
-                )
-            ),
+            percent=percent,
             message=result.message,
-            result=asdict(result),
+            result=asdict(result) if hasattr(result, "__dataclass_fields__") else {},
         )
 
     def _start_format_code_async(
