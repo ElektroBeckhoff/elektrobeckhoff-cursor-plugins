@@ -1,0 +1,39 @@
+---
+description: TwinCAT MCP server log inspection and diagnostics. When to inspect mcp-twincat.log, how to verify MCP server version, and how to troubleshoot COM timeouts and modal dialog blockades.
+alwaysApply: false
+---
+
+# TwinCAT MCP Server Logging & Diagnostics
+
+## Log Location & Configuration
+
+- **Primary Path:** `%LOCALAPPDATA%\ElektroBeckhoff\logs\mcp-twincat.log`
+- **MCP Tool:** `twincat_status()` provides `log_file` and `mcp_server_version`.
+- **Format:** `YYYY-MM-DD HH:MM:SS.mmm [LEVEL] [logger:thread] message`
+- **Rotation:** 10 MB per file, max 5 backup generations.
+
+## When to Inspect Logs
+
+1. An MCP tool call returns a timeout or `MCP error -32001`.
+2. A COM action (`twincat_open`, `twincat_reload`, `twincat_build`, `twincat_activate`) fails unexpectedly.
+3. Multiple TcXaeShell / Visual Studio instances are running and session resolution is unclear.
+4. Diagnosing whether a modal dialog in TcXaeShell was auto-dismissed or blocked the thread.
+5. Verifying which MCP server version and Python process ID (`pid`) processed the request.
+
+## Version Verification
+
+The MCP server logs its version on initialization:
+```text
+TwinCAT MCP logging initialized | version=1.0.0 | log_file='...' | level=INFO | pid=... | python=...
+```
+
+Match the version with `.cursor-plugin/plugin.json` to verify that Cursor is running the current plugin build and not an outdated cache copy.
+
+## Key Troubleshooting Signatures
+
+| Signature in Log | Meaning | Required Action |
+|------------------|---------|-----------------|
+| `COM STA call '...' timed out after 50.0s` | TcXaeShell COM thread blocked | Check for open modal dialogs or disconnect PLC from Online mode |
+| `Auto-dismissed TcXaeShell dialog` | Safe reload prompt automatically confirmed | Normal background operation by `Dialog-Watcher` |
+| `SilentMode COM busy (attempt X/6)` | VS COM busy processing UI | Handled automatically by retry mechanism |
+| `Unhandled top-level exception` | Crash in MCP server | Inspect Python traceback in log for root cause |
