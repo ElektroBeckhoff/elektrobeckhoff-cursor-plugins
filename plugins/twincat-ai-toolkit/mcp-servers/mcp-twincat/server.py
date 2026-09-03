@@ -35,15 +35,11 @@ for _subdir in (
         sys.path.insert(0, _p)
 
 from migrator._bootstrap import setup_migrator_paths  # noqa: E402
+from mcp_logging import setup_mcp_logging, get_log_path  # noqa: E402
 
 setup_migrator_paths()
+setup_mcp_logging()
 
-# stdout is the MCP JSON-RPC wire -- all logging goes to stderr
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    stream=sys.stderr,
-)
 log = logging.getLogger("twincat-mcp")
 
 from mcp.server.fastmcp import FastMCP
