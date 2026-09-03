@@ -1424,6 +1424,41 @@ tTotalDiff := _fbTime.tTimeDiffPos + _fbTime.tTimeDiffNeg;
         tc_sem_006 = [d for d in diags if d.code == "TC-SEM-006"]
         assert len(tc_sem_006) == 0, f"Expected 0 TC-SEM-006 diagnostics for TIME arithmetic on FB members, got: {tc_sem_006}"
 
+    def test_position_and_pouname_macros_warn_4026_and_no_type_error(self, tmp_path):
+        from twincat_core.semantic.diagnostics import run_semantic_analysis
+        from twincat_core.syntax.diagnostics import DiagnosticSeverity
+
+        pou_file = tmp_path / "FB_Macros.TcPOU"
+        pou_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Macros" Id="{77777777-7777-7777-7777-777777777777}">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Macros
+VAR
+    sDeclPos : STRING := __POSITION();
+    sDeclPou : STRING := __POUNAME();
+    sImplPos : STRING;
+    sImplPou : STRING;
+END_VAR
+]]></Declaration>
+    <Implementation><![CDATA[
+sImplPos := __POSITION();
+sImplPou := __POUNAME();
+]]></Implementation>
+  </POU>
+</TcPlcObject>""", encoding="utf-8")
+
+        ws = WorkspaceIndex()
+        ws.update_file(pou_file)
+
+        diags = run_semantic_analysis(ws, pou_file)
+        errors = [d for d in diags if d.severity == DiagnosticSeverity.ERROR]
+        assert len(errors) == 0, f"Expected 0 semantic errors, got: {errors}"
+
+        warnings = [d for d in diags if d.code == "TC-SEM-4026"]
+        assert len(warnings) >= 2, f"Expected TC-SEM-4026 warnings for 4026 macros, got: {warnings}"
+        assert all("TwinCAT 3.1 Build 4026" in w.message for w in warnings)
+
+
 
 
 

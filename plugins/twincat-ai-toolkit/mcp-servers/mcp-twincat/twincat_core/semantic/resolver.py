@@ -321,6 +321,8 @@ class SymbolResolver:
 
         if isinstance(expr, IdentifierExpr):
             upper_name = expr.name.upper()
+            if upper_name in ("__POUNAME", "__POSITION"):
+                return "STRING"
             pou_scope = self._find_enclosing_pou_scope(current_scope)
             if upper_name == "THIS":
                 return pou_scope.owner_symbol.name if (pou_scope and pou_scope.owner_symbol) else None

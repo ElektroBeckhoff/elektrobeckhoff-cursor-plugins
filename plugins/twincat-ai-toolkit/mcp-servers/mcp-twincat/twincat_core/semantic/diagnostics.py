@@ -303,6 +303,16 @@ def run_semantic_analysis(index: WorkspaceIndex, file_path: Path) -> List[Syntax
                         p = StatementParser.from_source(init_val)
                         init_expr = p.parse_expression()
                         if init_expr:
+                            _validate_expression_identifiers(
+                                init_expr,
+                                index.symbol_table.global_scope,
+                                index,
+                                file_path,
+                                diagnostics,
+                                line_offset=sym.span.start.line - 1 if sym.span else 0,
+                                col_offset=sym.span.start.column - 1 if sym.span else 0,
+                                char_offset=sym.span.start.offset if sym.span else 0,
+                            )
                             init_t = index.resolver.infer_expression_type(init_expr, index.symbol_table.global_scope)
                     if init_t:
                         res = check_type_assignment(sym.type_ref, init_t, index.type_index, file_path)
@@ -344,6 +354,11 @@ BUILTIN_KEYWORDS = {
     "THIS", "SUPER", "TRUE", "FALSE", "NULL", "16#0", "0",
 }
 
+TC_4026_KEYWORDS: dict[str, str] = {
+    "__POSITION": "TwinCAT 3.1 Build 4026 or higher",
+    "__POUNAME": "TwinCAT 3.1 Build 4026 or higher",
+}
+
 BUILTIN_FUNCS = {
     "SIZEOF", "XSIZEOF", "LEN", "BITADR", "INDEXOF", "LOWER_BOUND", "UPPER_BOUND",
     "CONCAT", "MID", "LEFT", "RIGHT", "INSERT", "DELETE", "REPLACE",
@@ -377,6 +392,16 @@ def _validate_expression_identifiers(
         name = expr.name.strip()
         name_upper = name.upper()
         if not name:
+            return
+        if name_upper in TC_4026_KEYWORDS:
+            diagnostics.append(
+                SyntaxDiagnostic(
+                    message=f"Operator '{name}' requires {TC_4026_KEYWORDS[name_upper]}",
+                    span=_offset(expr.span),
+                    severity=DiagnosticSeverity.WARNING,
+                    code="TC-SEM-4026",
+                )
+            )
             return
         if name_upper in BUILTIN_KEYWORDS or name_upper.startswith("__") or name_upper.startswith("%"):
             return
