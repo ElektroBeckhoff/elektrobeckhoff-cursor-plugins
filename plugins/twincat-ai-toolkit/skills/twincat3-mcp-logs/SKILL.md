@@ -51,15 +51,15 @@ The MCP server maintains persistent rotating logs across executions. Locate the 
 
 ## Step 2 & 3: Read Session Header & Version
 
-Each MCP server startup writes a session banner:
+Each MCP server startup writes a session banner, and **every single log line** contains the `[PID:...]` tag to cleanly distinguish between multiple Cursor windows or background tabs:
 
 ```text
-2026-09-03 12:13:16.891 [INFO   ] [twincat-mcp:MainThread] TwinCAT MCP logging initialized | version=1.0.0 | log_file='C:\Users\...\mcp-twincat.log' | level=INFO | pid=4368 | python=3.12.6
+2026-09-03 12:13:16.891 [INFO   ] [PID:4368 ] [twincat-mcp:MainThread] TwinCAT MCP logging initialized | version=1.0.0 | log_file='C:\Users\...\mcp-twincat.log' | level=INFO | pid=4368 | python=3.12.6
 ```
 
 Verify:
 - **`version`**: Confirms the loaded MCP code version (e.g. `1.0.0`).
-- **`pid`**: Process ID of the running Python MCP server instance.
+- **`[PID:...]`**: Process ID of the running Python MCP server instance.
 - **`log_file`**: Confirms active write destination.
 
 ---
@@ -70,8 +70,8 @@ Verify:
 
 * **Log entries:**
   ```text
-  [WARNING] [twincat-mcp:MainThread] dismiss_safe_dialogs: hwnd=42 pattern='file has been changed outside' text='file has been changed outside the environment'
-  [WARNING] [twincat-mcp:Dialog-Watcher] Auto-dismissed TcXaeShell dialog (hwnd=12345, pattern='bibliotheksreferenz', text='Die Bibliotheksreferenz wurde geändert...')
+  2026-09-03 12:13:18.102 [WARNING] [PID:4368 ] [twincat-mcp:MainThread] dismiss_safe_dialogs: hwnd=42 pattern='file has been changed outside' text='file has been changed outside the environment'
+  2026-09-03 12:13:18.150 [WARNING] [PID:4368 ] [twincat-mcp:Dialog-Watcher] Auto-dismissed TcXaeShell dialog (hwnd=12345, pattern='bibliotheksreferenz', text='Die Bibliotheksreferenz wurde geändert...')
   ```
 * **Diagnostic:** The `Dialog-Watcher` automatically confirms known safe reload prompts (`IDYES` / `IDOK`).
 * **Problem indicator:** If a dialog text is logged that is *not* auto-dismissable (unknown title or custom message box), the STA thread will wait until timeout.
@@ -81,7 +81,7 @@ Verify:
 
 * **Log entries:**
   ```text
-  [ERROR  ] [twincat-mcp:MainThread] COM STA call 'open_solution' timed out after 50.0s (limit=50s). TcXaeShell / Visual Studio DTE is unresponsive
+  2026-09-03 12:13:50.000 [ERROR  ] [PID:4368 ] [twincat-mcp:MainThread] COM STA call 'open_solution' timed out after 50.0s (limit=50s). TcXaeShell / Visual Studio DTE is unresponsive
   ```
 * **Diagnostic:** TcXaeShell did not return within the 50s guard limit.
 * **Root causes:**

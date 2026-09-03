@@ -9,7 +9,7 @@ alwaysApply: false
 
 - **Primary Path:** `%LOCALAPPDATA%\ElektroBeckhoff\logs\mcp-twincat.log`
 - **MCP Tool:** `twincat_status()` provides `log_file` and `mcp_server_version`.
-- **Format:** `YYYY-MM-DD HH:MM:SS.mmm [LEVEL] [logger:thread] message`
+- **Format:** `YYYY-MM-DD HH:MM:SS.mmm [LEVEL] [PID:XXXXX] [logger:thread] message`
 - **Rotation:** 10 MB per file, max 5 backup generations.
 
 ## When to Inspect Logs

@@ -26,10 +26,11 @@ class TestMcpLogging(unittest.TestCase):
             log.info("Test info message for unit testing")
             log.warning("Test warning message for unit testing")
             
-            # Ensure log file exists and contains entries including version
+            # Ensure log file exists and contains entries including version and PID
             entries = get_recent_log_entries(max_lines=10)
             self.assertTrue(any("Test info message" in e or "TwinCAT MCP logging initialized" in e for e in entries))
             self.assertTrue(any(f"version={MCP_SERVER_VERSION}" in e for e in entries))
+            self.assertTrue(any(f"PID:{os.getpid()}" in e for e in entries))
 
     def test_get_log_path_consistent(self):
         p1 = get_log_path()

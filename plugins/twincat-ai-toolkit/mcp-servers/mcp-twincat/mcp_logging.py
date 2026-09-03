@@ -55,6 +55,18 @@ def resolve_log_path() -> str:
     return _ACTIVE_LOG_PATH
 
 
+class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler resilient against Windows file lock contention between multiple Cursor instances."""
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except (PermissionError, OSError):
+            # Another Cursor MCP process has the file open on Windows.
+            # Continue writing to current file safely.
+            pass
+
+
 def setup_mcp_logging(level: Optional[int] = None) -> str:
     """Initialize logging with stderr stream and persistent RotatingFileHandler.
 
@@ -69,9 +81,9 @@ def setup_mcp_logging(level: Optional[int] = None) -> str:
     root_logger = logging.getLogger()
     root_logger.setLevel(active_level)
 
-    # Format
+    # Format with explicit PID on every line for multi-window / multi-tab discrimination
     fmt = logging.Formatter(
-        fmt="%(asctime)s.%(msecs)03d [%(levelname)-7s] [%(name)s:%(threadName)s] %(message)s",
+        fmt="%(asctime)s.%(msecs)03d [%(levelname)-7s] [PID:%(process)-5d] [%(name)s:%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -94,7 +106,7 @@ def setup_mcp_logging(level: Optional[int] = None) -> str:
     )
     if not has_file:
         try:
-            file_handler = logging.handlers.RotatingFileHandler(
+            file_handler = SafeRotatingFileHandler(
                 log_path,
                 maxBytes=10 * 1024 * 1024,
                 backupCount=5,
