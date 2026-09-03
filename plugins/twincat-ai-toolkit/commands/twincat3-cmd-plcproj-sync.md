@@ -15,6 +15,6 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 
 ## Do
 
-1. Follow the plcproj-sync skill (verify â†’ dry-run â†’ sync).
+1. Follow the plcproj-sync skill (verify → dry-run → sync).
 2. Never skip verify/dry-run unless the user explicitly allows.
 3. XAE compile only if the user explicitly asks.

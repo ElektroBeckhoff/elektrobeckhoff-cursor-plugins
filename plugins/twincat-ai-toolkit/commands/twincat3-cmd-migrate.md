@@ -3,7 +3,7 @@ name: twincat3-cmd-migrate
 description: Auto-detect FBD/CFC and migrate TwinCAT .TcPOU implementations to Structured Text (preview-first).
 ---
 
-# Migrate FBD/CFC â†’ ST
+# Migrate FBD/CFC → ST
 
 ## Read first (in order)
 
@@ -26,6 +26,6 @@ If the user insists on **CFC-only**, also Read:
 
 Default path (mixed / unspecified): follow `twincat3-migrate`.
 
-1. Analyze â†’ preview (`dry_run`) â†’ migrate â€” do not skip 1â€“2 unless user explicitly allows.
+1. Analyze → preview (`dry_run`) → migrate — do not skip 1–2 unless user explicitly allows.
 2. After migrate: search `TODO [FBD Migration]` / `TODO [CFC Migration]`.
 3. Do **not** run XAE compile (`twincat_open` / `twincat_check_all_objects`) unless the user explicitly asks.

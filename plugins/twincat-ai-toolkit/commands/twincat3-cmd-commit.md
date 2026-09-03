@@ -13,7 +13,7 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 
 ## Do
 
-1. Follow the skill end-to-end (status â†’ thematic groups â†’ sequential local commits).
+1. Follow the skill end-to-end (status → thematic groups → sequential local commits).
 2. Commit **locally only**.
 3. **NEVER** `git push`, force-push, or remote update.
 4. Finish with a list of created commits and remind: nothing was pushed.

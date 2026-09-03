@@ -16,7 +16,7 @@ Resolve this plugin root (folder that contains `skills/` and `rules/`). Then **R
 
 1. Follow the validate skill end-to-end.
 2. Prefer `.sln` when known; else `.plcproj`.
-3. `twincat_open` â†’ `twincat_check_all_objects` â†’ report errors with path + line.
+3. `twincat_open` → `twincat_check_all_objects` → report errors with path + line.
 4. Success = `error_count: 0` (still surface `warnings[]`).
 5. Optional `xae_version` only if the user requires a specific shell.
 6. If errors found, offer to fix.
