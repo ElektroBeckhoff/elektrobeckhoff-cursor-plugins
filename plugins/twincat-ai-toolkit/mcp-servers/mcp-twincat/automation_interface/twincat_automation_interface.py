@@ -144,6 +144,7 @@ class TcAutomationInterface(
             target=self._sta_loop, daemon=True, name="COM-STA"
         )
         self._dte = None
+        self._active_dte_pid: Optional[int] = None
         self._sys_man = None
         self._plc_proj_item = None
         self._created_new = False

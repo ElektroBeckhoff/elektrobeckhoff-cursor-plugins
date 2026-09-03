@@ -153,12 +153,11 @@ class DialogOpsMixin:
         found: list[dict] = []
 
         known_pids = set()
-        if hasattr(self, "_get_dte_pid") and getattr(self, "_dte", None):
-            p = self._get_dte_pid(self._dte)
-            if p:
-                known_pids.add(p)
+        active_pid = getattr(self, "_active_dte_pid", None)
+        if active_pid:
+            known_pids.add(active_pid)
         for state in (getattr(self, "_instances", {}) or {}).values():
-            if state.get("pid"):
+            if isinstance(state, dict) and state.get("pid"):
                 known_pids.add(state["pid"])
 
         def enum_cb(hwnd, _):

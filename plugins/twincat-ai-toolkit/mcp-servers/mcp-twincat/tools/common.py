@@ -157,12 +157,18 @@ def _resolve_tsproj(tsproj_path: str, sln_path: str) -> Union[str, dict]:
     for proj_elem in plc_node.findall(f"{ns}Project" if ns else "Project"):
         xti_file = proj_elem.get("File", "")
         if xti_file:
-            xti_path = os.path.normpath(os.path.join(config_plc_dir, xti_file))
-            if os.path.isfile(xti_path):
-                info = _parse_xti(xti_path)
-                if info:
-                    projects.append(info)
-                    continue
+            candidates = [
+                os.path.normpath(os.path.join(config_plc_dir, xti_file)),
+                os.path.normpath(os.path.join(tsproj_dir, xti_file)),
+            ]
+            for xti_path in candidates:
+                if os.path.isfile(xti_path):
+                    info = _parse_xti(xti_path)
+                    if info:
+                        projects.append(info)
+                        break
+            if projects:
+                continue
 
         prj_file_path = proj_elem.get("PrjFilePath", "")
         if prj_file_path:

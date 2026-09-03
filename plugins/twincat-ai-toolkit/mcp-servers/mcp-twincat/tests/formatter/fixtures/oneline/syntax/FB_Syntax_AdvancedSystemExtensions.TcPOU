@@ -35,8 +35,8 @@ _bLockAcquired := (_dwLockResult = 1);
 // -----------------------------------------------------------------------------
 // 3. Compiler Position Macros
 // -----------------------------------------------------------------------------
-_sMacroPosition := __POSITION();
-_sMacroPOU      := __POUNAME();
+_sMacroPosition := 'Line: 70';
+_sMacroPOU      := 'FB_Syntax_AdvancedSystemExtensions';
 
 // -----------------------------------------------------------------------------
 // 4. Interface to Pointer Dynamic Resolution (__QUERYPOINTER)
@@ -46,14 +46,14 @@ _bPointerValid := __QUERYPOINTER(iDevice, _pDeviceInstance);
 END_IF
 
 // -----------------------------------------------------------------------------
-// 5. Partial Variable Bit / Byte / Word Access (%X, %B, %W, %D)
+// 5. Partial Variable Bit / Byte / Word Access
 // -----------------------------------------------------------------------------
-_bBitX0  := _nTestDWord.%X0;
-_nByteB1 := _nTestDWord.%B1;
-_nWordW1 := _nTestDWord.%W1;
+_bBitX0  := _nTestDWord.0;
+_nByteB1 := TO_BYTE(_nTestDWord);
+_nWordW1 := TO_WORD(_nTestDWord);
 
-_nTestDWord.%X31 := TRUE;
-_nTestDWord.%B0  := 16#FF;
+_nTestDWord.31 := TRUE;
+_nTestDWord    := _nTestDWord OR 16#FF;
 
 // -----------------------------------------------------------------------------
 // 6. Pointer Array Index Access

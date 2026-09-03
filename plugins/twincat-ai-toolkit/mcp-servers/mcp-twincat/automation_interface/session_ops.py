@@ -296,6 +296,7 @@ class SessionOpsMixin:
                 self._kill_orphaned_entry(state, norm_sln)
                 return False
         self._dte = dte
+        self._active_dte_pid = state.get("pid") or (self._get_dte_pid(dte) if dte else None)
         self._sys_man = state["sys_man"]
         self._plc_proj_item = state["plc_proj_item"]
         self._created_new = state["created_new"]
@@ -512,6 +513,7 @@ class SessionOpsMixin:
         self._dte = dte
         self._prog_id = prog_id
         self._created_new = created_new
+        self._active_dte_pid = self._get_dte_pid(dte) if dte else None
         self._ensure_silent_mode()
 
     def _open_result(
@@ -1664,6 +1666,7 @@ class SessionOpsMixin:
 
     def _reset_state(self):
         self._dte = None
+        self._active_dte_pid = None
         self._sys_man = None
         self._plc_proj_item = None
         self._created_new = False
