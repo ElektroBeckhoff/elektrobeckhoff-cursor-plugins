@@ -298,20 +298,22 @@ class SymbolResolver:
                 return "WSTRING"
             if expr.literal_type == "TYPED_LITERAL":
                 prefix = expr.value.split("#")[0].upper()
-                if prefix == "T":
+                if prefix in ("T", "TIME"):
                     return "TIME"
-                if prefix == "LT":
+                if prefix in ("LT", "LTIME"):
                     return "LTIME"
-                if prefix == "DT":
-                    return "DATE_AND_TIME"
-                if prefix == "TOD":
+                if prefix in ("DT", "DATE_AND_TIME"):
+                    return "DT"
+                if prefix in ("TOD", "TIME_OF_DAY"):
                     return "TOD"
-                if prefix == "LTOD":
+                if prefix in ("LTOD", "LTIME_OF_DAY"):
                     return "LTOD"
-                if prefix == "D":
+                if prefix in ("D", "DATE"):
                     return "DATE"
-                if prefix == "LD":
+                if prefix in ("LD", "LDATE"):
                     return "LDATE"
+                if prefix in ("LDT", "DATE_AND_LTIME"):
+                    return "LDT"
                 if prefix in ("16", "8", "2"):
                     return "ANY_INT"
                 return prefix

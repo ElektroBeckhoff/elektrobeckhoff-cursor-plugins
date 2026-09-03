@@ -91,9 +91,25 @@ def _fast_infer_literal_type(val: str) -> Optional[str]:
         return "STRING_LITERAL"
     if (val.startswith('"') and val.endswith('"')) or v_upper.startswith("WSTRING#\""):
         return "WSTRING_LITERAL"
-    if v_upper.startswith(("T#", "TIME#", "LTIME#", "D#", "DATE#", "TOD#", "TIME_OF_DAY#", "DT#", "DATE_AND_TIME#")):
+    if v_upper.startswith(("T#", "TIME#", "LT#", "LTIME#", "D#", "DATE#", "LD#", "LDATE#", "TOD#", "TIME_OF_DAY#", "LTOD#", "LTIME_OF_DAY#", "DT#", "DATE_AND_TIME#", "LDT#", "DATE_AND_LTIME#")):
         prefix = v_upper.split("#", 1)[0]
-        return "TIME" if prefix in ("T", "TIME") else prefix
+        if prefix in ("T", "TIME"):
+            return "TIME"
+        if prefix in ("LT", "LTIME"):
+            return "LTIME"
+        if prefix in ("D", "DATE"):
+            return "DATE"
+        if prefix in ("LD", "LDATE"):
+            return "LDATE"
+        if prefix in ("TOD", "TIME_OF_DAY"):
+            return "TOD"
+        if prefix in ("LTOD", "LTIME_OF_DAY"):
+            return "LTOD"
+        if prefix in ("DT", "DATE_AND_TIME"):
+            return "DT"
+        if prefix in ("LDT", "DATE_AND_LTIME"):
+            return "LDT"
+        return prefix
     if v_upper.startswith(("INT#", "DINT#", "SINT#", "LINT#", "UINT#", "UDINT#", "USINT#", "ULINT#", "BYTE#", "WORD#", "DWORD#", "LWORD#", "REAL#", "LREAL#")):
         return v_upper.split("#", 1)[0]
     if v_upper.startswith(("16#", "8#", "2#")):

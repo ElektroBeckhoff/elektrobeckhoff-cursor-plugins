@@ -58,12 +58,16 @@ FLOATS: dict[str, tuple[int, int]] = {
 
 TIME_TYPES: dict[str, tuple[int, int]] = {
     "TIME": (32, 1),
+    "T": (32, 1),
     "LTIME": (64, 2),
+    "LT": (64, 2),
 }
 
 DATE_TYPES: dict[str, tuple[int, int]] = {
     "DATE": (32, 1),
+    "D": (32, 1),
     "LDATE": (64, 2),
+    "LD": (64, 2),
 }
 
 TOD_TYPES: dict[str, tuple[int, int]] = {
@@ -77,6 +81,7 @@ DT_TYPES: dict[str, tuple[int, int]] = {
     "DT": (32, 1),
     "DATE_AND_TIME": (32, 1),
     "LDT": (64, 2),
+    "DATE_AND_LTIME": (64, 2),
 }
 
 STRING_TYPES: Set[str] = {"STRING", "WSTRING"}
