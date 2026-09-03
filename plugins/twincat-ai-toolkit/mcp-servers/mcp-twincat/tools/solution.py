@@ -70,6 +70,10 @@ def twincat_status() -> str:
     """
     ext_status = extension_ops.get_extension_status()
     try:
+        from mcp_version import MCP_SERVER_VERSION
+    except Exception:
+        MCP_SERVER_VERSION = "1.0.0"
+    try:
         from mcp_logging import get_log_path
         log_path = get_log_path()
     except Exception:
@@ -86,15 +90,17 @@ def twincat_status() -> str:
             "message": "pywin32 not installed (Windows + TwinCAT XAE required)",
             "vscode_extension": ext_status,
             "log_file": log_path,
+            "mcp_server_version": MCP_SERVER_VERSION,
         })
     try:
         status_dict = _as_dict(_get_bridge().get_status())
         status_dict["vscode_extension"] = ext_status
         status_dict["log_file"] = log_path
+        status_dict["mcp_server_version"] = MCP_SERVER_VERSION
         return _json(status_dict)
     except Exception as exc:
         log.error("twincat_status failed: %s", exc, exc_info=True)
-        return _json({"error": str(exc), "vscode_extension": ext_status, "log_file": log_path})
+        return _json({"error": str(exc), "vscode_extension": ext_status, "log_file": log_path, "mcp_server_version": MCP_SERVER_VERSION})
 
 
 def twincat_open(

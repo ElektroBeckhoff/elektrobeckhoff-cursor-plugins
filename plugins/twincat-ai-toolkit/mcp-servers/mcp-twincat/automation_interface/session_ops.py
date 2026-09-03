@@ -696,6 +696,16 @@ class SessionOpsMixin:
         if target_net_id and "target_net_id" not in prereqs:
             prereqs["target_net_id"] = target_net_id
 
+        try:
+            from mcp_version import MCP_SERVER_VERSION
+        except Exception:
+            MCP_SERVER_VERSION = "1.0.0"
+        try:
+            from mcp_logging import get_log_path
+            current_log_file = get_log_path()
+        except Exception:
+            current_log_file = ""
+
         common_kw = dict(
             instances=running,
             mcp_session_active=mcp_session_active,
@@ -708,6 +718,8 @@ class SessionOpsMixin:
             twincat_runtime_started=runtime_started,
             target_net_id=target_net_id,
             prereqs=prereqs,
+            mcp_server_version=MCP_SERVER_VERSION,
+            log_file=current_log_file,
         )
 
         if running:

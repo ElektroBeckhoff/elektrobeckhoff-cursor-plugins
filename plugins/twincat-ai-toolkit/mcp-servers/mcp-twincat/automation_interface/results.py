@@ -21,6 +21,8 @@ class StatusResult:
     twincat_runtime_started: Optional[bool] = None
     target_net_id: str = ""
     prereqs: dict = field(default_factory=dict)
+    mcp_server_version: str = ""
+    log_file: str = ""
 
 
 @dataclass

@@ -13,6 +13,8 @@ import sys
 import threading
 from typing import Optional
 
+from mcp_version import MCP_SERVER_VERSION, __version__
+
 _LOG_FILENAME = "mcp-twincat.log"
 _ACTIVE_LOG_PATH: Optional[str] = None
 
@@ -128,7 +130,8 @@ def setup_mcp_logging(level: Optional[int] = None) -> str:
 
     log = logging.getLogger("twincat-mcp")
     log.info(
-        "TwinCAT MCP logging initialized | log_file='%s' | level=%s | pid=%d | python=%s",
+        "TwinCAT MCP logging initialized | version=%s | log_file='%s' | level=%s | pid=%d | python=%s",
+        MCP_SERVER_VERSION,
         log_path,
         logging.getLevelName(active_level),
         os.getpid(),
@@ -136,6 +139,11 @@ def setup_mcp_logging(level: Optional[int] = None) -> str:
     )
 
     return log_path
+
+
+def get_mcp_server_version() -> str:
+    """Return the MCP server version string."""
+    return MCP_SERVER_VERSION
 
 
 def get_log_path() -> str:
