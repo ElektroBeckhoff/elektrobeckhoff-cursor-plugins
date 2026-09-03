@@ -33,13 +33,13 @@ def _tai():
 
 class BuildOpsMixin:
     def check_all_objects(self) -> CheckResult:
-        return self._call_sta(self._impl_check_all_objects, timeout=120)
+        return self._call_sta(self._impl_check_all_objects, timeout=50)
 
-    def build(self, timeout_s: int = 180, full_rebuild: bool = False) -> BuildResult:
-        return self._call_sta(self._impl_build, timeout_s, full_rebuild, timeout=timeout_s + 60)
+    def build(self, timeout_s: int = 50, full_rebuild: bool = False) -> BuildResult:
+        return self._call_sta(self._impl_build, timeout_s, full_rebuild, timeout=min(timeout_s + 10, 60))
 
     def get_output_log(self) -> ErrorsResult:
-        return self._call_sta(self._impl_get_output_log, timeout=30)
+        return self._call_sta(self._impl_get_output_log, timeout=15)
 
     def export_library(
         self,

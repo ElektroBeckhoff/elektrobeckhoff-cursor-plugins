@@ -71,10 +71,10 @@ class RuntimeOpsMixin:
         return self._call_sta(self._impl_set_target_net_id, net_id, confirm)
 
     def activate_configuration(self, confirm: bool = False) -> ActivateResult:
-        return self._call_sta(self._impl_activate_configuration, confirm, timeout=180)
+        return self._call_sta(self._impl_activate_configuration, confirm, timeout=60)
 
     def start_restart_twincat(self, confirm: bool = False) -> StartResult:
-        return self._call_sta(self._impl_start_restart_twincat, confirm, timeout=180)
+        return self._call_sta(self._impl_start_restart_twincat, confirm, timeout=60)
 
     def list_tasks(self) -> TaskListResult:
         return self._call_sta(self._impl_list_tasks)

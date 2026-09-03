@@ -207,8 +207,11 @@ class TcAutomationInterface(
             self._cleanup_com()
             pythoncom.CoUninitialize()
 
-    def _call_sta(self, func, *args, timeout=300, **kwargs):
+    def _call_sta(self, func, *args, timeout=60, **kwargs):
         require_win32()
+        func_name = getattr(func, "__name__", str(func))
+        start_t = time.time()
+        log.debug("STA call start: %s (timeout=%ss)", func_name, timeout)
         result_q: queue.Queue = queue.Queue()
         self._queue.put((func, args, kwargs, result_q))
 
@@ -223,12 +226,23 @@ class TcAutomationInterface(
 
         try:
             status, value = result_q.get(timeout=timeout)
+        except queue.Empty:
+            elapsed = time.time() - start_t
+            err_msg = (
+                f"COM STA call '{func_name}' timed out after {elapsed:.1f}s (limit={timeout}s). "
+                f"TcXaeShell / Visual Studio DTE is unresponsive (check for modal dialogs or online connection in TcXaeShell)."
+            )
+            log.error(err_msg)
+            raise TimeoutError(err_msg)
         finally:
             stop_event.set()
-            watcher.join(timeout=5)
+            watcher.join(timeout=2)
 
+        elapsed = time.time() - start_t
         if status == "error":
+            log.error("STA call '%s' failed after %.2fs: %s", func_name, elapsed, value, exc_info=True)
             raise value
+        log.debug("STA call '%s' completed successfully in %.2fs", func_name, elapsed)
         return value
 
     def shutdown(self):

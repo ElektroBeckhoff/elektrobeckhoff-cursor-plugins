@@ -60,7 +60,7 @@ def twincat_status() -> str:
     COM-busy flags (modal dialog), visible TcXaeShell message boxes,
     MCP session binding, SilentMode, recent auto-dismissed dialogs,
     SysManager error text, twincat_runtime_started, target_net_id,
-    and VS Code / Cursor extension installation status.
+    active log file path, and VS Code / Cursor extension installation status.
 
     If ``dte_busy`` or ``blocking_dialogs`` is set: READ those fields.
     For ``auto_dismissable=true`` reload prompts call
@@ -69,6 +69,11 @@ def twincat_status() -> str:
     -> stop and tell the user the dialog text.
     """
     ext_status = extension_ops.get_extension_status()
+    try:
+        from mcp_logging import get_log_path
+        log_path = get_log_path()
+    except Exception:
+        log_path = ""
 
     if not HAS_WIN32:
         return _json({
@@ -80,13 +85,16 @@ def twincat_status() -> str:
             "dismissed_dialogs_recent": [],
             "message": "pywin32 not installed (Windows + TwinCAT XAE required)",
             "vscode_extension": ext_status,
+            "log_file": log_path,
         })
     try:
         status_dict = _as_dict(_get_bridge().get_status())
         status_dict["vscode_extension"] = ext_status
+        status_dict["log_file"] = log_path
         return _json(status_dict)
     except Exception as exc:
-        return _json({"error": str(exc), "vscode_extension": ext_status})
+        log.error("twincat_status failed: %s", exc, exc_info=True)
+        return _json({"error": str(exc), "vscode_extension": ext_status, "log_file": log_path})
 
 
 def twincat_open(
@@ -94,7 +102,7 @@ def twincat_open(
     plcproj_path: str = "",
     sln_path: str = "",
     proj_name: str = "",
-    timeout_seconds: int = 180,
+    timeout_seconds: int = 50,
     xae_version: str = "",
 ) -> str:
     """Open a TwinCAT solution in XAE and locate the PLC project.
@@ -194,18 +202,24 @@ def twincat_open(
     bridge = _get_bridge()
 
     try:
-        return _json(bridge.open_solution(
+        log.info("twincat_open: opening sln='%s', plc='%s' (timeout=%ss)", resolved_sln or sln_path, plcproj_path, timeout_seconds)
+        res = bridge.open_solution(
             sln_path=resolved_sln or sln_path or None,
             plcproj_path=plcproj_path or None,
             proj_name=proj_name or None,
             timeout_s=timeout_seconds,
             xae_version=xae_version or None,
-        ))
+        )
+        s_ok = getattr(res, "success", res.get("success") if isinstance(res, dict) else False)
+        s_msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "")
+        log.info("twincat_open completed: success=%s, msg='%s'", s_ok, s_msg)
+        return _json(res)
     except Exception as exc:
+        log.error("twincat_open failed: %s", exc, exc_info=True)
         return _json({"success": False, "error": str(exc)})
 
 
-def twincat_reload(timeout_seconds: int = 180) -> str:
+def twincat_reload(timeout_seconds: int = 50) -> str:
     """Reload the TwinCAT solution from disk (close without save, reopen).
 
     ONLY required after the .plcproj file was changed (version bump,
@@ -218,8 +232,14 @@ def twincat_reload(timeout_seconds: int = 180) -> str:
     Takes ~5-10 seconds (polls for readiness instead of fixed timer).
     Requires twincat_open to have been called at least once."""
     try:
-        return _json(_get_bridge().reload_solution(timeout_s=timeout_seconds))
+        log.info("twincat_reload: reloading solution (timeout=%ss)", timeout_seconds)
+        res = _get_bridge().reload_solution(timeout_s=timeout_seconds)
+        s_ok = getattr(res, "success", res.get("success") if isinstance(res, dict) else False)
+        s_msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "")
+        log.info("twincat_reload completed: success=%s, msg='%s'", s_ok, s_msg)
+        return _json(res)
     except Exception as exc:
+        log.error("twincat_reload failed: %s", exc, exc_info=True)
         return _json({"success": False, "error": str(exc)})
 
 
@@ -241,12 +261,18 @@ def twincat_check_all_objects() -> str:
     No twincat_reload needed -- CheckAllObjects reads from disk.
     Requires twincat_open to have been called."""
     try:
-        return _json(_get_bridge().check_all_objects())
+        log.info("twincat_check_all_objects: running check")
+        res = _get_bridge().check_all_objects()
+        s_ok = getattr(res, "success", res.get("success") if isinstance(res, dict) else False)
+        err_c = getattr(res, "error_count", res.get("error_count", 0) if isinstance(res, dict) else 0)
+        log.info("twincat_check_all_objects completed: success=%s, errors=%s", s_ok, err_c)
+        return _json(res)
     except Exception as exc:
+        log.error("twincat_check_all_objects failed: %s", exc, exc_info=True)
         return _json({"success": False, "error": str(exc)})
 
 
-def twincat_build(timeout_seconds: int = 180, full_rebuild: bool = False) -> str:
+def twincat_build(timeout_seconds: int = 50, full_rebuild: bool = False) -> str:
     """Build the TwinCAT solution.
 
     By default runs an incremental build (Build.BuildSolution).
@@ -264,10 +290,16 @@ def twincat_build(timeout_seconds: int = 180, full_rebuild: bool = False) -> str
 
     Requires twincat_open to have been called."""
     try:
-        return _json(_get_bridge().build(
+        log.info("twincat_build: starting build (full_rebuild=%s, timeout=%ss)", full_rebuild, timeout_seconds)
+        res = _get_bridge().build(
             timeout_s=timeout_seconds, full_rebuild=full_rebuild,
-        ))
+        )
+        s_ok = getattr(res, "success", res.get("success") if isinstance(res, dict) else False)
+        err_c = getattr(res, "error_count", res.get("error_count", 0) if isinstance(res, dict) else 0)
+        log.info("twincat_build completed: success=%s, errors=%s", s_ok, err_c)
+        return _json(res)
     except Exception as exc:
+        log.error("twincat_build failed: %s", exc, exc_info=True)
         return _json({"success": False, "error": str(exc)})
 
 

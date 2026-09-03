@@ -26,7 +26,7 @@ def _tai():
 
 
 class SessionOpsMixin:
-    def get_status(self, timeout_s: int = 5) -> StatusResult:
+    def get_status(self, timeout_s: int = 4) -> StatusResult:
         try:
             return self._call_sta(self._impl_get_status, timeout=timeout_s)
         except Exception as exc:
@@ -44,21 +44,22 @@ class SessionOpsMixin:
         sln_path: Optional[str] = None,
         plcproj_path: Optional[str] = None,
         proj_name: Optional[str] = None,
-        timeout_s: int = 180,
+        timeout_s: int = 50,
         xae_version: Optional[str] = None,
     ) -> OpenResult:
         return self._call_sta(
             self._impl_open_solution,
             sln_path, plcproj_path, proj_name, timeout_s, xae_version,
-            timeout=timeout_s + 60,
+            timeout=min(timeout_s + 10, 60),
         )
-    def reload_solution(self, timeout_s: int = 180) -> ReloadResult:
+
+    def reload_solution(self, timeout_s: int = 50) -> ReloadResult:
         return self._call_sta(
-            self._impl_reload_solution, timeout_s, timeout=timeout_s + 60
+            self._impl_reload_solution, timeout_s, timeout=min(timeout_s + 10, 60)
         )
 
     def close(self, force_quit: bool = False) -> CloseResult:
-        return self._call_sta(self._impl_close, force_quit, timeout=30)
+        return self._call_sta(self._impl_close, force_quit, timeout=15)
     @staticmethod
     def _extract_pid_from_moniker(moniker_name: str) -> Optional[int]:
         """Extract PID from moniker like '!TcXaeShell.DTE.17.0:23572'."""
