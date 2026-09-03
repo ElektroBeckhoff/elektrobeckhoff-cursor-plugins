@@ -323,7 +323,11 @@ class SessionOpsMixin:
             self._prog_id = _tai()._resolve_prog_id()
         return self._prog_id
 
-    def _enumerate_rot_dtes(self, prog_id_filter: Optional[str] = None):
+    def _enumerate_rot_dtes(
+        self,
+        prog_id_filter: Optional[str] = None,
+        modal_pids: Optional[set[int]] = None,
+    ):
         """Yield ``(prog_id, moniker_name, dte)`` for every running TcXaeShell.
 
         TcXaeShell registers ROT monikers as ``!TcXaeShell.DTE.X.Y:pid``.
@@ -361,6 +365,13 @@ class SessionOpsMixin:
             prog_id = body.split(":", 1)[0]
             if prog_id_filter and prog_id != prog_id_filter:
                 continue
+
+            mon_pid = self._extract_pid_from_moniker(name)
+            if mon_pid and modal_pids and mon_pid in modal_pids:
+                log.info("Skipping ROT GetObject for modal-blocked PID %s (%s)", mon_pid, name)
+                yield prog_id, name, None
+                continue
+
             try:
                 obj = rot.GetObject(mons[0])
                 dte = _tai().win32com.client.Dispatch(
@@ -597,6 +608,8 @@ class SessionOpsMixin:
         cached_slns = list(self._instances.keys())
         registered = _tai()._discover_registered_prog_ids()
 
+        # Dismiss any safe reload dialogs before ROT probe to unblock busy instances
+        self.dismiss_safe_dialogs()
         blocking_dialogs = self._enumerate_xae_dialogs()
         dismissed_recent = list(self._dismissed_dialogs[-20:])
         if dismissed_recent:
@@ -618,17 +631,22 @@ class SessionOpsMixin:
         if hasattr(self, "_read_target_net_id_safe"):
             target_net_id = self._read_target_net_id_safe()
 
+        modal_pids = {d["pid"] for d in blocking_dialogs if d.get("pid")}
+
         # Enumerate ALL running instances via ROT (not just GetActiveObject)
         running: list[dict] = []
         start_rot_t = time.time()
-        for prog_id, moniker, dte in self._enumerate_rot_dtes():
+        for prog_id, moniker, dte in self._enumerate_rot_dtes(modal_pids=modal_pids):
             if time.time() - start_rot_t > 3.0:
                 log.warning("ROT status iteration exceeded 3.0s budget -- returning partial list")
                 break
             pid = self._get_dte_pid(dte, moniker=moniker)
-            busy = self._probe_dte_busy(dte)
+            if dte is None or (pid and pid in modal_pids):
+                busy = True
+            else:
+                busy = self._probe_dte_busy(dte)
             is_open, sln = False, ""
-            if not busy:
+            if not busy and dte is not None:
                 is_open, sln = self._read_dte_solution_path(
                     dte, retry_on_busy=False,
                 )

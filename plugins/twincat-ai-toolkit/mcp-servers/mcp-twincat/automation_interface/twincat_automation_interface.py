@@ -93,6 +93,7 @@ win32com = None  # type: ignore
 pywintypes = None  # type: ignore
 win32gui = None  # type: ignore
 win32con = None  # type: ignore
+win32process = None  # type: ignore
 
 try:
     import pythoncom as _pythoncom
@@ -109,8 +110,10 @@ except ImportError:
 try:
     import win32gui as _win32gui
     import win32con as _win32con
+    import win32process as _win32process
     win32gui = _win32gui
     win32con = _win32con
+    win32process = _win32process
     HAS_WIN32GUI = True
 except ImportError:
     pass

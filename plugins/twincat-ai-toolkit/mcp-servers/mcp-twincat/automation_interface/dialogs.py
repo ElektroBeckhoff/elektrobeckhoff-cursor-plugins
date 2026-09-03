@@ -30,25 +30,41 @@ class DialogOpsMixin:
     # text. TwinCAT/VS wording differs by version and language — keep broad but
     # still specific to the external-file-change / reload prompt.
     _SAFE_DIALOG_PATTERNS = [
-        # EN — VS / TcXaeShell file-change (4024 often says "changed", not "modified")
+        # EN — VS / TcXaeShell file-change & reload
         "file has been changed outside",
         "file has been modified outside",
         "changed outside the environment",
         "modified outside the environment",
         "modified outside of twincat",
         "outside the environment",  # broad EN anchor for reload prompt
+        "library reference",
+        "the library reference",
+        "reload the project",
+        "reload project",
+        "do you want to reload",
+        "has been modified",
+        "has been changed",
         "can not create project",
         "name must be a valid identifier",
         "an exception has been encountered. this may be caused by an extension",
         "no solution found",
         "system.invalidoperationexception",
         "stweep",
-        # DE
+        "log out",
+        "disconnect from plc",
+        # DE — VS / TcXaeShell file-change & reload
         "außerhalb der umgebung geändert",
         "ausserhalb der umgebung geändert",  # ae spelling
         "außerhalb von twincat xae",
         "außerhalb der umgebung",
         "datei neu laden",
+        "projekt neu laden",
+        "möchten sie das projekt neu laden",
+        "bibliotheksreferenz",
+        "die bibliotheksreferenz",
+        "wurde geändert",
+        "abmelden",
+        "sps abmelden",
         "der name muss ein",
         "ein gültiger iec 61131-3-bezeichner",
     ]
@@ -136,14 +152,37 @@ class DialogOpsMixin:
 
         found: list[dict] = []
 
+        known_pids = set()
+        if hasattr(self, "_get_dte_pid") and getattr(self, "_dte", None):
+            p = self._get_dte_pid(self._dte)
+            if p:
+                known_pids.add(p)
+        for state in (getattr(self, "_instances", {}) or {}).values():
+            if state.get("pid"):
+                known_pids.add(state["pid"])
+
         def enum_cb(hwnd, _):
             try:
                 if not _tai().win32gui.IsWindowVisible(hwnd):
                     return True
-                title = _tai().win32gui.GetWindowText(hwnd)
-                if title != "TcXaeShell":
-                    return True
                 if _tai().win32gui.GetClassName(hwnd) != "#32770":
+                    return True
+
+                title = _tai().win32gui.GetWindowText(hwnd) or ""
+                w_pid = None
+                if getattr(_tai(), "win32process", None):
+                    try:
+                        _, w_pid = _tai().win32process.GetWindowThreadProcessId(hwnd)
+                    except Exception:
+                        pass
+
+                is_xae_window = False
+                if known_pids and w_pid and w_pid in known_pids:
+                    is_xae_window = True
+                elif title in ("TcXaeShell", "Microsoft Visual Studio", "TwinCAT", "TwinCAT XAE", "Beckhoff TwinCAT") or title.startswith(("TcXaeShell", "Microsoft Visual Studio", "TwinCAT")):
+                    is_xae_window = True
+
+                if not is_xae_window:
                     return True
 
                 full_text = self._read_dialog_text(hwnd)
@@ -154,6 +193,7 @@ class DialogOpsMixin:
                     "text": full_text[:240],
                     "auto_dismissable": bool(matched),
                     "matched_pattern": matched,
+                    "pid": w_pid,
                 })
             except Exception:
                 pass
